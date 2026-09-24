@@ -1,0 +1,94 @@
+# CLAUDE.md
+
+Rules for writing code in this repo. Each rule cites the decision in DECISIONS.md that created it. If a rule seems wrong, change the decision first.
+
+## API contract
+
+- [G1] Treat skuId as case-sensitive: never change its case; compare with equals().
+- [G11] Validate skuId against ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Check it in the controller with a precompiled Pattern, never with @Pattern on the @PathVariable. POST create → 400 "Invalid request"; GET and purchase → 404 "SKU not found" without touching the database or the idempotency table (GET has no 400 in the spec). @Valid body validation runs first, so a bad body wins with 400 (G4). (refined by R7, S2)
+- [G11] Column: sku.sku_id varchar(64) COLLATE "C" PRIMARY KEY; inventory_ledger.sku_id references it with the same type and collation (W1). (refined by W1)
+- [G2] Stored and returned quantity is long in Java and bigint in Postgres; request quantity is Integer (V2). (refined by V2)
+- [G12] Adds that would exceed 9223372036854775807 are rejected by the SUM check in the add's INSERT … WHERE (W1). No row returned → 400 "Invalid request". (refined by S7, V2, W1)
+- [G3] On the two POST operations, every client request error returns 400 text/plain, including malformed JSON, a missing body, and a wrong or missing Content-Type (instead of 415). (refined by R3)
+- [G13] Configure Jackson to reject string→int and float→int coercion and a null quantity; ignore unknown properties (OpenAPI 3.0 allows them).
+- [G4] Use @Valid on request bodies; validation runs before the SKU lookup.
+- [G5] Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1). (refined by W1)
+- [G6] Error bodies are exactly one of: "SKU not found", "Insufficient inventory", "Invalid request", or "Internal server error" (500 only). Any other error status uses its standard reason phrase (e.g. "Method Not Allowed"). Never include stock counts. (refined by S6, T3)
+- [G7] Stock correctness is enforced by Postgres in one transaction, never by a Java-side check alone. There is no balance column to CHECK; SERIALIZABLE plus retries is the guard (W1). (refined by W1)
+- [G8] Idempotency-Key header is optional on both POSTs; without it the endpoint behaves exactly as the original spec.
+- [G14] Write the idempotency row in the same transaction as the stock change, keyed by the key alone, storing operation, skuId and a request hash. (refined by S8)
+- [G14] Same key + same body → replay stored status and body. Different operation, skuId or body → 400 "Invalid request". A key older than 24h is rejected with 400 "Invalid request" (T1); rows are never purged. (refined by R9, S8, T1)
+- [G9] Optional `limit` (1–250) and `after` (last skuId) query params. Without them return every row. (refined by R8)
+- [G9] Keyset query: WHERE sku_id > :after ORDER BY sku_id LIMIT :limit + 1. If the extra row exists, add Link: <…>; rel="next".
+- [G10] No authentication.
+- [G10] The spec's /inventory/** operations return only the status codes the spec lists for them (500 only for server faults, body "Internal server error"). Other requests under /inventory/** keep standard HTTP codes (404/405; GET ignores Accept, POST answers 400; see U2) with text/plain bodies. /actuator/** and the springdoc paths (/v3/api-docs, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect). (refined by S6, U2)
+- [R1] Inside the stock transaction, return an outcome value (Ok / NotFound / Insufficient / Overflow); never throw for business results. The controller maps outcomes to 200/404/400. (refined by U1)
+- [R1] Store 200, 404 "SKU not found", 400 "Insufficient inventory" and the overflow 400 "Invalid request" against the key. Validation 400s are not stored. (refined by U1)
+- [R2] Claim the key with INSERT … ON CONFLICT DO NOTHING RETURNING. No row → SELECT the stored response and replay it; under SERIALIZABLE a concurrent claim may instead raise 40001, and the W1 retry replays (different operation, skuId or request hash → 400 "Invalid request"). (refined by S8, W1)
+- [R3] Map client errors to 400 only on the two POST operations. Outside the spec's operations keep Spring's 404/405 (GET ignores Accept; POST answers 400; see U2), with text/plain bodies. (refined by U2)
+- [R4] GET /inventory never returns 400. Non-positive or non-numeric limit → ignored. limit above the max → the max. after is compared as a plain string and never validated; after alone returns every row after it.
+- [R7] skuId pattern for POST create: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$.
+- [R8] limit range is 1–250.
+- [R9] Keys expire after 24h: a key older than 24h is rejected with 400 (T1). No purge job. (refined by T1)
+- [S2] Never put constraint annotations on @PathVariable parameters (they switch on method validation, which answers 400).
+- [S2] Controllers check skuId with SkuId.isValid() before calling the service: create → 400 "Invalid request"; GET and purchase → 404 "SKU not found", with no database or idempotency access.
+- [S3] Idempotency-Key: absent means no key (G8). A present key must match ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$; an empty or non-matching key → 400 "Invalid request" before any database work. This 400 is not stored (R1).
+- [S3] Column: idempotency key uuid.
+- [S5] Build every error response (advice and controller) with one helper that calls .contentType(MediaType.TEXT_PLAIN). Never rely on content negotiation for error bodies.
+- [S5] Test each error status with Accept: application/json and assert Content-Type text/plain and the exact body.
+- [S6] The advice has one @Hidden @ExceptionHandler(Exception.class): log the stack trace at ERROR and return 500 text/plain "Internal server error". If the exception is an ErrorResponse, use its status and G6's fixed text, or the status's standard reason phrase when G6 has none. (refined by T3)
+- [S6] G10 covers /inventory/** only. /actuator/** and springdoc paths keep library behaviour.
+- [S8] The idempotency row's primary key is the key alone. Store operation, skuId and the request hash. On reuse, a different operation, skuId or body → 400 "Invalid request". Test the same key on another SKU and on the other POST.
+- [T1] A stored key older than 24h → 400 "Invalid request"; keys are never reused.
+- [T3] When G6 has no fixed text for a status, the body is that status's standard reason phrase (HttpStatus.getReasonPhrase()), e.g. "Method Not Allowed". Keep the Allow header on 405.
+- [U1] The add returns Ok or Overflow. Overflow → 400 "Invalid request", stored against the Idempotency-Key like NotFound and Insufficient.
+- [U2] GET /inventory/** ignores the Accept header (a filter sets it to application/json). POST requests whose Accept excludes JSON get 400 "Invalid request" (HttpMediaTypeNotAcceptableException → 400 on POST).
+- [U2] Test both: GET with Accept: application/xml → 200 JSON; POST with Accept: application/xml → 400.
+- [U3] Controller order on purchase: body validation (@Valid) → Idempotency-Key format → skuId pattern (404) → service.
+- [V2] Request quantity is Integer (1 to 2,147,483,647). Stored and returned quantity is bigint in Postgres and long in Java.
+- [Y3] request_hash is SHA-256 of operation + "\n" + skuId + "\n" + quantity, computed from the parsed, validated request. Never hash the raw body.
+- [Y3] Test: same key and quantity with different whitespace or an extra unknown field → replay; same key with a different quantity → 400 "Invalid request".
+
+## Implementation
+
+- [D0] After each AI session, append to agent-prompts.md: prompt, output summary, what was accepted, what was rejected, your response.
+- [D0] Keep CLAUDE.md, DECISIONS.md and agent-prompts.md at the repo root. Supporting AI artifacts (decision board, decision review, research sources) go in ai/. (refined by S9)
+- [D1] Java 25 toolchain, Spring Boot 4.1.x (built with 4.1.1; set in gradle/libs.versions.toml) (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.1). Use spring-boot-starter-webmvc, not -web. (refined by S10)
+- [D2] Use the Gradle wrapper, version 9.1+ (Java 25 needs it; pinned in gradle-wrapper.properties), with the Kotlin DSL. (refined by S10)
+- [D3] Spring Data JPA for reads (balances come from native or projection queries that cast SUM(quantity_delta)::bigint, because SUM(bigint) returns numeric); atomic writes are native SQL run through JdbcClient in a repository fragment, inside the service's SERIALIZABLE TransactionTemplate (X1). No @Modifying. (refined by S1, W1, X1)
+- [D4] Run stock writes at SERIALIZABLE and retry on PessimisticLockingFailureException with root SQLState 40001/40P01 (see W2). (refined by W1)
+- [D5] Schema changes only through Flyway migrations in src/main/resources/db/migration; spring.jpa.hibernate.ddl-auto=validate.
+- [D5] Migrations declare the sku table, the inventory_ledger table (id bigint identity, sku_id, quantity_delta bigint NOT NULL CHECK (quantity_delta <> 0), reason text NOT NULL CHECK (reason IN ('add','purchase')), created_at; index on sku_id) and the sku_id collation from G11 (W1). (refined by W1)
+- [D6] One @RestControllerAdvice maps every thrown error (parsing, validation, framework) to ResponseEntity<String> built by one helper that sets .contentType(MediaType.TEXT_PLAIN) explicitly (never left to content negotiation); the controller's 404/400 outcome responses use the same helper. Keep ProblemDetail off. (refined by R1, S5)
+- [D7] Controllers are hand-written. springdoc-openapi 3.1.x (set in gradle/libs.versions.toml) serves /v3/api-docs and Swagger UI; a test writes /v3/api-docs to openapi.yaml, asserts every error response is text/plain, and the file is committed. (refined by S10, S12)
+- [D8] compose.yaml runs Postgres and compose.override.yaml adds the app, so `docker compose up --build` runs both for reviewers; spring-boot-docker-compose (developmentOnly) for bootRun. (refined by S4)
+- [D9] Integration and repository tests run against Postgres via Testcontainers 2.x (version from the Spring Boot BOM) @ServiceConnection, with the Flyway migrations. (refined by S10)
+- [D9] Include a concurrent purchase test: N ≤ 8 threads, stock M < N, assert exactly M succeed and final quantity is 0. (refined by W2)
+- [D10] Package by feature (inventory/, idempotency/). Classes are package-private unless another feature uses them.
+- [D10] Expose /actuator/health (liveness and readiness).
+- [R6] Build scripts use the Kotlin DSL (build.gradle.kts, settings.gradle.kts).
+- [S1] Atomic writes live in a repository fragment (e.g. InventoryWrites + InventoryWritesImpl) and run through JdbcClient. Reads use Spring Data JPA.
+- [S1] JdbcClient writes run only inside the service's SERIALIZABLE TransactionTemplate callback (X1) (JpaTransactionManager shares the connection). Never mix a JPA entity change and a JdbcClient write in one transaction. (refined by X1)
+- [S4] compose.yaml defines only Postgres, with a pg_isready healthcheck. compose.override.yaml adds the app service (build: ., port 8080, depends_on postgres with condition: service_healthy). Reviewers run `docker compose up --build`; bootRun reads compose.yaml only. Never set COMPOSE_FILE or COMPOSE_PROFILES in .env.
+- [S9] DECISIONS.md is generated from the board and never hand-edited. The export lists the parts of a combined choice (e.g. D8-C's A and B) under "Included in the choice", never under Rejected. To change DECISIONS.md, change the board and regenerate.
+- [S10] Library and plugin versions are written only in gradle/libs.versions.toml; the Gradle version only in gradle-wrapper.properties. Never add a version to a dependency the Spring Boot BOM manages.
+- [S10] Docs name versions as a range plus the built-with version, e.g. "Spring Boot 4.1.x (built with 4.1.1)", "Gradle 9.1+".
+- [S11] Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change. (refined by T1, V2, W1)
+- [S11] Include a concurrent add test: N ≤ 8 threads add 1 to one new SKU through the service; assert all return Ok and the final quantity is N. (refined by W2)
+- [S11] Concurrency tests are not @Transactional; clean tables in @BeforeEach.
+- [S12] A parameterized MockMvc test has one row per response in the original spec and asserts status, Content-Type and exact body.
+- [S12] Set springdoc.override-with-generic-response=false. Each controller method declares @ApiResponse for exactly the spec's codes; error responses use mediaType "text/plain".
+- [T6] Build in the order in ai/decision-review.md. At hour 20, stop feature work; list anything not built under "Designed, not built" in the README with its decision IDs.
+- [V1] Stock is the SUM of inventory_ledger.quantity_delta per SKU. Every write checks the SUM and inserts the delta in one SERIALIZABLE transaction: Add: INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING; then INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, :q, 'add' WHERE (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) <= 9223372036854775807 - :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) + :q)::bigint; no row → Overflow. Purchase: INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, -:q, 'purchase' WHERE EXISTS (SELECT 1 FROM sku WHERE sku_id = :id) AND (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) >= :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) - :q)::bigint; no row → SELECT the sku row in the same transaction: missing → NotFound, otherwise Insufficient. The RETURNING subquery doesn't see the row being inserted, so the balance is the old SUM ± :q. The ledger is append-only: never UPDATE or DELETE inventory_ledger rows (W1). (refined by W1)
+- [W1] Stock writes run at SERIALIZABLE and retry on SQLSTATE 40001 or 40P01 as W2 specifies; X1 sets where the retry and the transaction boundary sit. (refined by W2)
+- [W2] Retry SERIALIZABLE stock writes on PessimisticLockingFailureException whose root SQLState is 40001 or 40P01: up to 10 retries, 5–200 ms jittered backoff. The retry wraps the transaction (one new transaction per attempt).
+- [W2] When retries are exhausted, return 500 "Internal server error" and log the SKU.
+- [W2] inventory_ledger has an index on sku_id; a test asserts the SUM query uses it. Concurrency tests use at most 8 threads per SKU.
+- [X1] @Retryable sits on the service method, which runs the write through a TransactionTemplate with ISOLATION_SERIALIZABLE (one new transaction per attempt). Stock-write methods have no @Transactional annotation.
+- [Y1] Both POST mappings declare produces = MediaType.APPLICATION_JSON_VALUE (and consumes = APPLICATION_JSON_VALUE), so an Accept that excludes JSON fails at handler lookup (HttpMediaTypeNotAcceptableException → 400 "Invalid request") before the controller, the idempotency claim or the ledger write runs.
+- [Y1] Test: POST with Accept: application/xml → 400 "Invalid request" and no ledger or idempotency row is written.
+- [Y2] @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class, maxRetries = 10, …) with @EnableResilientMethods. SerializationFailure implements MethodRetryPredicate and returns true only when NestedExceptionUtils.getMostSpecificCause(t) is an SQLException with SQLState 40001 or 40P01.
+- [Y2] Don't add Spring Retry or Apache Commons Lang for retries.
+- [Y2] Test: a PessimisticLockingFailureException whose root SQLState is 55P03 is not retried; one with 40001 is.
+- [Y4] The idempotency table stores content_type text NOT NULL with status and body. A replay sends the stored status, Content-Type and body unchanged.
+- [Y4] Test: a replayed 200 has Content-Type application/json; a replayed 404 or 400 has text/plain.
