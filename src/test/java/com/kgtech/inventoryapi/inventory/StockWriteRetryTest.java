@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BiFunction;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +44,7 @@ class StockWriteRetryTest {
     private static final String DEADLOCK_DETECTED = "40P01";
     private static final String LOCK_NOT_AVAILABLE = "55P03";
     private static final int MAX_RETRIES = 10;
+    private static final Pattern STACK_FRAME = Pattern.compile("^\\s+at \\S");
 
     /** The two stock writes; purchase runs against 10 seeded units, add against a new SKU. */
     enum Op {
@@ -179,7 +182,18 @@ class StockWriteRetryTest {
         assertThat(fault.attempts()).isEqualTo(1);
         assertThat(ledgerRows(sku)).isZero();
         assertThat(skuRows(sku)).isZero();
-        assertThat(output.getAll()).contains("ERROR").contains("failed without retry for SKU " + sku);
+        List<String> lines = output.getAll().lines().toList();
+        String warn = "Stock write failed without retry for SKU " + sku + " (SQLState " + LOCK_NOT_AVAILABLE + ")";
+        List<Integer> warnAt = IntStream.range(0, lines.size())
+                .filter(i -> lines.get(i).contains(warn))
+                .boxed()
+                .toList();
+        assertThat(warnAt).as(output.getAll()).hasSize(1);
+        assertThat(lines.get(warnAt.get(0))).contains("WARN");
+        assertThat(lines).as(output.getAll()).noneMatch(line -> line.contains("ERROR") && line.contains(sku));
+        assertThat(lines.subList(warnAt.get(0) + 1, lines.size()))
+                .as("no stack trace after the WARN line")
+                .noneMatch(line -> line.contains("SQLException") || STACK_FRAME.matcher(line).find());
     }
 
     /** AC8: after 10 retries the last exception escapes (story 3 maps it to 500) and the SKU is logged at ERROR. */
@@ -194,7 +208,9 @@ class StockWriteRetryTest {
         assertThat(fault.attempts()).isEqualTo(MAX_RETRIES + 1);
         assertThat(ledgerRows(sku)).isZero();
         assertThat(skuRows(sku)).isZero();
-        assertThat(output.getAll()).contains("ERROR").contains("retries exhausted for SKU " + sku);
+        assertThat(output.getAll().lines())
+                .as(output.getAll())
+                .anyMatch(line -> line.contains("ERROR") && line.contains("Stock write retries exhausted for SKU " + sku));
     }
 
     /** X1: both writes run at SERIALIZABLE; the trigger raises P0001 for a ledger insert at any other level. */

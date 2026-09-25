@@ -3,6 +3,8 @@ package com.kgtech.inventoryapi.inventory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,10 @@ class LedgerQueryPlanTest {
 
     private static final int SKUS = 500;
     private static final int ROWS_PER_SKU = 10;
+    private static final Pattern ID_PARAM = Pattern.compile("(?<!:):id\\b");
+    private static final Pattern Q_PARAM = Pattern.compile("(?<!:):q\\b");
+    /** A :name placeholder, but not the second colon of a :: cast. */
+    private static final Pattern NAMED_PARAM = Pattern.compile("(?<!:):(?!:)\\w");
 
     @Autowired
     JdbcTemplate jdbc;
@@ -58,22 +64,20 @@ class LedgerQueryPlanTest {
         assertThat(plan).as(plan).doesNotContain("Seq Scan on inventory_ledger");
     }
 
+    /** Inlines the production statement's :id and :q so it can be EXPLAINed; fails if any named parameter is left. */
+    private String inline(String statement) {
+        assertThat(ID_PARAM.matcher(statement).find()).as(statement).isTrue();
+        assertThat(Q_PARAM.matcher(statement).find()).as(statement).isTrue();
+        String withId = ID_PARAM.matcher(statement).replaceAll(Matcher.quoteReplacement("'" + seeded + "'"));
+        String sql = Q_PARAM.matcher(withId).replaceAll("3");
+        assertThat(NAMED_PARAM.matcher(sql).find()).as(sql).isFalse();
+        return sql;
+    }
+
     @Test
     void addAndPurchaseStatementsUseSkuIndex() {
-        String add = explain("""
-                INSERT INTO inventory_ledger (sku_id, quantity_delta, reason)
-                SELECT '%1$s', 3, 'add'
-                WHERE (SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_ledger WHERE sku_id = '%1$s')
-                      <= 9223372036854775807 - 3
-                RETURNING ((SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_ledger WHERE sku_id = '%1$s') + 3)::bigint
-                """.formatted(seeded));
-        String purchase = explain("""
-                INSERT INTO inventory_ledger (sku_id, quantity_delta, reason)
-                SELECT '%1$s', -3, 'purchase'
-                WHERE EXISTS (SELECT 1 FROM sku WHERE sku_id = '%1$s')
-                  AND (SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_ledger WHERE sku_id = '%1$s') >= 3
-                RETURNING ((SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_ledger WHERE sku_id = '%1$s') - 3)::bigint
-                """.formatted(seeded));
+        String add = explain(inline(InventoryWritesImpl.ADD));
+        String purchase = explain(inline(InventoryWritesImpl.PURCHASE));
 
         for (String plan : new String[] {add, purchase}) {
             assertThat(plan).as(plan).contains("inventory_ledger_sku");
