@@ -2,7 +2,7 @@
 
 A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring Data JPA and PostgreSQL.
 
-> Status: story 1 (project setup and ledger schema) is built, and `./gradlew test` works (Testcontainers starts Postgres; JDK 25 + Docker required). `./gradlew bootRun`, `docker compose up --build` and the API arrive in later stories (compose in story 5); those commands below are the planned setup (D8, D9).
+> Status: stories 1–2 (project setup, ledger schema, and SERIALIZABLE ledger writes with retries and service outcomes) are built, and `./gradlew test` works (Testcontainers starts Postgres; JDK 25 + Docker required). `./gradlew bootRun`, `docker compose up --build` and the API arrive in later stories (compose in story 5); those commands below are the planned setup (D8, D9).
 
 ## Build and run
 
@@ -52,6 +52,7 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - An add rejected for overflow is remembered like other results: retrying it with the same key returns the same 400. (U1)
 - GET requests ignore the `Accept` header and always return JSON; a POST whose `Accept` header excludes JSON returns 400. (U2)
 - A single request adds or purchases at most 2,147,483,647 units; stock levels are 64-bit. (V2)
+- A stock change that keeps conflicting with concurrent changes is retried up to 10 times; if it still conflicts, the request returns 500 `Internal server error`. (W2)
 - A retry with the same `Idempotency-Key` counts as the same request when the endpoint, SKU and quantity match; whitespace, field order and unknown fields don't matter. (Y3)
 
 ## Future improvements

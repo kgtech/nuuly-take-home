@@ -1,5 +1,7 @@
 package com.kgtech.inventoryapi.inventory;
 
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.resilience.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -19,11 +21,23 @@ class InventoryService {
         serializable.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
+    @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
+            maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
     public StockOutcome.Add add(String skuId, int quantity) {
-        throw new UnsupportedOperationException("not implemented");
+        requirePositive(quantity);
+        return serializable.execute(status -> skus.add(skuId, quantity));
     }
 
+    @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
+            maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
     public StockOutcome.Purchase purchase(String skuId, int quantity) {
-        throw new UnsupportedOperationException("not implemented");
+        requirePositive(quantity);
+        return serializable.execute(status -> skus.purchase(skuId, quantity));
+    }
+
+    private static void requirePositive(int quantity) {
+        if (quantity < 1) {
+            throw new IllegalArgumentException("quantity must be >= 1");
+        }
     }
 }
