@@ -51,7 +51,14 @@ class VersionPinningTest {
             Pattern.compile("(source|target)Compatibility\\s*=\\s*\"?\\d"),
             Pattern.compile("--release\\s+\\d"),
             Pattern.compile("release(\\.set\\(|\\s*=)\\s*\\d"),
-            Pattern.compile("\\bversion\\s*(=|\\()?\\s*\"\\d"));
+            Pattern.compile("\\bversion\\s*(=|\\()?\\s*\"\\d"),
+            Pattern.compile("java-version['\"]?\\s*[:=]\\s*['\"]?\\d"));
+
+    /** Version-manager files: any digit outside a # comment is a version pin. */
+    private static final Set<String> VERSION_MANAGER_FILES = Set.of(
+            ".java-version", ".tool-versions", ".sdkmanrc", ".python-version", ".nvmrc", ".node-version");
+
+    private static final Pattern DIGIT = Pattern.compile("\\d");
 
     /** Applied to non-.java files only, so float literals in Java stay legal. */
     private static final Pattern DOTTED_NUMBER = Pattern.compile("\\b\\d+\\.\\d+\\b");
@@ -78,6 +85,13 @@ class VersionPinningTest {
             "VersionPinningTest.java", ".DS_Store");
 
     static boolean flags(String fileName, String line) {
+        if (VERSION_MANAGER_FILES.contains(fileName)) {
+            int comment = line.indexOf('#');
+            String content = comment >= 0 ? line.substring(0, comment) : line;
+            if (DIGIT.matcher(content).find()) {
+                return true;
+            }
+        }
         for (Pattern pattern : VERSION_PATTERNS) {
             if (pattern.matcher(line).find()) {
                 return true;
@@ -164,7 +178,9 @@ class VersionPinningTest {
         "options.release.set(25)",
         "JavaLanguageVersion.of(\"25\")",
         "sourceCompatibility = JavaVersion.toVersion(25)",
-        "kotlin { jvmToolchain(25) }"
+        "kotlin { jvmToolchain(25) }",
+        "java-version: '25'",
+        "          java-version: 25"
     })
     void scannerDetectsKnownVersionForms(String line) {
         assertThat(flags("build.gradle.kts", line)).as(line).isTrue();
@@ -179,6 +195,23 @@ class VersionPinningTest {
     })
     void scannerIgnoresNonVersions(String line) {
         assertThat(flags("build.gradle.kts", line)).as(line).isFalse();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        ".java-version,25",
+        ".tool-versions,java 25",
+        ".sdkmanrc,java=25",
+        ".java-version,temurin-25"
+    })
+    void scannerDetectsVersionManagerPins(String fileName, String line) {
+        assertThat(flags(fileName, line)).as(fileName + ": " + line).isTrue();
+    }
+
+    @Test
+    void scannerIgnoresVersionManagerCommentsAndUnpinnedLines() {
+        assertThat(flags(".sdkmanrc", "# managed by sdkman")).isFalse();
+        assertThat(flags("ci.yml", "runs-on: ubuntu-latest")).isFalse();
     }
 
     @Test
