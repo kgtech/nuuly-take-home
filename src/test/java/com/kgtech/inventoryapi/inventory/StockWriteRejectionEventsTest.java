@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
@@ -17,58 +16,38 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.resilience.retry.MethodRetryEvent;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
  * Issue #15 (R3-2), W2, S2, S3, S8: requests rejected before or at the idempotency claim return an outcome and never
  * throw, so no MethodRetryEvent is published and StockWriteFailureLogger logs nothing. Regression guard; the
- * positive controls force a non-retryable 55P03 so the recorder and the log capture are shown to work. Not
+ * positive controls force a non-retryable 55P03 so the recorded events and the log capture are shown to work. Not
  * {@code @Transactional}; rows and the fault trigger are removed afterwards.
  */
 @SpringBootTest
-@Import({TestcontainersConfiguration.class, StockWriteRejectionEventsTest.RetryEventRecorderConfiguration.class})
+@Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
+@RecordApplicationEvents
 class StockWriteRejectionEventsTest {
 
     private static final String LOCK_NOT_AVAILABLE = "55P03";
     private static final String MALFORMED_SKU = "-bad";
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class RetryEventRecorderConfiguration {
-
-        @Bean
-        RetryEventRecorder retryEventRecorder() {
-            return new RetryEventRecorder();
-        }
-    }
-
-    /** Records every MethodRetryEvent the context publishes. */
-    static class RetryEventRecorder {
-
-        final List<MethodRetryEvent> events = new CopyOnWriteArrayList<>();
-
-        @EventListener
-        void on(MethodRetryEvent event) {
-            events.add(event);
-        }
-    }
-
     @Autowired
     InventoryService service;
 
     @Autowired
-    RetryEventRecorder recorder;
+    ApplicationEvents events;
 
     @Autowired
     JdbcClient jdbc;
@@ -84,7 +63,6 @@ class StockWriteRejectionEventsTest {
     void setUp() {
         fault = new LedgerFaultTrigger(jdbcTemplate);
         fault.drop(); // in case an earlier run was killed before its @AfterEach
-        recorder.events.clear();
     }
 
     @AfterEach
@@ -112,7 +90,7 @@ class StockWriteRejectionEventsTest {
     }
 
     private void assertNoRetryEventAndNoFailureLog(CapturedOutput output) {
-        assertThat(recorder.events).as("MethodRetryEvents").isEmpty();
+        assertThat(events.stream(MethodRetryEvent.class).toList()).as("MethodRetryEvents").isEmpty();
         assertThat(output.getAll().lines())
                 .as(output.getAll())
                 .noneMatch(line -> line.contains("StockWriteFailureLogger")
@@ -179,7 +157,7 @@ class StockWriteRejectionEventsTest {
 
         assertThatThrownBy(() -> service.add(sku, 4, key)).isInstanceOf(DataAccessException.class);
 
-        assertThat(recorder.events)
+        assertThat(events.stream(MethodRetryEvent.class).toList())
                 .as("MethodRetryEvents")
                 .anySatisfy(event -> {
                     assertThat(event.isRetryAborted()).isTrue();

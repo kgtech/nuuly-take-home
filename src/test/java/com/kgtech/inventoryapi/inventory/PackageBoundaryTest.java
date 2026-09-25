@@ -14,14 +14,18 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Z2, issue #15: the inventory domain and idempotency packages import no Spring MVC or HTTP transport types, the
  * domain imports no inventory web types, and header names are written once: Idempotency-Key in HttpConstants, the
- * standard ones in Spring's HttpHeaders; tests use the constants too. Reads the sources; Gradle runs tests from the
+ * standard ones in Spring's HttpHeaders; tests pass the constants, not quoted names, to header calls. Reads the sources; Gradle runs tests from the
  * project directory.
  */
 class PackageBoundaryTest {
@@ -36,8 +40,20 @@ class PackageBoundaryTest {
     /** Built from the constants so this file does not contain the quoted names it looks for. */
     private static final List<String> QUOTED_HEADER_NAMES = Stream.of(ACCEPT, ALLOW, CONTENT_TYPE, LOCATION,
                     IDEMPOTENCY_KEY)
-            .map(name -> ('"' + name + '"').toLowerCase(Locale.ROOT))
+            .map(PackageBoundaryTest::quoted)
             .toList();
+    /**
+     * A quoted header name (any case) as the first argument of a header call: MockMvc {@code .header(} and
+     * {@code header().string/exists/doesNotExist(}, HttpRequest.Builder {@code .header(}, java.net.http.HttpHeaders
+     * {@code firstValue/allValues(}, servlet {@code getHeader(s)/setHeader/addHeader/containsHeader(} and Spring
+     * HttpHeaders {@code getFirst(}. Other string arguments that happen to equal a header name are not flagged.
+     */
+    private static final Pattern QUOTED_HEADER_NAME_USE = Pattern.compile(
+            "(?i)(?:\\b(?:headers?|getHeaders?|setHeader|addHeader|containsHeader|firstValue|allValues|getFirst)"
+                    + "|\\bheader\\(\\s*\\)\\s*\\.\\s*(?:string|exists|doesNotExist|stringValues|values))"
+                    + "\\s*\\(\\s*(?:"
+                    + String.join("|", QUOTED_HEADER_NAMES.stream().map(Pattern::quote).toList())
+                    + ")");
 
     @Test
     void domainPackageImportsNoWebOrHttpTypes() throws IOException {
@@ -64,7 +80,10 @@ class PackageBoundaryTest {
         assertThat(withLiteral).containsExactly(HTTP_CONSTANTS);
     }
 
-    /** Issue #15 (R3-3): tests name headers with HttpHeaders / HttpConstants, never a quoted literal (any case). */
+    /**
+     * Issue #15 (R3-3): tests name headers with HttpHeaders / HttpConstants, never a quoted literal (any case) as the
+     * first argument of a header call. See {@link #isQuotedHeaderNameUse(String)}.
+     */
     @Test
     void testsUseHeaderNameConstants() throws IOException {
         List<String> found = new ArrayList<>();
@@ -72,16 +91,38 @@ class PackageBoundaryTest {
             for (Path file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
                 List<String> lines = Files.readAllLines(file);
                 for (int i = 0; i < lines.size(); i++) {
-                    String line = lines.get(i).toLowerCase(Locale.ROOT);
-                    for (String quoted : QUOTED_HEADER_NAMES) {
-                        if (line.contains(quoted)) {
-                            found.add(file + ":" + (i + 1) + ": " + lines.get(i).strip());
-                        }
+                    if (isQuotedHeaderNameUse(lines.get(i))) {
+                        found.add(file + ":" + (i + 1) + ": " + lines.get(i).strip());
                     }
                 }
             }
         }
-        assertThat(found).as("quoted header names in src/test").isEmpty();
+        assertThat(found).as("quoted header names in header calls in src/test").isEmpty();
+    }
+
+    /** Rows are built from the constants so this file stays clean under its own scan. */
+    static Stream<Arguments> quotedHeaderScannerCases() {
+        return Stream.of(
+                Arguments.of(".header(" + quoted(ACCEPT) + ", x)", true),
+                Arguments.of("getHeader(" + quoted(CONTENT_TYPE).toLowerCase(Locale.ROOT) + ")", true),
+                Arguments.of("firstValue(" + quoted(LOCATION) + ")", true),
+                Arguments.of("{" + quoted(LOCATION).toLowerCase(Locale.ROOT) + ": 1}", false),
+                Arguments.of("purchase(" + quoted(ACCEPT) + ", 1, null)", false),
+                Arguments.of("List.of(" + quoted(ALLOW).toLowerCase(Locale.ROOT) + ")", false));
+    }
+
+    @ParameterizedTest
+    @MethodSource("quotedHeaderScannerCases")
+    void quotedHeaderScannerFlagsOnlyHeaderCalls(String line, boolean flagged) {
+        assertThat(isQuotedHeaderNameUse(line)).as(line).isEqualTo(flagged);
+    }
+
+    static boolean isQuotedHeaderNameUse(String line) {
+        return QUOTED_HEADER_NAME_USE.matcher(line).find();
+    }
+
+    private static String quoted(String name) {
+        return '"' + name + '"';
     }
 
     private static void assertReferencesNone(Path dir, List<String> forbidden) throws IOException {
