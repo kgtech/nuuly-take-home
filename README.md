@@ -49,6 +49,8 @@ curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/jso
      -H "Idempotency-Key: $KEY" -d '{"quantity":6}'   # 400 Invalid request
 ```
 
+The controller passes the raw header and SKU ID to the service. An `@Idempotent` interceptor on the service's stock-write methods checks the key, then the SKU ID, and then claims the key, changes stock and stores the response in one SERIALIZABLE transaction, which is retried as a whole on a serialization failure. Without a key, the service runs the same stock write on its own. (Z1)
+
 Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), Gradle 9.1+, PostgreSQL 18, Docker Compose v2.
 
 ## Assumptions
