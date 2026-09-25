@@ -59,7 +59,7 @@ curl -i 'localhost:8080/inventory?limit=2'
 curl -i 'localhost:8080/inventory?limit=2&after=B-2'   # the next two SKUs after B-2
 ```
 
-Every page is a plain JSON array of items. `after` is the last SKU ID of the previous page. SKUs created behind the cursor during a walk are not seen by that walk. (G9, R4)
+Every page is a plain JSON array of items. `after` is the last SKU ID of the previous page. SKUs created behind the cursor during a walk are not seen by that walk. A query string that can't be decoded (e.g. `after=%zz`) or that repeats `after` returns 400 `Invalid request`. (G9, R4, Z3)
 
 Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), Gradle 9.1+, PostgreSQL 18, Docker Compose v2.
 
@@ -80,11 +80,11 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - Both POST endpoints accept an optional `Idempotency-Key` header. Repeating a request with the same key returns the first response and doesn't change stock again. (G8)
 - Reusing an `Idempotency-Key` with a different body, SKU or endpoint returns 400. Keys expire after 24 hours and can't be reused after that. (G14)
 - The list is sorted by SKU ID. Optional `limit` and `after` query parameters page through it; without them every SKU is returned. `after` is exclusive: the page starts with the first SKU ID after it. The next page's absolute URL, built from the request, is in the `Link` header. (G9)
-- There is no authentication. Each operation in the spec returns only the status codes the spec lists for it (500 only for unexpected server errors); requests outside those operations get standard HTTP codes. (G10)
+- There is no authentication. Each operation in the spec returns only the status codes the spec lists for it, plus a 400 on `GET /inventory` for an undecodable query or a repeated `after` (500 only for unexpected server errors); requests outside those operations get standard HTTP codes. (G10, Z3)
 - A retried request with the same key returns the first response, including 404 and 400 "Insufficient inventory". Requests rejected by validation are not remembered and can be retried. (R1)
 - Two simultaneous requests with the same key produce one change; the second gets the first one's response. (R2)
 - Requests outside the spec's operations get standard HTTP codes: unknown paths 404, wrong methods 405. GET ignores the Accept header; a POST whose Accept excludes JSON returns 400 (U2). (R3)
-- Invalid paging values never cause an error: a bad `limit` is ignored, a `limit` above the maximum is reduced to it, and `after` alone returns every SKU after it. (R4)
+- Invalid paging values don't cause an error: a bad or repeated `limit` is ignored, a `limit` above the maximum is reduced to it, and `after` alone returns every SKU after it. `GET /inventory` returns 400 `Invalid request` only when its query string can't be decoded or repeats `after`. (R4, Z3)
 - `limit` accepts up to 250. (R8)
 - `Idempotency-Key` must be a UUID. An empty or non-UUID key returns 400. (S3)
 - Unexpected server errors return 500 with the text/plain body `Internal server error`. The contract rules apply to `/inventory` URLs; `/actuator/health` returns 503 when the database is down, and `/swagger-ui.html` redirects to the UI. (S6)
