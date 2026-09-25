@@ -1,8 +1,10 @@
 package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.http.HttpHeaders.ACCEPT;
 
 import java.util.Collections;
+import java.util.Locale;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -20,7 +22,7 @@ class JsonAcceptForGetFilterTest {
 
     private static MockHttpServletRequest request(String method, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
-        request.addHeader("Accept", "application/xml");
+        request.addHeader(ACCEPT, "application/xml");
         return request;
     }
 
@@ -32,8 +34,8 @@ class JsonAcceptForGetFilterTest {
         filter.doFilter(request("GET", path), new MockHttpServletResponse(), chain);
 
         HttpServletRequest downstream = (HttpServletRequest) chain.getRequest();
-        assertThat(downstream.getHeader("accept")).isEqualTo("application/json");
-        assertThat(Collections.list(downstream.getHeaders("Accept"))).containsExactly("application/json");
+        assertThat(downstream.getHeader(ACCEPT.toLowerCase(Locale.ROOT))).isEqualTo("application/json");
+        assertThat(Collections.list(downstream.getHeaders(ACCEPT))).containsExactly("application/json");
     }
 
     @ParameterizedTest
@@ -52,6 +54,6 @@ class JsonAcceptForGetFilterTest {
         filter.doFilter(request, new MockHttpServletResponse(), chain);
 
         assertThat(chain.getRequest()).isSameAs(request);
-        assertThat(((HttpServletRequest) chain.getRequest()).getHeader("Accept")).isEqualTo("application/xml");
+        assertThat(((HttpServletRequest) chain.getRequest()).getHeader(ACCEPT)).isEqualTo("application/xml");
     }
 }

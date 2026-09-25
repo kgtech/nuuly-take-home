@@ -3,6 +3,7 @@ package com.kgtech.inventoryapi.inventory.web;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -267,7 +268,7 @@ class InventoryRequestValidationTest {
         when(service.find(SKU)).thenReturn(Optional.of(new InventoryItem(SKU, 3)));
         when(service.findAll()).thenReturn(List.of(new InventoryItem(SKU, 3)));
 
-        mvc.perform(get(path).header("Accept", accept))
+        mvc.perform(get(path).header(ACCEPT, accept))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().json(expectedJson, JsonCompareMode.STRICT));
@@ -293,7 +294,7 @@ class InventoryRequestValidationTest {
     @ParameterizedTest(name = "{0} Accept {1}")
     @MethodSource
     void postWithUnacceptableAcceptReturns400(Post op, String accept) throws Exception {
-        expectInvalidRequest(mvc.perform(post(op.template, SKU).header("Accept", accept)
+        expectInvalidRequest(mvc.perform(post(op.template, SKU).header(ACCEPT, accept)
                 .contentType(MediaType.APPLICATION_JSON).content(VALID_BODY)));
         verifyNoInteractions(service);
     }
@@ -315,7 +316,7 @@ class InventoryRequestValidationTest {
         MockHttpServletRequestBuilder request = post(op.template, SKU)
                 .contentType(MediaType.APPLICATION_JSON).content(VALID_BODY);
         if (accept != null) {
-            request.header("Accept", accept);
+            request.header(ACCEPT, accept);
         }
 
         expectItem(mvc.perform(request), SKU, 5);

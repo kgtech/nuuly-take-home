@@ -140,7 +140,7 @@ class IdempotencyApiIntegrationTest {
 
     private static void assertText(Reply reply, int status, String body) {
         assertThat(reply.status()).as(reply.body()).isEqualTo(status);
-        assertThat(reply.contentType()).as("Content-Type").isNotNull();
+        assertThat(reply.contentType()).as(HttpHeaders.CONTENT_TYPE).isNotNull();
         assertThat(MediaType.parseMediaType(reply.contentType()).isCompatibleWith(MediaType.TEXT_PLAIN))
                 .as(reply.contentType()).isTrue();
         assertThat(reply.body()).isEqualTo(body);

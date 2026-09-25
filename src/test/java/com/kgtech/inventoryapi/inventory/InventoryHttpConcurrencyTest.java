@@ -1,6 +1,8 @@
 package com.kgtech.inventoryapi.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.http.HttpHeaders.ACCEPT;
+import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
 
 import java.io.IOException;
 import java.net.URI;
@@ -71,15 +73,15 @@ class InventoryHttpConcurrencyTest {
     }
 
     private Reply send(HttpRequest.Builder request) throws IOException, InterruptedException {
-        HttpResponse<String> response = http.send(request.timeout(TIMEOUT).header("Accept", "application/json").build(),
+        HttpResponse<String> response = http.send(request.timeout(TIMEOUT).header(ACCEPT, "application/json").build(),
                 HttpResponse.BodyHandlers.ofString());
-        return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),
+        return new Reply(response.statusCode(), response.headers().firstValue(CONTENT_TYPE).orElse(""),
                 response.body());
     }
 
     private Reply post(String path, long quantity) throws IOException, InterruptedException {
         return send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
-                .header("Content-Type", "application/json")
+                .header(CONTENT_TYPE, "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString("{\"quantity\":" + quantity + "}")));
     }
 
