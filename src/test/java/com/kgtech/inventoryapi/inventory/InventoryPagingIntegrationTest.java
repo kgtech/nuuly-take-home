@@ -100,7 +100,9 @@ class InventoryPagingIntegrationTest {
         if (after != null) {
             builder.queryParam("after", "{after}");
         }
-        return builder.encode().buildAndExpand(limit == null ? "" : limit, after == null ? "" : after).toUri();
+        return builder.encode()
+                .buildAndExpand(Map.of("limit", limit == null ? "" : limit, "after", after == null ? "" : after))
+                .toUri();
     }
 
     private ResultActions list(URI uri) throws Exception {
