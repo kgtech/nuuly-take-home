@@ -1,5 +1,6 @@
 package com.kgtech.inventoryapi.idempotency;
 
+import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -70,7 +71,7 @@ class IdempotencyWiringTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"quantity\":" + quantity + "}");
         if (key != null) {
-            request.header("Idempotency-Key", key);
+            request.header(IDEMPOTENCY_KEY, key);
         }
         return mvc.perform(request).andReturn().getResponse();
     }
@@ -81,7 +82,7 @@ class IdempotencyWiringTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"quantity\":" + quantity + "}");
         if (key != null) {
-            request.header("Idempotency-Key", key);
+            request.header(IDEMPOTENCY_KEY, key);
         }
         return mvc.perform(request).andReturn().getResponse();
     }

@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -26,6 +26,11 @@ import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+
+import com.kgtech.inventoryapi.inventory.InventoryItem;
+import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.StockOutcome;
+import com.kgtech.inventoryapi.inventory.WriteResult;
 
 /**
  * Request validation at the HTTP edge: G13/G3 bodies (AC3), G4/U3 ordering, U2/Y1 Accept handling. Every body or

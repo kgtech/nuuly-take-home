@@ -1,5 +1,6 @@
 package com.kgtech.inventoryapi.inventory;
 
+import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -18,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -92,9 +94,9 @@ class ApiDocsTest {
                             "$.paths['" + path.getKey() + "']." + method + ".responses['" + code + "'].content");
                     String where = method + " " + path.getKey() + " " + code;
                     if (code.equals("200")) {
-                        assertThat(contentTypes.keySet()).as(where).containsExactly("application/json");
+                        assertThat(contentTypes.keySet()).as(where).containsExactly(MediaType.APPLICATION_JSON_VALUE);
                     } else {
-                        assertThat(contentTypes.keySet()).as(where).containsExactly("text/plain");
+                        assertThat(contentTypes.keySet()).as(where).containsExactly(MediaType.TEXT_PLAIN_VALUE);
                     }
                     checked++;
                 }
@@ -121,7 +123,7 @@ class ApiDocsTest {
         Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['" + path + "']." + method);
         List<Map<String, Object>> parameters =
                 (List<Map<String, Object>>) operation.getOrDefault("parameters", List.of());
-        return parameters.stream().filter(p -> "Idempotency-Key".equals(p.get("name"))).toList();
+        return parameters.stream().filter(p -> IDEMPOTENCY_KEY.equals(p.get("name"))).toList();
     }
 
     /** G8, S3: both POSTs document the optional Idempotency-Key header as a UUID string. */
@@ -150,7 +152,7 @@ class ApiDocsTest {
     void swaggerUiRedirectKeepsLibraryBehaviour() throws Exception {
         mvc.perform(get("/swagger-ui.html"))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(header().string("Location", endsWith("/swagger-ui/index.html")));
+                .andExpect(header().string(HttpHeaders.LOCATION, endsWith("/swagger-ui/index.html")));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.kgtech.inventoryapi.inventory;
 
+import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -86,7 +88,8 @@ class IdempotencyApiIntegrationTest {
 
     private Reply send(MockHttpServletRequestBuilder request) throws Exception {
         MockHttpServletResponse response = mvc.perform(request).andReturn().getResponse();
-        return new Reply(response.getStatus(), response.getHeader("Content-Type"), response.getContentAsString());
+        return new Reply(response.getStatus(), response.getHeader(HttpHeaders.CONTENT_TYPE),
+                response.getContentAsString());
     }
 
     private Reply postTo(Post op, String skuId, String body, String key, MediaType accept) throws Exception {
@@ -95,7 +98,7 @@ class IdempotencyApiIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
         if (key != null) {
-            request.header("Idempotency-Key", key);
+            request.header(IDEMPOTENCY_KEY, key);
         }
         return send(request);
     }
@@ -200,7 +203,7 @@ class IdempotencyApiIntegrationTest {
         assertThat(row.get("operation")).isEqualTo("add");
         assertThat(row.get("sku_id")).isEqualTo("widget");
         assertThat(((Number) row.get("status")).intValue()).isEqualTo(200);
-        assertThat(row.get("content_type")).isEqualTo("application/json");
+        assertThat(row.get("content_type")).isEqualTo(MediaType.APPLICATION_JSON_VALUE);
         assertThat(row.get("body")).isEqualTo(item("widget", 5));
         assertItem(find("widget"), "widget", 5);
     }
@@ -402,7 +405,8 @@ class IdempotencyApiIntegrationTest {
         var contentTypes = jdbc.sql("SELECT status, content_type FROM idempotency_keys ORDER BY status")
                 .query().listOfRows();
         assertThat(contentTypes).extracting(r -> r.get("content_type"))
-                .containsExactly("application/json", "text/plain", "text/plain");
+                .containsExactly(MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_PLAIN_VALUE,
+                        MediaType.TEXT_PLAIN_VALUE);
     }
 
     // ---- AC9: Accept that excludes JSON fails before the claim (Y1) ----
@@ -495,7 +499,7 @@ class IdempotencyApiIntegrationTest {
                         .accept(MediaType.APPLICATION_JSON)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(quantityJson(1))
-                        .header("Idempotency-Key", newKey(), newKey())),
+                        .header(IDEMPOTENCY_KEY, newKey(), newKey())),
                 400, INVALID_REQUEST);
 
         assertNothingWritten();

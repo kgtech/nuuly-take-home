@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -15,6 +15,8 @@ import org.springframework.http.ResponseEntity;
 
 import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
+import com.kgtech.inventoryapi.inventory.StockOutcome;
+import com.kgtech.inventoryapi.inventory.WriteResult;
 
 import tools.jackson.databind.json.JsonMapper;
 

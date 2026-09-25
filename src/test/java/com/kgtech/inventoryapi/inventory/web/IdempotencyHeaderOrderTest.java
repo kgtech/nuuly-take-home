@@ -1,5 +1,6 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
+import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -19,12 +20,16 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
+import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.StockOutcome;
+import com.kgtech.inventoryapi.inventory.WriteResult;
 
 /**
  * U3, S3, G8, Z1 at the controller: @Valid runs first; after that the controller passes the raw skuId and the raw
@@ -78,7 +83,7 @@ class IdempotencyHeaderOrderTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
         if (keys.length > 0) {
-            request.header("Idempotency-Key", (Object[]) keys);
+            request.header(IDEMPOTENCY_KEY, (Object[]) keys);
         }
         return mvc.perform(request);
     }
@@ -125,7 +130,8 @@ class IdempotencyHeaderOrderTest {
     @MethodSource
     void rawKeyAndSkuIdPassedThrough(Post op, String skuId, String key) throws Exception {
         String body = "{\"skuId\":\"" + skuId + "\",\"quantity\":1}";
-        op.stub(service, skuId, 1, key, new WriteResult.Stored(new StoredResponse(200, "application/json", body)));
+        op.stub(service, skuId, 1, key,
+                new WriteResult.Stored(new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, body)));
 
         send(op, skuId, "{\"quantity\":1}", key)
                 .andExpect(status().isOk())
@@ -163,10 +169,10 @@ class IdempotencyHeaderOrderTest {
         List<Arguments> cases = new ArrayList<>();
         for (Post op : Post.values()) {
             for (StoredResponse stored : List.of(
-                    new StoredResponse(200, "application/json", "{\"skuId\":\"widget\",\"quantity\":5}"),
-                    new StoredResponse(404, "text/plain", "SKU not found"),
-                    new StoredResponse(400, "text/plain", "Insufficient inventory"),
-                    new StoredResponse(400, "text/plain", "Invalid request"))) {
+                    new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, "{\"skuId\":\"widget\",\"quantity\":5}"),
+                    new StoredResponse(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found"),
+                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory"),
+                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Invalid request"))) {
                 cases.add(Arguments.of(op, stored));
             }
         }
@@ -191,13 +197,13 @@ class IdempotencyHeaderOrderTest {
         String body = "{\"skuId\":\"widget\",\"quantity\":5}";
         Post.CREATE.stub(service, "widget", 5, null, new StockOutcome.Ok(5));
         Post.CREATE.stub(service, "widget", 5, KEY,
-                new WriteResult.Stored(new StoredResponse(200, "application/json", body)));
+                new WriteResult.Stored(new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, body)));
 
         String unkeyed = send(Post.CREATE, "widget", "{\"quantity\":5}").andExpect(status().isOk())
-                .andReturn().getResponse().getHeader("Content-Type");
+                .andReturn().getResponse().getHeader(HttpHeaders.CONTENT_TYPE);
         send(Post.CREATE, "widget", "{\"quantity\":5}", KEY)
                 .andExpect(status().isOk())
-                .andExpect(header().string("Content-Type", unkeyed))
+                .andExpect(header().string(HttpHeaders.CONTENT_TYPE, unkeyed))
                 .andExpect(content().string(body));
     }
 

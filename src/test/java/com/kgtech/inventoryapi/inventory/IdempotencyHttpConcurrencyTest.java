@@ -1,5 +1,6 @@
 package com.kgtech.inventoryapi.inventory;
 
+import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
@@ -21,6 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
@@ -73,15 +76,15 @@ class IdempotencyHttpConcurrencyTest {
     private Reply post(String path, int quantity, String key) throws IOException, InterruptedException {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .timeout(TIMEOUT)
-                .header("Accept", "application/json")
-                .header("Content-Type", "application/json")
+                .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString("{\"quantity\":" + quantity + "}"));
         if (key != null) {
-            request.header("Idempotency-Key", key);
+            request.header(IDEMPOTENCY_KEY, key);
         }
         HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
-        return new Reply(quantity, response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),
-                response.body());
+        return new Reply(quantity, response.statusCode(),
+                response.headers().firstValue(HttpHeaders.CONTENT_TYPE).orElse(""), response.body());
     }
 
     private Reply create(String sku, int quantity, String key) throws IOException, InterruptedException {
@@ -94,7 +97,7 @@ class IdempotencyHttpConcurrencyTest {
 
     private static long itemQuantity(Reply reply, String sku) {
         assertThat(reply.status()).as(reply.body()).isEqualTo(200);
-        assertThat(reply.contentType()).startsWith("application/json");
+        assertThat(reply.contentType()).startsWith(MediaType.APPLICATION_JSON_VALUE);
         JsonNode item = JsonMapper.shared().readTree(reply.body());
         assertThat(item.propertyNames()).containsExactlyInAnyOrder("skuId", "quantity");
         assertThat(item.get("skuId").asString()).isEqualTo(sku);
@@ -176,7 +179,7 @@ class IdempotencyHttpConcurrencyTest {
         assertThat(itemQuantity(won.getFirst(), sku)).isEqualTo(winner);
         assertThat(byQuantity.get(loser)).allSatisfy(r -> {
             assertThat(r.status()).isEqualTo(400);
-            assertThat(r.contentType()).startsWith("text/plain");
+            assertThat(r.contentType()).startsWith(MediaType.TEXT_PLAIN_VALUE);
             assertThat(r.body()).isEqualTo("Invalid request");
         });
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(1);
@@ -197,7 +200,7 @@ class IdempotencyHttpConcurrencyTest {
         Map<Integer, List<Reply>> byStatus = replies.stream().collect(Collectors.groupingBy(Reply::status));
         assertThat(byStatus.get(200)).hasSize(3);
         assertThat(byStatus.get(400)).hasSize(THREADS - 3).allSatisfy(r -> {
-            assertThat(r.contentType()).startsWith("text/plain");
+            assertThat(r.contentType()).startsWith(MediaType.TEXT_PLAIN_VALUE);
             assertThat(r.body()).isEqualTo("Insufficient inventory");
         });
         assertThat(byStatus.get(200).stream().map(r -> itemQuantity(r, sku)).toList())
