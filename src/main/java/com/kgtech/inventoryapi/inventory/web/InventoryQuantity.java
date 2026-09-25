@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;

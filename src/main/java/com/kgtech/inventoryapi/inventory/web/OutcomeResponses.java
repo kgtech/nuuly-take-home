@@ -1,14 +1,24 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
+
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 import java.util.Optional;
 
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import com.kgtech.inventoryapi.idempotency.IdempotentResults;
 import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
+import com.kgtech.inventoryapi.inventory.InventoryItem;
+import com.kgtech.inventoryapi.inventory.SkuId;
+import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
+import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
+import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
+import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
+import com.kgtech.inventoryapi.inventory.WriteResult;
+import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
+import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -32,24 +42,24 @@ final class OutcomeResponses implements IdempotentResults<WriteResult> {
     @Override
     public StoredResponse toStored(String skuId, WriteResult result) {
         return switch (result) {
-            case StockOutcome.Ok ok -> new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE,
+            case Ok ok -> new StoredResponse(200, APPLICATION_JSON_VALUE,
                     json.writeValueAsString(new InventoryItem(skuId, ok.quantity())));
-            case StockOutcome.NotFound _ -> text(TextErrors.skuNotFound());
-            case StockOutcome.Insufficient _ -> text(TextErrors.insufficientInventory());
-            case StockOutcome.Overflow _ -> text(TextErrors.invalidRequest());
-            case WriteResult.Stored _, WriteResult.InvalidRequest _ ->
+            case NotFound _ -> text(TextErrors.skuNotFound());
+            case Insufficient _ -> text(TextErrors.insufficientInventory());
+            case Overflow _ -> text(TextErrors.invalidRequest());
+            case Stored _, InvalidRequest _ ->
                     throw new IllegalStateException("not a stock outcome: " + result);
         };
     }
 
     @Override
     public WriteResult stored(StoredResponse response) {
-        return new WriteResult.Stored(response);
+        return new Stored(response);
     }
 
     @Override
     public WriteResult invalidRequest() {
-        return new WriteResult.InvalidRequest();
+        return new InvalidRequest();
     }
 
     /** The same status, Content-Type and body the unkeyed path sends (S5). */

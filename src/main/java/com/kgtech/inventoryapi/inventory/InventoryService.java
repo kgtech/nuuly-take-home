@@ -21,7 +21,7 @@ import com.kgtech.inventoryapi.idempotency.Operation;
  * balances from the ledger SUM (D3).
  */
 @Service
-class InventoryService {
+public class InventoryService {
 
     private final SkuRepository skus;
     private final TransactionTemplate serializable;

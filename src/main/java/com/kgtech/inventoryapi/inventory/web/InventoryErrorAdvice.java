@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.servlet.http.HttpServletRequest;
