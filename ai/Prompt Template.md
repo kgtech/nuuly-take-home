@@ -3,17 +3,21 @@ Implement https://github.com/kgtech/nuuly-take-home/issues/<issue-number> using 
 You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do.
 
 ## Handoff and logging
-- Each subagent starts fresh. Pass it: the issue URL, the branch name, the PR number (from step 4 on), and the path to the plan (.orchestrator/plan-issue-1.md).
-- You own all logging. Keep one log at .orchestrator/issue-1-log.md. Before step 1, add .orchestrator/ to .git/info/exclude so it is never committed. After each step, append: the step, the agent's returned result, the commits it pushed, and any decisions I made.
+- Each subagent starts fresh. Pass it: the issue URL, the branch name, the PR number (from step 4 on), and the path to the plan (.orchestrator/plan-issue-<issue-number>.md).
+- You own all logging. Keep one log at .orchestrator/issue-<issue-number>-log.md. Before step 1, add .orchestrator/ to .git/info/exclude so it is never committed. After each step, append: the step, the agent's returned result, the commits it pushed, and any decisions I made.
 - Subagents write no notes, scratch files, or reasoning to disk or GitHub. Each one returns its result to you as its final message and nothing else.
 - Review and fix agents read PR threads directly with gh.
 
 ## Shared rules
-- Branch: feat/issue-1-<slug>. The planner picks the slug.
+- Branch: feat/issue-<issue-number>-<slug>. The planner picks the slug.
 - Use only the build/test/lint commands recorded in the plan. "Green" = build, lint, and the full test suite pass.
 - Push only when green. The only exception is step 2.
 - Only the test author creates, edits, deletes, or skips tests (no @Disabled, .skip, commented-out asserts, etc.). If any other agent needs a test added or changed, it stops and returns the exact request; you re-invoke the test author for it.
 - If an agent can't get green after ~3 distinct fix attempts, it stops and reports. Never hand broken state to the next agent.
+- Orchestrator: never approve a proposal yourself. Show it to me with your recommendation and wait. Log my decision, update .orchestrator/plan-issue-<issue-number>.md if I approve, then re-invoke the agent with the outcome.
+- Subagents don't change decisions on their own. A decision is anything in the approved plan (interfaces, layout, test cases, commands) or recorded in repo docs (README, ADRs, design notes). If an agent needs to change one, it stops before making the change and returns a proposal: what to change, why, and what it affects.
+- Decisions recorded in DECISIONS.md or CLAUDE.md come from the decision board (S9). If I approve a change to one, the orchestrator updates ai/decision-board.html, regenerates DECISIONS.md and CLAUDE.md with the board's own export functions against the live board data (first confirming the unchanged board reproduces the committed files byte for byte), republishes the board, and commits the board and both exports together. Never hand-edit DECISIONS.md.
+- Keep repo documentation current. When code changes behavior, configuration, or run/test commands, update the affected docs in the same commit, but only to describe what was already decided. Changing a documented decision requires my approval first.
 - Never merge. Never force-push.
 - Prefix every PR comment with [Round N – <role>].
 - Anything a subagent posts to GitHub is limited to what the step requires:
@@ -28,6 +32,14 @@ You are the orchestrator and the only agent that talks to me. Subagents can't pa
   - MINOR: maintainability or clarity.
   - NIT: style.
 
+## Preflight (orchestrator, before step 1)
+Check each item and report every failure to me with a proposed fix before starting; don't work around one silently.
+- Base branch: the default branch exists on the remote and has at least one commit, so the PR has a base.
+- Push access: `git push --dry-run` to the remote works with the configured protocol (SSH or HTTPS via `gh auth setup-git`), and `gh auth status` is logged in with repo scope.
+- Test runtime: whatever the test suite needs is reachable. For Testcontainers, `docker info` succeeds and Testcontainers resolves the same socket (DOCKER_HOST, /var/run/docker.sock, ~/.testcontainers.properties).
+- Toolchains: the JDK and build tool versions the repo requires are installed or resolvable.
+- Working tree: note any uncommitted changes so agents stage by path and never include them.
+
 ## Steps
 1. Planner: read the issue and the repo. Pick the slug and create the branch locally (don't push; it has no commits yet). Return the plan to the orchestrator with:
    - exact build, test, and lint commands
@@ -37,11 +49,11 @@ You are the orchestrator and the only agent that talks to me. Subagents can't pa
    - test cases per criterion, including edge cases
    - open questions
    Write nothing to disk.
-   Orchestrator: save the plan to .orchestrator/plan-issue-1.md, show it to me, and wait. If I ask for changes, re-run the planner with my feedback.
+   Orchestrator: save the plan to .orchestrator/plan-issue-<issue-number>.md, show it to me, and wait. If I ask for changes, re-run the planner with my feedback.
 
 2. Test author: from the approved plan, write tests for every acceptance criterion and listed edge case. Add stubs matching the plan's signatures that throw a not-implemented error so everything compiles. Build and lint must pass. Only the new tests may fail, and each must fail on an assertion or the stub, not on compile or setup errors. Return each test with its failure reason. Commit and push (first push of the branch).
 
-3. Implementer: make the tests pass without touching any test file. If a test looks wrong and blocks green, stop and report it. When green, open a PR whose body has: "Closes #1", a summary, how to run it, and a "Test concerns" section for tests that pass but look questionable. Return the PR number.
+3. Implementer: make the tests pass without touching any test file. If a test looks wrong and blocks green, stop and report it. When green, open a PR whose body has: "Closes #<issue-number>", a summary, how to run it, and a "Test concerns" section for tests that pass but look questionable. Return the PR number.
 
 4. Reviewer (round 1): your inputs are the issue, the plan, the diff, and the PR description. Don't read commit messages or the orchestrator log. Judge against the issue first, and flag anywhere the plan itself is wrong. Check out the branch and run the checks yourself. Review for correctness, edge cases, error handling, test quality and coverage gaps, security, and unnecessary complexity.
    - Post inline comments on diff lines.
@@ -68,6 +80,8 @@ You are the orchestrator and the only agent that talks to me. Subagents can't pa
 
 8. Verifier: check out the branch and run the checks. Confirm every round-2 finding has a reply, and every claimed fix SHA exists and addresses its finding. Make no changes. Return anything unresolved.
 
+9. Orchestrator: draft the agent-prompts.md entry for this run (D0). Append it as the next numbered section in the file's existing format: the prompt (quote it, link ai/Prompt Template.md for the full text), tool, output summary per step, accepted, rejected, and my response. Write "My response" only from what I said or decided, not from inferred reasons. Leave it uncommitted and show it to me; commit it only when I approve.
+
 ## Final summary
 - PR link
 - Per round: findings raised / fixed / rejected, by severity
@@ -77,3 +91,4 @@ You are the orchestrator and the only agent that talks to me. Subagents can't pa
 - Anything the verifier flagged
 - Anything left for me to decide
 - Path to the orchestrator log
+- The drafted agent-prompts.md entry (step 9), awaiting my approval
