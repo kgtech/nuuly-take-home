@@ -53,7 +53,7 @@ Rules for writing code in this repo. Each rule cites the decision in DECISIONS.m
 
 - [D0] After each AI session, append to agent-prompts.md: prompt, output summary, what was accepted, what was rejected, your response.
 - [D0] Keep CLAUDE.md, DECISIONS.md and agent-prompts.md at the repo root. Supporting AI artifacts (decision board, decision review, research sources) go in ai/. (refined by S9)
-- [D1] Java 25 toolchain, Spring Boot 4.1.x (built with 4.1.1; set in gradle/libs.versions.toml) (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.1). Use spring-boot-starter-webmvc, not -web. (refined by S10)
+- [D1] Java 25 toolchain, Spring Boot 4.1.x (built with 4.1.1; set in gradle/libs.versions.toml) (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.x (version from the Spring Boot BOM; 7.4.5 with Boot 4.1.1)). Use spring-boot-starter-webmvc, not -web. (refined by S10)
 - [D2] Use the Gradle wrapper, version 9.1+ (Java 25 needs it; pinned in gradle-wrapper.properties), with the Kotlin DSL. (refined by S10)
 - [D3] Spring Data JPA for reads (balances come from native or projection queries that cast SUM(quantity_delta)::bigint, because SUM(bigint) returns numeric); atomic writes are native SQL run through JdbcClient in a repository fragment, inside the service's SERIALIZABLE TransactionTemplate (X1). No @Modifying. (refined by S1, W1, X1)
 - [D4] Run stock writes at SERIALIZABLE and retry on PessimisticLockingFailureException with root SQLState 40001/40P01 (see W2). (refined by W1)

@@ -420,3 +420,34 @@ Chose W2-A. All decisions are now answered.
 
 **My response**
 - Chose Y2-A: the same root-SQLState check, written as a Framework 7 `MethodRetryPredicate`.
+
+## 18. Issue #1 with sequential subagents (2026-09-24)
+
+**Prompt**
+> Implement issue #1 using sequential subagents (planner → test author → implementer → reviewer → fixer → reviewer → fixer → verifier). The orchestrator is the only agent that talks to me, owns the log in `.orchestrator/`, and never approves a proposal itself. Only the test author touches tests. Push only when green. Never merge or force-push. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md).) Added mid-run: keep docs current in the same commit; subagents don't change decisions and return a proposal instead.
+
+Tool: Claude Code (desktop), one orchestrator and 10 subagent runs.
+
+**Output summary**
+- **Setup:** the repo had no commits and SSH push failed. Docs became the first commit on `main`, and origin moved to HTTPS through `gh`.
+- **Plan:** Gradle 9.6.0 wrapper, Kotlin DSL, Boot 4.1.1 with every version in `libs.versions.toml`, lint as `-Xlint:all -Werror` plus `--warning-mode=fail`. The V1 ledger schema follows D5/G11/V1. 18 constraint tests run against Testcontainers Postgres.
+- **Test author:** Testcontainers couldn't find Docker (OrbStack socket). Fixed on the machine, not in the repo. At step 2, 20 tests failed on assertions, as planned.
+- **Implementer:** V1 DDL, `application.yaml`, README status line, CLAUDE.md D1 wording. PR [#9](https://github.com/kgtech/nuuly-take-home/pull/9) opened green with 37 tests.
+- **Review round 1:** 11 findings (6 MINOR, 5 NIT). Most were in the version-pinning scan. 5 test requests and 2 proposals came back for my decision.
+- **Review round 2:** R1-4 was partly fixed and still open. New R2-1 (MAJOR): the repo-wide scan read IDE build output in `bin/`, so tests would fail in an Eclipse or VS Code checkout.
+- **Verifier:** every claimed fix SHA exists and addresses its finding, and all acceptance criteria are met.
+
+**Accepted**
+- The plan, with root package `com.kgtech.inventoryapi` and `postgres:18`.
+- Test requests TR-1 to TR-5 and TR-7. Proposals P-1 (`.gitignore`) and P-2 (Gradle checksum).
+- Rewording the issue's AC3 (R1-11).
+- Changing CLAUDE.md D1 to "Hibernate 7.x (from the Boot BOM)", then updating the board and regenerating DECISIONS.md from it.
+
+**Rejected**
+- P-3/TR-6 (exclude IDE output from the version scan).
+- Then the version-pinning tests themselves: `VersionPinningTest` was deleted and AC3 removed from issue #1. S10 stays a CLAUDE.md rule with no test enforcing it.
+- The fixer's first R1-11 verdict (INVALID). I approved the reviewer's suggestion instead.
+
+**My response**
+- Mid-run I added the docs-current and no-silent-decision-change rules. After two review rounds on the version scanner, I dropped the scanner and AC3 instead of extending it again.
+- R1-4 resolved by me. The PR is left unmerged for my review.

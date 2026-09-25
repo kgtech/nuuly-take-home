@@ -2,7 +2,7 @@
 
 A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring Data JPA and PostgreSQL.
 
-> Status: the design is settled and the implementation hasn't started. The commands below are the planned setup (D8, D9). Check them once the code exists.
+> Status: story 1 (project setup and ledger schema) is built, and `./gradlew test` works (Testcontainers starts Postgres; JDK 25 + Docker required). `./gradlew bootRun`, `docker compose up --build` and the API arrive in later stories (compose in story 5); those commands below are the planned setup (D8, D9).
 
 ## Build and run
 
