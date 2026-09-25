@@ -31,7 +31,7 @@ As a developer, I want a building project with the ledger schema migrated into a
 **Acceptance criteria**
 - [ ] `./gradlew test` passes a context-load test against Testcontainers, with Flyway applied and Hibernate validation on.
 - [ ] A ledger row with `quantity_delta = 0` fails the CHECK constraint; a row with an unknown `reason` fails too.
-- [ ] The only files that contain version numbers are `libs.versions.toml` and `gradle-wrapper.properties`.
+- [ ] Outside docs (`*.md`, `ai/`, `docs/`) and the generated wrapper scripts (`gradlew`, `gradlew.bat`), the only files that contain version numbers are `libs.versions.toml` and `gradle-wrapper.properties`.
 
 ---
 
