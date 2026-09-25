@@ -183,4 +183,44 @@ class IdempotencyHttpConcurrencyTest {
         assertThat(ledgerSum(sku)).isEqualTo(winner);
         assertThat(keyRows()).isEqualTo(1);
     }
+
+    /** R2, W2: distinct fresh keys never replay each other; stock still never goes negative. */
+    @Test
+    void concurrentPurchasesDistinctFreshKeys() throws Exception {
+        String sku = newSku("idem-many-buy");
+        assertThat(itemQuantity(create(sku, 3, null), sku)).isEqualTo(3);
+
+        List<Reply> replies = Concurrently.run(THREADS, () -> purchase(sku, 1, UUID.randomUUID().toString()));
+
+        assertThat(replies).extracting(Reply::status).as("only 200 and 400, never a 500")
+                .allMatch(s -> s == 200 || s == 400);
+        Map<Integer, List<Reply>> byStatus = replies.stream().collect(Collectors.groupingBy(Reply::status));
+        assertThat(byStatus.get(200)).hasSize(3);
+        assertThat(byStatus.get(400)).hasSize(THREADS - 3).allSatisfy(r -> {
+            assertThat(r.contentType()).startsWith("text/plain");
+            assertThat(r.body()).isEqualTo("Insufficient inventory");
+        });
+        assertThat(byStatus.get(200).stream().map(r -> itemQuantity(r, sku)).toList())
+                .containsExactlyInAnyOrder(2L, 1L, 0L);
+        assertThat(ledgerSum(sku)).isEqualTo(0);
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
+                .isEqualTo(3);
+        assertThat(keyRows()).isEqualTo(THREADS);
+    }
+
+    /** R2, W2: distinct fresh keys each add once; every add sees a distinct running total. */
+    @Test
+    void concurrentAddsDistinctFreshKeys() throws Exception {
+        String sku = newSku("idem-many-add");
+
+        List<Reply> replies = Concurrently.run(THREADS, () -> create(sku, 1, UUID.randomUUID().toString()));
+
+        assertThat(replies).extracting(Reply::status).as("never a 500").containsOnly(200);
+        assertThat(replies.stream().map(r -> itemQuantity(r, sku)).toList())
+                .containsExactlyInAnyOrder(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L);
+        assertThat(ledgerSum(sku)).isEqualTo(THREADS);
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(THREADS);
+        assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", sku)).isEqualTo(1);
+        assertThat(keyRows()).isEqualTo(THREADS);
+    }
 }
