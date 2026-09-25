@@ -18,7 +18,10 @@ dependencies {
     implementation(libs.spring.boot.starter.data.jpa)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.spring.boot.starter.validation)
+    implementation(libs.spring.boot.starter.actuator)
     implementation(libs.springdoc.openapi.starter.webmvc.ui)
+    developmentOnly(platform(SpringBootPlugin.BOM_COORDINATES)) // bootJar resolves this configuration on its own
+    developmentOnly(libs.spring.boot.docker.compose) // bootRun starts compose.yaml; excluded from bootJar (D8)
     runtimeOnly(libs.flyway.database.postgresql)
     runtimeOnly(libs.postgresql)
     testImplementation(libs.spring.boot.starter.test)
