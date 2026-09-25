@@ -58,7 +58,7 @@ class InventoryController {
             content = @Content(mediaType = "text/plain", schema = @Schema(implementation = String.class)))
     ResponseEntity<?> create(@PathVariable String skuId, @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = "Optional UUID; same key + same request replays the first response for 24h",
+                    description = "Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400.",
                     schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
         if (idempotencyKey != null && !IdempotencyKey.isValid(idempotencyKey)) {
@@ -83,7 +83,7 @@ class InventoryController {
             content = @Content(mediaType = "text/plain", schema = @Schema(implementation = String.class)))
     ResponseEntity<?> purchase(@PathVariable String skuId, @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = "Optional UUID; same key + same request replays the first response for 24h",
+                    description = "Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400.",
                     schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
         // U3: @Valid body → Idempotency-Key format → skuId pattern → service

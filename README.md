@@ -37,7 +37,7 @@ export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 
 `compose.yaml` defines only Postgres; `compose.override.yaml` adds the app, and `docker compose` reads both by default. `bootRun` reads `compose.yaml` only, through Spring Boot's Docker Compose support, which is a development-only dependency and isn't in the jar. Don't run `docker compose up` and `bootRun` together: both want port 8080.
 
-**Idempotency-Key.** Either POST accepts an optional `Idempotency-Key` UUID header. Repeating the same request with the same key within 24 hours returns the first response and changes stock only once; the same key with a different SKU, endpoint or quantity returns 400:
+**Idempotency-Key.** Either POST accepts an optional `Idempotency-Key` UUID header. Repeating the same request with the same key within 24 hours returns the first response and changes stock only once. The same key with a different SKU, endpoint or quantity returns 400 `Invalid request`, and so does any request with a key older than 24 hours; keys are never reused, so send a new key for each new request:
 
 ```bash
 KEY=$(uuidgen)
