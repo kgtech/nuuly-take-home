@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.kgtech"
-// no `version`: it would be a version number outside the catalog (AC3)
+// no `version`: it would be a version number outside the catalog (S10)
 
 java { toolchain { languageVersion = JavaLanguageVersion.of(libs.versions.java.get().toInt()) } }
 
