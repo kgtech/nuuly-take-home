@@ -16,3 +16,12 @@ spring:
       enabled: false                      # explicit "ProblemDetail stays off"
 springdoc:
   override-with-generic-response: false
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health                   # D10: health only
+  endpoint:
+    health:
+      probes:
+        enabled: true                     # D10: /actuator/health/liveness and /readiness

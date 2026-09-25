@@ -2,25 +2,35 @@
 
 A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring Data JPA and PostgreSQL.
 
-> Status: stories 1–4 are built: the ledger schema, SERIALIZABLE ledger writes with retries, the four spec operations with text/plain errors, and concurrent add and purchase tests that run over HTTP against Postgres. The spec is complete (build step 4 in [`ai/decision-review.md`](ai/decision-review.md)). The app serves springdoc-openapi 3.1.x (built with 3.1.1) annotations at `/v3/api-docs` and Swagger UI, checked by tests. `./gradlew build` runs everything (JDK 25 + Docker; Testcontainers starts Postgres). Not built yet: the `Idempotency-Key` header (story 6), paging (story 7), and the `openapi.yaml` export and Swagger UI instructions (story 8). `./gradlew bootRun` and `docker compose up --build` arrive in story 5; the commands below are the planned setup (D8, D9).
+> Status: stories 1–5 are built: the ledger schema, SERIALIZABLE ledger writes with retries, the four spec operations with text/plain errors, concurrent add and purchase tests over HTTP against Postgres, and Docker Compose with health checks. The spec is complete and the repo is submittable (build step 5 in [`ai/decision-review.md`](ai/decision-review.md)). The app serves springdoc-openapi 3.1.x (built with 3.1.1) annotations at `/v3/api-docs` and Swagger UI, checked by tests. Not built yet: the `Idempotency-Key` header (story 6), paging (story 7), and the `openapi.yaml` export and Swagger UI instructions (story 8).
 
 ## Build and run
 
-**Reviewers (Docker only):**
+**Reviewers (Docker with Compose v2):**
 
 ```bash
 docker compose up --build
 # API:        http://localhost:8080/inventory
 # Swagger UI: http://localhost:8080/swagger-ui.html
 # Health:     http://localhost:8080/actuator/health
+#             http://localhost:8080/actuator/health/liveness
+#             http://localhost:8080/actuator/health/readiness
+docker compose down -v   # stop and remove the database
 ```
+
+This builds the app image, starts Postgres 18, waits for its health check and then starts the app on port 8080. Port 8080 must be free. Postgres is published on a random host port (`docker compose port postgres 5432`), so a local Postgres on 5432 doesn't conflict. The database has no volume: every run starts empty.
 
 **Development (JDK 25 + Docker):**
 
 ```bash
-./gradlew bootRun   # starts Postgres from compose.yaml automatically
-./gradlew test      # Testcontainers starts a throwaway Postgres
+./gradlew bootRun                         # starts Postgres from compose.yaml, stops it on exit
+./gradlew clean build --warning-mode=fail # compile with -Werror and run all tests (Testcontainers starts Postgres)
+docker compose up postgres                # Postgres alone, e.g. for a debugger-launched app
 ```
+
+`compose.yaml` defines only Postgres; `compose.override.yaml` adds the app, and `docker compose` reads both by default. `bootRun` reads `compose.yaml` only, through Spring Boot's Docker Compose support, which is a development-only dependency and isn't in the jar. Don't run `docker compose up` and `bootRun` together: both want port 8080.
+
+Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), Gradle 9.1+, PostgreSQL 18, Docker Compose v2.
 
 ## Assumptions
 
