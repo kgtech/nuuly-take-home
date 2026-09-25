@@ -29,7 +29,7 @@ public class InventoryService {
     /** R8: the largest page. */
     private static final int MAX_LIMIT = 250;
     private static final BigInteger MAX_LIMIT_BIG = BigInteger.valueOf(MAX_LIMIT);
-    /** R4, OQ3: ASCII digits with an optional sign; anything else is ignored. */
+    /** R4: ASCII digits with an optional sign; anything else is ignored. */
     private static final Pattern LIMIT = Pattern.compile("[+-]?[0-9]+");
     /** After alone returns every row after it. */
     private static final long UNBOUNDED = Long.MAX_VALUE;
@@ -100,7 +100,7 @@ public class InventoryService {
         return new InventoryPage(List.copyOf(page), Optional.of(new InventoryPage.Next(n, page.getLast().skuId())));
     }
 
-    /** R4, R8, OQ3: a positive ASCII integer, clamped to 250; blank, non-numeric, zero or negative is ignored. */
+    /** R4, R8: a positive ASCII integer, clamped to 250; blank, non-numeric, zero or negative is ignored. */
     private static OptionalInt parseLimit(String raw) {
         if (raw == null || !LIMIT.matcher(raw).matches()) {
             return OptionalInt.empty();
@@ -112,7 +112,10 @@ public class InventoryService {
         return OptionalInt.of(value.min(MAX_LIMIT_BIG).intValueExact());
     }
 
-    /** OQ2: Postgres text cannot hold NUL; every sku_id sorts above the part before it, so cut there. */
+    /**
+     * R4: after is never validated. Postgres text cannot hold NUL, and every sku_id sorts above the part before the
+     * first NUL, so the cursor is cut there.
+     */
     private static String truncateAtNul(String after) {
         if (after == null) {
             return null;
