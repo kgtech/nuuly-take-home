@@ -489,3 +489,71 @@ Tool: Claude Code (desktop), one orchestrator and 12 subagent runs.
 **My response**
 - On REQUIRES_NEW, I said it locks in X1-B. Tests that call the service must not be `@Transactional`; they seed data in a committed transaction and clean up afterwards.
 - I chose 55P03 option 1 because it keeps the real-Postgres coverage (D1/S11) and tests both halves of the Y2-A filter without side effects in production code.
+
+## 21. Issue #5 with sequential subagents (2026-09-25)
+
+**Prompt**
+> Implement https://github.com/kgtech/nuuly-take-home/issues/5 using sequential subagents. You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md).)
+
+Tool: Claude Code (desktop), one orchestrator and 7 subagent runs (plus one resumed fixer run).
+
+**Output summary**
+- **Preflight:**
+  - Push, `gh`, Docker/Testcontainers (OrbStack), the JDK 25 toolchain and Node/Playwright all passed.
+  - Local `main` was fast-forwarded.
+  - The issue-4 worktree was kept because it has an uncommitted `agent-prompts.md` change.
+  - Port 8080 was held by an unrelated local container, so it was stopped for each smoke and restarted after.
+- **Plan:**
+  - Branch `feat/issue-5-compose-health`.
+  - Actuator exposes health only, with the liveness and readiness probes on.
+  - `spring-boot-docker-compose` is `developmentOnly`.
+  - `compose.yaml` runs Postgres only, with a `pg_isready` healthcheck over TCP and a random host port.
+  - `compose.override.yaml` adds the app.
+  - The layered, non-root, multi-stage `Dockerfile` ships with a `.dockerignore`.
+  - The compose stack is checked by manual smokes, not by the test suite.
+  - 8 open questions, one of them a proposed S10 change.
+- **Decision change (S10):**
+  - The board's own export, run headless, reproduced `DECISIONS.md` and `CLAUDE.md` byte for byte.
+  - I then added the image-tag exception to S10 on the board, regenerated both files, committed them and republished the board (version 18).
+  - Posted as a `[Decision change]` comment on issue #5.
+- **Test author:**
+  - Added `ActuatorHealthTest`, `ActuatorHealthDownTest` and `ComposeFilesTest`, plus the two dependencies.
+  - 10 compose-file tests failed on their file-exists assertions; the actuator tests already passed on Boot's defaults.
+  - Found that `bootJar` needs the BOM platform on `developmentOnly`.
+- **Implementer:**
+  - Build green: 252 tests.
+  - The clean-clone `docker compose up --build` smoke and the `bootRun` smoke both passed.
+  - Opened PR [#13](https://github.com/kgtech/nuuly-take-home/pull/13).
+- **Review round 1:** 4 MINOR:
+  - Postgres published on all interfaces.
+  - README said every run starts empty.
+  - README's instructions for an app run outside `bootRun` didn't work.
+  - The Dockerfile's java tag isn't tested.
+  - The fixer marked all 4 valid, fixed the two README items in one commit, and returned 2 proposals with 2 test requests.
+- **Review round 2:** both README threads were resolved and there were no new findings, so round 2 of fixes was skipped.
+- **Verifier:**
+  - Green at 252 and the clean-clone smoke passed.
+  - All acceptance criteria were met.
+  - No CI checks are configured.
+  - Two threads stay open by owner decision.
+
+**Accepted**
+- The plan, including the two BOM-managed dependencies and the planner's recommendations: no automated compose smoke, a structural `ComposeFilesTest`, a random Postgres host port, default readiness, no `.env`, and a layered non-root image.
+- Refining S10: container image tags in `compose.yaml` and the `Dockerfile` repeat the catalog's versions.
+- Letting agents stop and restart the local container holding port 8080 for the smokes.
+- Switching the session worktree to the feature branch instead of adding a new worktree.
+- The test author's `developmentOnly(platform(...))` fix.
+- Keeping the explicit `management` block.
+- The fixer's README fixes for R1-2 and R1-3.
+
+**Rejected**
+- R1-1 proposal: publish Postgres on loopback only (`127.0.0.1::5432`), with its test change.
+- R1-4 proposal: a test tying the Dockerfile's `eclipse-temurin` tags to the catalog's java version, plus matching S10 wording.
+
+**My response**
+- Approved the plan and the S10 refinement after first answering "no preference".
+- Allowed agents to stop the container holding port 8080.
+- Chose to switch the session worktree.
+- Accepted the BOM platform fix and kept the management block.
+- Rejected both round-1 proposals (R1-1 and R1-4).
+- Said the plugin MCP servers that asked for authorization (GitHub, Slack, Linear and others) won't be connected; they only need to be mocked out for demonstration purposes.
