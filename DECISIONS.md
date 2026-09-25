@@ -67,6 +67,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | Y2 | Design | How does the retry tell a serialization failure (40001/40P01) from other lock failures? | A: Framework 7 predicate = MethodRetryPredicate | Yes |
 | Y3 | Spec gap | What goes into the Idempotency-Key request hash? | A: SHA-256 of (operation, skuId, quantity) after parsing | Yes |
 | Y4 | Design | How does a replayed response get its Content-Type? | A: Store content_type with status and body | Yes |
+| Z1 | Design | Where do Idempotency-Key handling, input checks and the idempotency transaction sit? | B: Service-layer @Idempotent interceptor | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -86,9 +87,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Any printable string up to 255, no slash, COLLATE "C". Drawback noted in research: URL-encoding cases (spaces, %2F, Unicode) need tests.
   - C: Any non-blank string, database default collation. Drawback noted in research: Sort order depends on the database's locale (en_US puts a before B; C puts B first).
 - **Matched recommendation:** Yes
-- **Refined by:** R7, S2, W1
+- **Refined by:** R7, S2, W1, Z1
 - **Current rules (after refinement):**
-  - Validate skuId against ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Check it in the controller with a precompiled Pattern, never with @Pattern on the @PathVariable. POST create → 400 "Invalid request"; GET and purchase → 404 "SKU not found" without touching the database or the idempotency table (GET has no 400 in the spec). @Valid body validation runs first, so a bad body wins with 400 (G4). (refined by R7, S2)
+  - Validate skuId against ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Check it in the service with a precompiled Pattern (SkuId.isValid), never with @Pattern on the @PathVariable; controllers pass the raw path value. POST create → 400 "Invalid request"; GET and purchase → 404 "SKU not found" without touching the database or the idempotency table (GET has no 400 in the spec). @Valid body validation runs first, so a bad body wins with 400 (G4). (refined by R7, S2, Z1)
   - Column: sku.sku_id varchar(64) COLLATE "C" PRIMARY KEY; inventory_ledger.sku_id references it with the same type and collation (W1). (refined by W1)
 
 ## G2: How wide is quantity: 32-bit or 64-bit?
@@ -291,9 +292,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: JdbcClient with hand-written SQL. Drawback noted in research: Manual row mapping.
   - C: jOOQ. Drawback noted in research: Code generation setup eats time.
 - **Matched recommendation:** No
-- **Refined by:** S1, W1, X1
+- **Refined by:** S1, W1, X1, Z1
 - **Current rules (after refinement):**
-  - Spring Data JPA for reads (balances come from native or projection queries that cast SUM(quantity_delta)::bigint, because SUM(bigint) returns numeric); atomic writes are native SQL run through JdbcClient in a repository fragment, inside the service's SERIALIZABLE TransactionTemplate (X1). No @Modifying. (refined by S1, W1, X1)
+  - Spring Data JPA for reads (balances come from native or projection queries that cast SUM(quantity_delta)::bigint, because SUM(bigint) returns numeric); atomic writes are native SQL run through JdbcClient in a repository fragment, inside the attempt's SERIALIZABLE transaction (X1). No @Modifying. (refined by S1, W1, X1, Z1)
 
 ## D4: How do add and purchase stay correct under concurrency?
 
@@ -395,9 +396,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Replay successes only. Drawback noted in research: Changes G14 from A to C, and the README wording.
   - C: Keep throwing; record failures in a separate transaction. Drawback noted in research: Two transactions per failure.
 - **Matched recommendation:** Yes
-- **Refined by:** U1
+- **Refined by:** U1, Z1
 - **Current rules (after refinement):**
-  - Inside the stock transaction, return an outcome value (Ok / NotFound / Insufficient / Overflow); never throw for business results. The controller maps outcomes to 200/404/400. (refined by U1)
+  - Inside the stock transaction, return an outcome value (Ok / NotFound / Insufficient / Overflow); never throw for business results. Rejections of a malformed skuId or Idempotency-Key, and of a reused key, are outcome values too. The controller maps outcomes to 200/404/400. (refined by U1, Z1)
   - Store 200, 404 "SKU not found", 400 "Insufficient inventory" and the overflow 400 "Invalid request" against the key. Validation 400s are not stored. (refined by U1)
 
 ## R2: Two requests arrive at the same moment with the same Idempotency-Key. What happens?
@@ -500,10 +501,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: EntityManager.createNativeQuery in a custom fragment. Drawback noted in research: Same unconfirmed Hibernate behaviour as option A (DML through getResultList). JPA only forbids getResultList for JPQL UPDATE/DELETE and says nothing about native DML..
   - D: Drop RETURNING: @Modifying row count, then SELECT. Drawback noted in research: Two round trips on every successful add and purchase..
 - **Matched recommendation:** No
-- **Refined by:** X1
+- **Refined by:** X1, Z1
 - **Current rules (after refinement):**
   - Atomic writes live in a repository fragment (e.g. InventoryWrites + InventoryWritesImpl) and run through JdbcClient. Reads use Spring Data JPA.
-  - JdbcClient writes run only inside the service's SERIALIZABLE TransactionTemplate callback (X1) (JpaTransactionManager shares the connection). Never mix a JPA entity change and a JdbcClient write in one transaction. (refined by X1)
+  - JdbcClient writes (ledger and idempotency) run only inside the attempt's SERIALIZABLE transaction that X1 defines (JpaTransactionManager shares the connection). Never mix a JPA entity change and a JdbcClient write in one transaction. (refined by X1, Z1)
 
 ## S2: Where is the skuId format checked, so that GET and purchase return 404 (not 400) for an ID that fails the pattern?
 
@@ -514,6 +515,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: No format check on GET and purchase; lookup returns 404. Drawback noted in research: A bad ID costs a database round trip..
   - B: @Pattern everywhere, map HandlerMethodValidationException per endpoint. Drawback noted in research: Body errors on these methods move from MethodArgumentNotValidException to HandlerMethodValidationException. The handler must inspect getParameterValidationResults() and the method (getMethod()) to keep G4-C. Easy to get wrong..
 - **Matched recommendation:** Yes
+- **Refined by:** Z1
+- **Current rules (after refinement):**
+  - Never put constraint annotations on @PathVariable parameters (they switch on method validation, which answers 400).
+  - Controllers pass the raw path skuId to the service. The service checks it with SkuId.isValid() before any database or idempotency work and returns an outcome value: create → InvalidRequest (400 "Invalid request"); purchase → NotFound and GET → empty (404 "SKU not found"). With an Idempotency-Key, the @Idempotent interceptor runs the same check (IdempotentResults.beforeClaim) before it opens a transaction, and the result is not stored. (refined by Z1)
 
 ## S3: What does a valid Idempotency-Key look like, and what happens to an empty or oversized one?
 
@@ -524,6 +529,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Blank = absent; 1-255 printable ASCII, else 400. Drawback noted in research: A client that sends an empty key believing it is protected gets no protection; a retry applies twice..
   - C: Accept anything, store sha-256 of the key. Drawback noted in research: Still needs the blank rule, so it does not remove the validation step..
 - **Matched recommendation:** No
+- **Refined by:** Z1
+- **Current rules (after refinement):**
+  - Idempotency-Key: absent means no key (G8). The controller passes the raw header to the service; the @Idempotent interceptor checks it. A present key, including an empty one, must match ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$; otherwise → 400 "Invalid request", returned as an outcome value before any database work. This 400 is not stored (R1). (refined by Z1)
+  - Column: idempotency key uuid.
 
 ## S4: How do reviewers start app + Postgres with Docker while bootRun starts only Postgres?
 
@@ -697,6 +706,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: skuId first (404), then key format (400). Drawback noted in research: Opposite of G4-C's order.
 - **Matched recommendation:** Yes
+- **Refined by:** Z1
+- **Current rules (after refinement):**
+  - Order on both POSTs: body validation (@Valid, controller) → Idempotency-Key format (@Idempotent interceptor, 400) → skuId pattern (service check; run by the interceptor before the claim when a key is present; create 400, purchase 404) → claim and stock write. (refined by Z1)
 
 ## V1: Should stock changes also be recorded in an append-only ledger?
 
@@ -755,6 +767,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Two beans: @Retryable service calls a @Transactional writer. Drawback noted in research: One more class per feature.
   - C: Both annotations on one method. Drawback noted in research: Behaviour not documented.
 - **Matched recommendation:** Yes
+- **Refined by:** Z1
+- **Current rules (after refinement):**
+  - @Retryable sits on the service's stock-write method and wraps everything beneath it; each attempt runs in one new SERIALIZABLE transaction. Without an Idempotency-Key, the method's TransactionTemplate (ISOLATION_SERIALIZABLE, PROPAGATION_REQUIRED) starts it. With a key, the @Idempotent interceptor, which runs inside the retry, starts it (TransactionTemplate, ISOLATION_SERIALIZABLE, PROPAGATION_REQUIRES_NEW) and runs the claim, the stock write and the stored response in it; the method's TransactionTemplate joins. Stock-write methods have no @Transactional annotation. (refined by Z1)
 
 ## Y1: Where is a POST's Accept header checked, so an unacceptable Accept never changes stock?
 
@@ -791,4 +806,15 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **My reasoning:** Storing the content type is standard procedure.
 - **Rejected:**
   - B: Derive it from the status. Drawback noted in research: A second place that must agree with the controller.
+- **Matched recommendation:** Yes
+
+## Z1: Where do Idempotency-Key handling, input checks and the idempotency transaction sit?
+
+- **Type:** Design choice
+- **Choice:** B: Service-layer @Idempotent interceptor
+- **My reasoning:** Moving idempotency into a MethodInterceptor (@Idempotent) decouples InventoryController and InventoryService from IdempotencyStore while keeping @Retryable as the outermost wrapper ([Retry, Idempotency, Tx]). Returning WriteResult outcome values instead of throwing exceptions keeps bad requests (400/404) from firing MethodRetryEvent and adding WARN logs from StockWriteFailureLogger. spring-aop (MethodInterceptor + StaticMethodMatcherPointcut) is already on the classpath, avoids adding spring-boot-starter-aspectj, and a static @Role(ROLE_INFRASTRUCTURE) @Bean with ObjectProvider dependencies keeps bean post-processing order deterministic. The isolation check keeps InventoryService agnostic of the key while failing fast if a future caller runs a stock write inside a non-SERIALIZABLE transaction.
+- **Rejected:**
+  - A: In the controller. Doesn't align with standard idempotency practices; the key should be passed through so the service can handle conversions.
+  - C: MVC HandlerInterceptor. Drawback noted in research: Can't share the ledger write's transaction (G14) without an in-progress state and a 409 the spec doesn't list.
+  - D: Redis in front. Drawback noted in research: A new dependency and a 409 the spec doesn't list (G10).
 - **Matched recommendation:** Yes
