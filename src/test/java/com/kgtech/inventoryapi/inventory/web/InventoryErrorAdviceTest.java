@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.springframework.http.HttpHeaders.ALLOW;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
@@ -98,7 +99,7 @@ class InventoryErrorAdviceTest {
     @Test
     void deleteSkuReturns405WithAllowHeader() throws Exception {
         expectText(mvc.perform(delete("/inventory/x").accept(MediaType.APPLICATION_JSON)), 405, "Method Not Allowed")
-                .andExpect(header().string("Allow", allOf(containsString("GET"), containsString("POST"))));
+                .andExpect(header().string(ALLOW, allOf(containsString("GET"), containsString("POST"))));
     }
 
     @ParameterizedTest(name = "{0} {1}")
@@ -110,7 +111,7 @@ class InventoryErrorAdviceTest {
     void otherMethodsReturn405(String method, String path) throws Exception {
         expectText(mvc.perform(request(HttpMethod.valueOf(method), path).accept(MediaType.APPLICATION_JSON)),
                 405, "Method Not Allowed")
-                .andExpect(header().exists("Allow"));
+                .andExpect(header().exists(ALLOW));
     }
 
     @ParameterizedTest

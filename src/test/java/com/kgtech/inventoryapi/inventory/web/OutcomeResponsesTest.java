@@ -87,7 +87,7 @@ class OutcomeResponsesTest {
     }
 
     private static void assertStoredEquals(StoredResponse stored, ResponseEntity<String> expected) {
-        ResponseEntity<String> rendered = stored.toResponseEntity();
+        ResponseEntity<String> rendered = StoredResponses.toResponseEntity(stored);
         assertThat(rendered.getStatusCode()).isEqualTo(expected.getStatusCode());
         assertThat(rendered.getHeaders().getContentType()).isEqualTo(expected.getHeaders().getContentType());
         assertThat(rendered.getBody()).isEqualTo(expected.getBody());
