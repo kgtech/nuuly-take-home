@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 
 /** AC1: context loads against Testcontainers Postgres, Flyway applied, Hibernate validation on. */
 @SpringBootTest
@@ -27,6 +28,9 @@ class InventoryApplicationTests {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    LocalContainerEntityManagerFactoryBean entityManagerFactory;
 
     @Test
     void contextLoads() {
@@ -45,6 +49,8 @@ class InventoryApplicationTests {
     @Test
     void hibernateDdlAutoIsValidate() {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
+        // the value Hibernate actually receives, not just the configured property
+        assertThat(entityManagerFactory.getJpaPropertyMap()).containsEntry("hibernate.hbm2ddl.auto", "validate");
     }
 
     @Test
