@@ -100,7 +100,7 @@ class InventoryConcurrencyTest {
         jdbc.update("INSERT INTO sku (sku_id) VALUES (?)", sku);
         jdbc.update("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, ?, 'add')", sku, stock);
 
-        List<StockOutcome.Purchase> outcomes = runTogether(() -> service.purchase(sku, 1));
+        List<WriteResult> outcomes = runTogether(() -> service.purchase(sku, 1, null));
 
         assertThat(outcomes).filteredOn(StockOutcome.Ok.class::isInstance).hasSize(stock);
         assertThat(outcomes).filteredOn(StockOutcome.Insufficient.class::isInstance).hasSize(THREADS - stock);
@@ -116,7 +116,7 @@ class InventoryConcurrencyTest {
     void concurrentAddsAreNeverLost() throws InterruptedException {
         String sku = newSku("race-add");
 
-        List<StockOutcome.Add> outcomes = runTogether(() -> service.add(sku, 1));
+        List<WriteResult> outcomes = runTogether(() -> service.add(sku, 1, null));
 
         assertThat(outcomes).hasSize(THREADS).allMatch(StockOutcome.Ok.class::isInstance);
         assertThat(outcomes).extracting(o -> ((StockOutcome.Ok) o).quantity())

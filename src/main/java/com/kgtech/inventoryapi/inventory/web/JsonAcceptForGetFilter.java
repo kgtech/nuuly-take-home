@@ -1,4 +1,7 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
+
+import static org.springframework.http.HttpHeaders.ACCEPT;
+import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -12,10 +15,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.server.PathContainer;
+import org.springframework.http.server.PathContainer.Element;
+import org.springframework.http.server.PathContainer.PathSegment;
 import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -39,9 +41,9 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
     /** requestURI minus contextPath, decoded and without ";" parameters: the path Spring matches handlers on. */
     private static String routedPath(HttpServletRequest request) {
         StringBuilder path = new StringBuilder();
-        for (PathContainer.Element element
+        for (Element element
                 : RequestPath.parse(request.getRequestURI(), request.getContextPath()).pathWithinApplication().elements()) {
-            path.append(element instanceof PathContainer.PathSegment segment ? segment.valueToMatch() : element.value());
+            path.append(element instanceof PathSegment segment ? segment.valueToMatch() : element.value());
         }
         return path.toString();
     }
@@ -60,13 +62,13 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
 
         @Override
         public String getHeader(String name) {
-            return isAccept(name) ? MediaType.APPLICATION_JSON_VALUE : super.getHeader(name);
+            return isAccept(name) ? APPLICATION_JSON_VALUE : super.getHeader(name);
         }
 
         @Override
         public Enumeration<String> getHeaders(String name) {
             return isAccept(name)
-                    ? Collections.enumeration(Set.of(MediaType.APPLICATION_JSON_VALUE))
+                    ? Collections.enumeration(Set.of(APPLICATION_JSON_VALUE))
                     : super.getHeaders(name);
         }
 
@@ -74,13 +76,13 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
         public Enumeration<String> getHeaderNames() {
             Set<String> names = new LinkedHashSet<>(Collections.list(super.getHeaderNames()));
             if (names.stream().noneMatch(JsonAccept::isAccept)) {
-                names.add(HttpHeaders.ACCEPT);
+                names.add(ACCEPT);
             }
             return Collections.enumeration(names);
         }
 
         private static boolean isAccept(String name) {
-            return HttpHeaders.ACCEPT.equalsIgnoreCase(name);
+            return ACCEPT.equalsIgnoreCase(name);
         }
     }
 }

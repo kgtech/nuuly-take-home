@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,6 +24,10 @@ import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+
+import com.kgtech.inventoryapi.inventory.InventoryItem;
+import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.StockOutcome;
 
 /**
  * S12, AC1, AC2: one row per response in the original spec, asserting status, Content-Type and exact body. Every
@@ -67,20 +71,20 @@ class InventoryControllerContractTest {
                         s -> when(s.find("widget")).thenReturn(Optional.empty()),
                         404, "SKU not found"),
                 json("POST create 200", HttpMethod.POST, "/inventory/widget", "{\"quantity\":10}",
-                        s -> when(s.add("widget", 10)).thenReturn(new StockOutcome.Ok(10)),
+                        s -> when(s.add("widget", 10, null)).thenReturn(new StockOutcome.Ok(10)),
                         "{\"skuId\":\"widget\",\"quantity\":10}"),
                 text("POST create 400", HttpMethod.POST, "/inventory/widget", "{\"quantity\":0}", NO_STUB,
                         400, "Invalid request"),
                 json("POST purchase 200", HttpMethod.POST, PURCHASE, "{\"quantity\":3}",
-                        s -> when(s.purchase("widget", 3)).thenReturn(new StockOutcome.Ok(7)),
+                        s -> when(s.purchase("widget", 3, null)).thenReturn(new StockOutcome.Ok(7)),
                         "{\"skuId\":\"widget\",\"quantity\":7}"),
                 text("POST purchase 400 insufficient", HttpMethod.POST, PURCHASE, "{\"quantity\":3}",
-                        s -> when(s.purchase("widget", 3)).thenReturn(new StockOutcome.Insufficient()),
+                        s -> when(s.purchase("widget", 3, null)).thenReturn(new StockOutcome.Insufficient()),
                         400, "Insufficient inventory"),
                 text("POST purchase 400 invalid", HttpMethod.POST, PURCHASE, "{\"quantity\":0}", NO_STUB,
                         400, "Invalid request"),
                 text("POST purchase 404", HttpMethod.POST, PURCHASE, "{\"quantity\":3}",
-                        s -> when(s.purchase("widget", 3)).thenReturn(new StockOutcome.NotFound()),
+                        s -> when(s.purchase("widget", 3, null)).thenReturn(new StockOutcome.NotFound()),
                         404, "SKU not found"),
                 json("GET list 200", HttpMethod.GET, "/inventory", null,
                         s -> when(s.findAll())
@@ -123,7 +127,7 @@ class InventoryControllerContractTest {
     /** U1: an add that would pass Long.MAX_VALUE answers 400 "Invalid request". */
     @Test
     void createOverflowReturns400InvalidRequest() throws Exception {
-        when(service.add("widget", 5)).thenReturn(new StockOutcome.Overflow());
+        when(service.add("widget", 5, null)).thenReturn(new StockOutcome.Overflow());
 
         mvc.perform(jsonRequest(HttpMethod.POST, "/inventory/widget", "{\"quantity\":5}"))
                 .andExpect(status().isBadRequest())
@@ -134,13 +138,13 @@ class InventoryControllerContractTest {
     /** G1: the skuId reaches the service with its case unchanged. */
     @Test
     void createPassesSkuIdUnchanged() throws Exception {
-        when(service.add("ABC", 5)).thenReturn(new StockOutcome.Ok(5));
+        when(service.add("ABC", 5, null)).thenReturn(new StockOutcome.Ok(5));
 
         mvc.perform(post("/inventory/ABC").accept(MediaType.APPLICATION_JSON)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}"))
                 .andExpect(status().isOk())
                 .andExpect(content().json("{\"skuId\":\"ABC\",\"quantity\":5}", JsonCompareMode.STRICT));
 
-        verify(service).add("ABC", 5);
+        verify(service).add("ABC", 5, null);
     }
 }

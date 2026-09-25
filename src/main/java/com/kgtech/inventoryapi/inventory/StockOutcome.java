@@ -1,7 +1,7 @@
 package com.kgtech.inventoryapi.inventory;
 
 /** Business results of a stock write; never thrown (R1, U1). */
-sealed interface StockOutcome {
+public sealed interface StockOutcome extends WriteResult {
 
     sealed interface Add extends StockOutcome permits Ok, Overflow {
     }

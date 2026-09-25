@@ -20,7 +20,7 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
 /**
  * Y2 at the interceptor: the ledger write is mocked to throw a PessimisticLockingFailureException, so it passes the
  * {@code includes} filter and only the SerializationFailure predicate decides. The service's real @Retryable proxy and
- * SERIALIZABLE TransactionTemplate run. Not @Transactional.
+ * SERIALIZABLE TransactionTemplate (PROPAGATION_REQUIRED, no Idempotency-Key) run. Not @Transactional.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -37,7 +37,7 @@ class StockWriteRetryFilterTest {
         CannotAcquireLockException lockTimeout = new CannotAcquireLockException("x", new SQLException("x", "55P03"));
         when(skus.add("filter-55p03", 4)).thenThrow(lockTimeout);
 
-        assertThatThrownBy(() -> service.add("filter-55p03", 4)).isSameAs(lockTimeout);
+        assertThatThrownBy(() -> service.add("filter-55p03", 4, null)).isSameAs(lockTimeout);
 
         verify(skus, times(1)).add("filter-55p03", 4);
     }
@@ -48,7 +48,7 @@ class StockWriteRetryFilterTest {
                 .thenThrow(new CannotAcquireLockException("x", new SQLException("x", "40001")))
                 .thenReturn(new StockOutcome.Ok(5));
 
-        assertThat(service.add("filter-40001", 4)).isEqualTo(new StockOutcome.Ok(5));
+        assertThat(service.add("filter-40001", 4, null)).isEqualTo(new StockOutcome.Ok(5));
 
         verify(skus, times(2)).add("filter-40001", 4);
     }

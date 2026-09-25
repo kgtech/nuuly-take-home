@@ -14,17 +14,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
- * AC1–AC4, G1, G5, G12, V2 through the service against Postgres (S11). Not @Transactional: the service opens its
- * own REQUIRES_NEW transaction, so seed rows are committed first (autocommit JdbcClient) and removed afterwards.
+ * AC1–AC4, G1, G5, G12, V2, S2, Z1 through the service against Postgres (S11), without an Idempotency-Key. Not
+ * @Transactional: with no surrounding transaction the service's TransactionTemplate (SERIALIZABLE, REQUIRED) starts
+ * its own, so seed rows are committed first (autocommit JdbcClient) and removed afterwards.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -35,6 +40,9 @@ class InventoryServiceTest {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
 
     private final List<String> skus = new ArrayList<>();
 
@@ -97,7 +105,7 @@ class InventoryServiceTest {
     void addCreatesSkuRowAndFirstLedgerRow() {
         String sku = newSku("create");
 
-        StockOutcome.Add outcome = service.add(sku, 5);
+        WriteResult outcome = service.add(sku, 5, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(5));
         assertThat(skuRows(sku)).isEqualTo(1);
@@ -111,8 +119,8 @@ class InventoryServiceTest {
     void addToExistingSkuAppendsSecondRowAndReturnsSum() {
         String sku = newSku("addsum");
 
-        assertThat(service.add(sku, 5)).isEqualTo(new StockOutcome.Ok(5));
-        StockOutcome.Add outcome = service.add(sku, 7);
+        assertThat(service.add(sku, 5, null)).isEqualTo(new StockOutcome.Ok(5));
+        WriteResult outcome = service.add(sku, 7, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(12));
         assertThat(skuRows(sku)).isEqualTo(1);
@@ -125,8 +133,8 @@ class InventoryServiceTest {
     void addReturnsBalanceAboveIntMax() {
         String sku = newSku("aboveint");
 
-        assertThat(service.add(sku, Integer.MAX_VALUE)).isEqualTo(new StockOutcome.Ok(Integer.MAX_VALUE));
-        StockOutcome.Add outcome = service.add(sku, Integer.MAX_VALUE);
+        assertThat(service.add(sku, Integer.MAX_VALUE, null)).isEqualTo(new StockOutcome.Ok(Integer.MAX_VALUE));
+        WriteResult outcome = service.add(sku, Integer.MAX_VALUE, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(4_294_967_294L));
         assertThat(balance(sku)).isEqualTo(4_294_967_294L);
@@ -139,7 +147,7 @@ class InventoryServiceTest {
         String sku = newSku("tomax");
         seedStock(sku, Long.MAX_VALUE - quantity);
 
-        StockOutcome.Add outcome = service.add(sku, quantity);
+        WriteResult outcome = service.add(sku, quantity, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(Long.MAX_VALUE));
         assertThat(ledgerRows(sku)).isEqualTo(2);
@@ -162,10 +170,10 @@ class InventoryServiceTest {
         String sku = newSku("overmax");
         seedStock(sku, seed);
         if (firstAdd > 0) {
-            assertThat(service.add(sku, firstAdd)).isEqualTo(new StockOutcome.Ok(Long.MAX_VALUE));
+            assertThat(service.add(sku, firstAdd, null)).isEqualTo(new StockOutcome.Ok(Long.MAX_VALUE));
         }
 
-        StockOutcome.Add outcome = service.add(sku, overflowingAdd);
+        WriteResult outcome = service.add(sku, overflowingAdd, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Overflow());
         assertThat(ledgerRows(sku)).isEqualTo(expectedRows);
@@ -178,7 +186,7 @@ class InventoryServiceTest {
         String sku = newSku("buy");
         seedStock(sku, 10);
 
-        StockOutcome.Purchase outcome = service.purchase(sku, 3);
+        WriteResult outcome = service.purchase(sku, 3, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(7));
         List<Map<String, Object>> rows = ledger(sku);
@@ -193,7 +201,7 @@ class InventoryServiceTest {
         String sku = newSku("buyall");
         seedStock(sku, 4);
 
-        StockOutcome.Purchase outcome = service.purchase(sku, 4);
+        WriteResult outcome = service.purchase(sku, 4, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(0));
         assertThat(skuRows(sku)).isEqualTo(1);
@@ -206,7 +214,7 @@ class InventoryServiceTest {
         String sku = newSku("short");
         seedStock(sku, 2);
 
-        StockOutcome.Purchase outcome = service.purchase(sku, 3);
+        WriteResult outcome = service.purchase(sku, 3, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Insufficient());
         assertThat(ledgerRows(sku)).isEqualTo(1);
@@ -218,7 +226,7 @@ class InventoryServiceTest {
         String sku = newSku("bare");
         seedSku(sku);
 
-        StockOutcome.Purchase outcome = service.purchase(sku, 1);
+        WriteResult outcome = service.purchase(sku, 1, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Insufficient());
         assertThat(ledgerRows(sku)).isZero();
@@ -229,7 +237,7 @@ class InventoryServiceTest {
     void purchaseOfMissingSkuReturnsNotFoundAndInsertsNothing() {
         String sku = newSku("missing");
 
-        StockOutcome.Purchase outcome = service.purchase(sku, 1);
+        WriteResult outcome = service.purchase(sku, 1, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.NotFound());
         assertThat(skuRows(sku)).isZero();
@@ -241,7 +249,7 @@ class InventoryServiceTest {
         String sku = newSku("bigbuy");
         seedStock(sku, Long.MAX_VALUE);
 
-        StockOutcome.Purchase outcome = service.purchase(sku, Integer.MAX_VALUE);
+        WriteResult outcome = service.purchase(sku, Integer.MAX_VALUE, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(Long.MAX_VALUE - 2_147_483_647L));
         assertThat(balance(sku)).isEqualTo(Long.MAX_VALUE - 2_147_483_647L);
@@ -256,13 +264,13 @@ class InventoryServiceTest {
         String mixed = "Abc" + suffix;
         skus.addAll(List.of(upper, lower, mixed));
 
-        assertThat(service.add(upper, 3)).isEqualTo(new StockOutcome.Ok(3));
-        assertThat(service.add(lower, 5)).isEqualTo(new StockOutcome.Ok(5));
-        assertThat(service.purchase(upper, 3)).isEqualTo(new StockOutcome.Ok(0));
+        assertThat(service.add(upper, 3, null)).isEqualTo(new StockOutcome.Ok(3));
+        assertThat(service.add(lower, 5, null)).isEqualTo(new StockOutcome.Ok(5));
+        assertThat(service.purchase(upper, 3, null)).isEqualTo(new StockOutcome.Ok(0));
 
         assertThat(balance(upper)).isZero();
         assertThat(balance(lower)).isEqualTo(5);
-        assertThat(service.purchase(mixed, 1)).isEqualTo(new StockOutcome.NotFound());
+        assertThat(service.purchase(mixed, 1, null)).isEqualTo(new StockOutcome.NotFound());
         assertThat(skuRows(mixed)).isZero();
     }
 
@@ -273,13 +281,74 @@ class InventoryServiceTest {
         String stocked = newSku("nonpos-old");
         seedStock(stocked, 10);
 
-        assertThatThrownBy(() -> service.add(fresh, quantity)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.add(stocked, quantity)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.purchase(stocked, quantity)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.add(fresh, quantity, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.add(stocked, quantity, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.purchase(stocked, quantity, null)).isInstanceOf(IllegalArgumentException.class);
 
         assertThat(skuRows(fresh)).isZero();
         assertThat(ledgerRows(fresh)).isZero();
         assertThat(ledgerRows(stocked)).isEqualTo(1);
         assertThat(balance(stocked)).isEqualTo(10);
+    }
+
+    private TransactionTemplate outerTransaction(int isolation) {
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+        outer.setIsolationLevel(isolation);
+        return outer;
+    }
+
+    /** S2, Z1: a malformed skuId is an outcome value (create 400, purchase 404) and nothing is written. */
+    @ParameterizedTest
+    @ValueSource(strings = {"-bad", "a!b", "a b", ".dot"})
+    void malformedSkuIdReturnsOutcomeAndWritesNothing(String skuId) {
+        skus.add(skuId);
+
+        assertThat(service.add(skuId, 5, null)).isEqualTo(new WriteResult.InvalidRequest());
+        assertThat(service.purchase(skuId, 5, null)).isEqualTo(new StockOutcome.NotFound());
+
+        assertThat(skuRows(skuId)).isZero();
+        assertThat(ledgerRows(skuId)).isZero();
+    }
+
+    /**
+     * Z1 (owner decision on Revision R1): the service's REQUIRED template would silently join a surrounding
+     * transaction at its isolation, so a stock write inside a non-SERIALIZABLE transaction throws and writes nothing.
+     */
+    @ParameterizedTest(name = "{0} isolation {1}")
+    @CsvSource({
+        "add, " + TransactionDefinition.ISOLATION_DEFAULT,
+        "add, " + TransactionDefinition.ISOLATION_READ_COMMITTED,
+        "add, " + TransactionDefinition.ISOLATION_REPEATABLE_READ,
+        "purchase, " + TransactionDefinition.ISOLATION_DEFAULT,
+        "purchase, " + TransactionDefinition.ISOLATION_READ_COMMITTED,
+        "purchase, " + TransactionDefinition.ISOLATION_REPEATABLE_READ
+    })
+    void writeInsideNonSerializableTransactionFails(String operation, int isolation) {
+        String sku = newSku("guard");
+        seedStock(sku, 10);
+        TransactionTemplate outer = outerTransaction(isolation);
+
+        assertThatThrownBy(() -> outer.execute(status -> operation.equals("add")
+                        ? service.add(sku, 3, null)
+                        : service.purchase(sku, 3, null)))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(ledgerRows(sku)).isEqualTo(1);
+        assertThat(balance(sku)).isEqualTo(10);
+    }
+
+    /** X1: inside a SERIALIZABLE transaction the service's template joins it (the keyed path relies on this). */
+    @Test
+    void writeInsideSerializableTransactionJoinsIt() {
+        String sku = newSku("join");
+        TransactionTemplate outer = outerTransaction(TransactionDefinition.ISOLATION_SERIALIZABLE);
+
+        assertThatThrownBy(() -> outer.execute(status -> {
+            assertThat(service.add(sku, 5, null)).isEqualTo(new StockOutcome.Ok(5));
+            throw new IllegalStateException("roll back the outer transaction");
+        })).hasMessage("roll back the outer transaction");
+
+        assertThat(skuRows(sku)).as("the write rolled back with the outer transaction").isZero();
+        assertThat(ledgerRows(sku)).isZero();
     }
 }

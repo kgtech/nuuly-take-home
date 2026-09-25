@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;

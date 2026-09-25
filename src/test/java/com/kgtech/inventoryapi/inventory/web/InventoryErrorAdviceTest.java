@@ -1,9 +1,10 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -33,6 +34,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+
+import com.kgtech.inventoryapi.inventory.InventoryService;
 
 /**
  * D6, S5, S6, G6, T3, G10, AC5, AC8: every error the advice maps is text/plain with G6's fixed text or the standard
@@ -73,8 +76,8 @@ class InventoryErrorAdviceTest {
             switch (this) {
                 case GET_ITEM -> when(service.find(anyString())).thenThrow(failure);
                 case LIST -> when(service.findAll()).thenThrow(failure);
-                case CREATE -> when(service.add(anyString(), anyInt())).thenThrow(failure);
-                case PURCHASE -> when(service.purchase(anyString(), anyInt())).thenThrow(failure);
+                case CREATE -> when(service.add(anyString(), anyInt(), any())).thenThrow(failure);
+                case PURCHASE -> when(service.purchase(anyString(), anyInt(), any())).thenThrow(failure);
             }
         }
     }

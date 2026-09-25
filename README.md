@@ -2,7 +2,7 @@
 
 A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring Data JPA and PostgreSQL.
 
-> Status: stories 1–5 are built: the ledger schema, SERIALIZABLE ledger writes with retries, the four spec operations with text/plain errors, concurrent add and purchase tests over HTTP against Postgres, and Docker Compose with health checks. The spec is complete and the repo is submittable (build step 5 in [`ai/decision-review.md`](ai/decision-review.md)). The app serves springdoc-openapi 3.1.x (built with 3.1.1) annotations at `/v3/api-docs` and Swagger UI, checked by tests. Not built yet: the `Idempotency-Key` header (story 6), paging (story 7), and the `openapi.yaml` export and Swagger UI instructions (story 8).
+> Status: stories 1–6 are built: the ledger schema, SERIALIZABLE ledger writes with retries, the four spec operations with text/plain errors, concurrent add and purchase tests over HTTP against Postgres, Docker Compose with health checks, and the optional `Idempotency-Key` header on both POSTs. The spec is complete and the repo is submittable (build step 6 in [`ai/decision-review.md`](ai/decision-review.md)). The app serves springdoc-openapi 3.1.x (built with 3.1.1) annotations at `/v3/api-docs` and Swagger UI, checked by tests. Not built yet: paging (story 7), and the `openapi.yaml` export and Swagger UI instructions (story 8).
 
 ## Build and run
 
@@ -36,6 +36,20 @@ export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 ```
 
 `compose.yaml` defines only Postgres; `compose.override.yaml` adds the app, and `docker compose` reads both by default. `bootRun` reads `compose.yaml` only, through Spring Boot's Docker Compose support, which is a development-only dependency and isn't in the jar. Don't run `docker compose up` and `bootRun` together: both want port 8080.
+
+**Idempotency-Key.** Either POST accepts an optional `Idempotency-Key` UUID header. Repeating the same request with the same key within 24 hours returns the first response and changes stock only once. The same key with a different SKU, endpoint or quantity returns 400 `Invalid request`, and so does any request with a key older than 24 hours; keys are never reused, so send a new key for each new request:
+
+```bash
+KEY=$(uuidgen)
+curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: $KEY" -d '{"quantity":5}'   # 200 {"skuId":"ABC-1","quantity":5}
+curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: $KEY" -d '{"quantity":5}'   # same 200 replayed; stock is still 5
+curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: $KEY" -d '{"quantity":6}'   # 400 Invalid request
+```
+
+The controller passes the raw header and SKU ID to the service. An `@Idempotent` interceptor on the service's stock-write methods checks the key, then the SKU ID, and then claims the key, changes stock and stores the response in one SERIALIZABLE transaction, which is retried as a whole on a serialization failure. Without a key, the service runs the same stock write on its own. (Z1)
 
 Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), Gradle 9.1+, PostgreSQL 18, Docker Compose v2.
 
