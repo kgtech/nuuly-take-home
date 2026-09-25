@@ -9,7 +9,7 @@ class InventoryWritesImpl implements InventoryWrites {
 
     private static final String INSERT_SKU = "INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING";
 
-    private static final String ADD = """
+    static final String ADD = """
             INSERT INTO inventory_ledger (sku_id, quantity_delta, reason)
             SELECT :id, :q, 'add'
             WHERE (SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_ledger WHERE sku_id = :id)
@@ -17,7 +17,7 @@ class InventoryWritesImpl implements InventoryWrites {
             RETURNING ((SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_ledger WHERE sku_id = :id) + :q)::bigint
             """;
 
-    private static final String PURCHASE = """
+    static final String PURCHASE = """
             INSERT INTO inventory_ledger (sku_id, quantity_delta, reason)
             SELECT :id, -:q, 'purchase'
             WHERE EXISTS (SELECT 1 FROM sku WHERE sku_id = :id)

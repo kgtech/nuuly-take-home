@@ -3,12 +3,15 @@ package com.kgtech.inventoryapi.inventory;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
-/** Reads through Spring Data JPA; atomic writes through the InventoryWrites fragment (D3, S1). */
-interface SkuRepository extends JpaRepository<Sku, String>, InventoryWrites {
+/**
+ * Reads through Spring Data JPA; atomic writes through the InventoryWrites fragment (D3, S1).
+ * Extends the bare Repository so no save/delete methods exist (G5).
+ */
+interface SkuRepository extends Repository<Sku, String>, InventoryWrites {
 
     @Query(value = """
             SELECT (SELECT COALESCE(SUM(l.quantity_delta), 0) FROM inventory_ledger l WHERE l.sku_id = s.sku_id)::bigint
