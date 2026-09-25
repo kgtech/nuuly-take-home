@@ -1,6 +1,5 @@
 package com.kgtech.inventoryapi.inventory;
 
-import java.util.List;
 import java.util.Optional;
 
 import org.springframework.dao.PessimisticLockingFailureException;
@@ -67,12 +66,10 @@ public class InventoryService {
         return skus.findQuantity(skuId).map(quantity -> new InventoryItem(skuId, quantity));
     }
 
-    /** Every SKU in sku_id (COLLATE "C") order. */
+    /** Every SKU, or one page of them, in sku_id (COLLATE "C") order (G9, R4). */
     @Transactional(readOnly = true)
-    public List<InventoryItem> findAll() {
-        return skus.findAllQuantities().stream()
-                .map(row -> new InventoryItem(row.getSkuId(), row.getQuantity()))
-                .toList();
+    public InventoryPage list(String limit, String after) {
+        throw new UnsupportedOperationException("not implemented");
     }
 
     private static void requirePositive(int quantity) {

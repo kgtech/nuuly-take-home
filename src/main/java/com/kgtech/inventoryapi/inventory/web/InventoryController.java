@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
@@ -87,8 +88,9 @@ class InventoryController {
     @ApiResponse(responseCode = "200", description = "List of all inventory items",
             content = @Content(mediaType = APPLICATION_JSON_VALUE,
                     array = @ArraySchema(schema = @Schema(implementation = InventoryItem.class))))
-    List<InventoryItem> list() {
-        return service.findAll();
+    ResponseEntity<List<InventoryItem>> list(@RequestParam(required = false) String limit,
+            @RequestParam(required = false) String after) {
+        throw new UnsupportedOperationException("not implemented");
     }
 
     /** Maps every write result; keyed responses (first and replayed) are sent as stored (Y4). */

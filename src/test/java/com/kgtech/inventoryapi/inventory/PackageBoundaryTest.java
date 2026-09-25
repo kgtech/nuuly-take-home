@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.http.HttpHeaders.ALLOW;
 import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
+import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.HttpHeaders.LOCATION;
 
 import java.io.IOException;
@@ -38,8 +39,8 @@ class PackageBoundaryTest {
     private static final List<String> FORBIDDEN_HTTP = List.of("org.springframework.web.", "org.springframework.http.");
     private static final String INVENTORY_WEB = "com.kgtech.inventoryapi.inventory.web.";
     /** Built from the constants so this file does not contain the quoted names it looks for. */
-    private static final List<String> QUOTED_HEADER_NAMES = Stream.of(ACCEPT, ALLOW, CONTENT_TYPE, LOCATION,
-                    IDEMPOTENCY_KEY)
+    private static final List<String> QUOTED_HEADER_NAMES = Stream.of(ACCEPT, ALLOW, CONTENT_TYPE, LINK,
+                    LOCATION, IDEMPOTENCY_KEY)
             .map(PackageBoundaryTest::quoted)
             .toList();
     /**

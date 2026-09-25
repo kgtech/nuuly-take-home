@@ -3,11 +3,13 @@ package com.kgtech.inventoryapi.inventory;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.endsWith;
+import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -146,6 +148,56 @@ class ApiDocsTest {
     @ValueSource(strings = {"/inventory/{skuId}", "/inventory"})
     void getsHaveNoIdempotencyKeyHeader(String path) throws Exception {
         assertThat(idempotencyKeyParameters(path, "get")).isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Map<String, Object>> listQueryParameters() throws Exception {
+        Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['/inventory'].get");
+        List<Map<String, Object>> parameters =
+                (List<Map<String, Object>>) operation.getOrDefault("parameters", List.of());
+        Map<String, Map<String, Object>> byName = new LinkedHashMap<>();
+        for (Map<String, Object> parameter : parameters) {
+            byName.put((String) parameter.get("name"), parameter);
+        }
+        return byName;
+    }
+
+    /** G9, R4, R8: GET /inventory documents optional limit (integer 1–250) and after (string) query parameters. */
+    @Test
+    void listDocumentsOptionalLimitAndAfterQueryParameters() throws Exception {
+        Map<String, Map<String, Object>> parameters = listQueryParameters();
+
+        assertThat(parameters.keySet()).containsExactlyInAnyOrder("limit", "after");
+        for (Map<String, Object> parameter : parameters.values()) {
+            assertThat(parameter.get("in")).as(parameter.toString()).isEqualTo("query");
+            assertThat(parameter.get("required")).as("required absent or false").isIn(null, false);
+            assertThat(parameter.get("description")).as(parameter.toString()).isInstanceOf(String.class);
+        }
+        assertThat(parameters.get("limit").get("schema")).isInstanceOfSatisfying(Map.class, schema -> {
+            assertThat(schema.get("type")).isEqualTo("integer");
+            assertThat(((Number) schema.get("minimum")).intValue()).isEqualTo(1);
+            assertThat(((Number) schema.get("maximum")).intValue()).isEqualTo(250);
+        });
+        assertThat(parameters.get("after").get("schema")).isInstanceOfSatisfying(Map.class,
+                schema -> assertThat(schema.get("type")).isEqualTo("string"));
+    }
+
+    /** G9: the 200 response documents the Link header; the other operations have none. */
+    @Test
+    void listDocumentsLinkResponseHeader() throws Exception {
+        String docs = apiDocs();
+        Map<String, Object> ok = JsonPath.read(docs, "$.paths['/inventory'].get.responses['200']");
+        assertThat(ok).containsKey("headers");
+        Map<String, Map<String, Object>> headers =
+                JsonPath.read(docs, "$.paths['/inventory'].get.responses['200'].headers");
+
+        assertThat(headers.keySet()).containsExactly(LINK);
+        assertThat(headers.get(LINK).get("description")).isInstanceOf(String.class);
+        assertThat(headers.get(LINK).get("schema")).isInstanceOfSatisfying(Map.class,
+                schema -> assertThat(schema.get("type")).isEqualTo("string"));
+        List<Object> otherHeaders = JsonPath.read(docs, "$.paths['/inventory/{skuId}'].*.responses.*.headers");
+        otherHeaders.addAll(JsonPath.read(docs, "$.paths['/inventory/{skuId}/purchase'].*.responses.*.headers"));
+        assertThat(otherHeaders).isEmpty();
     }
 
     @Test

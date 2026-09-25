@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -83,5 +84,25 @@ class LedgerQueryPlanTest {
             assertThat(plan).as(plan).contains("inventory_ledger_sku");
             assertThat(plan).as(plan).doesNotContain("Seq Scan on inventory_ledger");
         }
+    }
+
+    /**
+     * G9: the page query range-scans the sku primary key and sums each page row's ledger through
+     * inventory_ledger_sku. The statement is read from the repository's @Query so the test tracks production.
+     */
+    @Test
+    void pageQueryUsesIndexes() throws Exception {
+        jdbc.execute("ANALYZE sku");
+        String statement = SkuRepository.class.getMethod("findQuantitiesAfter", String.class, long.class)
+                .getAnnotation(Query.class).value();
+        String sql = statement.replace(":after", "'" + prefix + "'").replace(":limit", "3");
+        assertThat(NAMED_PARAM.matcher(sql).find()).as(sql).isFalse();
+
+        String plan = explain(sql);
+
+        assertThat(plan).as(plan).contains("sku_pkey");
+        assertThat(plan).as(plan).contains("inventory_ledger_sku");
+        assertThat(plan).as(plan).doesNotContain("Seq Scan on inventory_ledger");
+        assertThat(plan).as(plan).doesNotContain("Seq Scan on sku");
     }
 }
