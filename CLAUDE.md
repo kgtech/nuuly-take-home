@@ -91,5 +91,5 @@ Rules for writing code in this repo. Each rule cites the decision in DECISIONS.m
 - [Y2] @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class, maxRetries = 10, …) with @EnableResilientMethods. SerializationFailure implements MethodRetryPredicate and returns true only when NestedExceptionUtils.getMostSpecificCause(t) is an SQLException with SQLState 40001 or 40P01.
 - [Y2] Don't add Spring Retry or Apache Commons Lang for retries.
 - [Y2] Test: a PessimisticLockingFailureException whose root SQLState is 55P03 is not retried; one with 40001 is.
-- [Y4] The idempotency table stores content_type text NOT NULL with status and body. A replay sends the stored status, Content-Type and body unchanged.
+- [Y4] The idempotency table stores content_type text with status and body. The R2 claim inserts them NULL; an UPDATE in the same transaction sets all three, and a CHECK allows only all NULL or all set, so no committed row is incomplete. A replay sends the stored status, Content-Type and body unchanged.
 - [Y4] Test: a replayed 200 has Content-Type application/json; a replayed 404 or 400 has text/plain.

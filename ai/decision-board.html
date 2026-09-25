@@ -1714,7 +1714,7 @@ const ROUND9 = [
  options:[
   {k:"A",label:"Store content_type with status and body",summary:"Add a content_type column; replay all three unchanged.",
    pros:["Replay is byte-for-byte the original response","No status-to-type mapping to keep in sync"],cons:["One more column"],h:0.1,risk:"Low",src:["brandur"],
-   rules:["The idempotency table stores content_type text NOT NULL with status and body. A replay sends the stored status, Content-Type and body unchanged.","Test: a replayed 200 has Content-Type application/json; a replayed 404 or 400 has text/plain."],
+   rules:["The idempotency table stores content_type text with status and body. The R2 claim inserts them NULL; an UPDATE in the same transaction sets all three, and a CHECK allows only all NULL or all set, so no committed row is incomplete. A replay sends the stored status, Content-Type and body unchanged.","Test: a replayed 200 has Content-Type application/json; a replayed 404 or 400 has text/plain."],
    assumption:null},
   {k:"B",label:"Derive it from the status",summary:"200 → application/json; anything else → text/plain.",
    pros:["No schema change"],cons:["A second place that must agree with the controller"],h:0.1,risk:"Low",src:[],
