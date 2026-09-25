@@ -21,6 +21,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.NestedExceptionUtils;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -160,13 +161,20 @@ class StockWriteRetryTest {
         assertThat(ledgerRows(sku)).isEqualTo(1);
     }
 
-    /** AC7: 55P03 is a PessimisticLockingFailureException but not a serialization failure, so it is not retried. */
+    /**
+     * AC7: 55P03 is not a serialization failure, so it is not retried. Through JdbcClient it arrives as a
+     * DataAccessException that is not necessarily a PessimisticLockingFailureException (see StockWriteRetryFilterTest).
+     */
     @Test
     void lockNotAvailableIsNotRetried(CapturedOutput output) {
         String sku = newSku("noretry", 0);
         fault.failOnInsert(sku, 1000, LOCK_NOT_AVAILABLE);
 
-        assertThatThrownBy(() -> service.add(sku, 4)).satisfies(thrown -> assertRootSqlState(thrown, LOCK_NOT_AVAILABLE));
+        assertThatThrownBy(() -> service.add(sku, 4))
+                .isInstanceOf(DataAccessException.class)
+                .satisfies(thrown -> assertThat(NestedExceptionUtils.getMostSpecificCause(thrown))
+                        .isInstanceOfSatisfying(SQLException.class,
+                                sql -> assertThat(sql.getSQLState()).isEqualTo(LOCK_NOT_AVAILABLE)));
 
         assertThat(fault.attempts()).isEqualTo(1);
         assertThat(ledgerRows(sku)).isZero();
