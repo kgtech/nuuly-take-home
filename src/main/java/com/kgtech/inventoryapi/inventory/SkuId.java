@@ -12,6 +12,6 @@ final class SkuId {
 
     /** null → false; uses matcher(..).matches(), never find(); never changes case (G1). */
     static boolean isValid(String skuId) {
-        throw new UnsupportedOperationException("not implemented");
+        return skuId != null && PATTERN.matcher(skuId).matches();
     }
 }

@@ -8,9 +8,13 @@ import org.springframework.resilience.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** Stock writes: one SERIALIZABLE transaction per attempt, retried on serialization failure (X1, W2, Y2). */
+/**
+ * Stock writes: one SERIALIZABLE transaction per attempt, retried on serialization failure (X1, W2, Y2).
+ * Reads run in a read-only transaction and return balances from the ledger SUM (D3).
+ */
 @Service
 class InventoryService {
 
@@ -38,12 +42,20 @@ class InventoryService {
         return serializable.execute(status -> skus.purchase(skuId, quantity));
     }
 
+    @Transactional(readOnly = true)
     public Optional<InventoryItem> find(String skuId) {
-        throw new UnsupportedOperationException("not implemented");
+        if (!SkuId.isValid(skuId)) {
+            return Optional.empty(); // G11: no repository call for a malformed or oversized ID
+        }
+        return skus.findQuantity(skuId).map(quantity -> new InventoryItem(skuId, quantity));
     }
 
+    /** Every SKU in sku_id (COLLATE "C") order. */
+    @Transactional(readOnly = true)
     public List<InventoryItem> findAll() {
-        throw new UnsupportedOperationException("not implemented");
+        return skus.findAllQuantities().stream()
+                .map(row -> new InventoryItem(row.getSkuId(), row.getQuantity()))
+                .toList();
     }
 
     private static void requirePositive(int quantity) {

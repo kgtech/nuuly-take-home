@@ -1,6 +1,10 @@
 package com.kgtech.inventoryapi.inventory;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -8,6 +12,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -15,21 +22,53 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 final class JsonAcceptForGetFilter extends OncePerRequestFilter {
 
+    private static final String BASE = "/inventory";
+
+    /** Only GET /inventory and GET /inventory/**; springdoc, actuator and every POST are untouched (S6). */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        throw new UnsupportedOperationException("not implemented");
+        if (!HttpMethod.GET.matches(request.getMethod())) {
+            return true;
+        }
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return !(path.equals(BASE) || path.startsWith(BASE + "/"));
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        throw new UnsupportedOperationException("not implemented");
+        chain.doFilter(new JsonAccept(request), response);
     }
 
     private static final class JsonAccept extends HttpServletRequestWrapper {
 
         JsonAccept(HttpServletRequest request) {
             super(request);
+        }
+
+        @Override
+        public String getHeader(String name) {
+            return isAccept(name) ? MediaType.APPLICATION_JSON_VALUE : super.getHeader(name);
+        }
+
+        @Override
+        public Enumeration<String> getHeaders(String name) {
+            return isAccept(name)
+                    ? Collections.enumeration(Set.of(MediaType.APPLICATION_JSON_VALUE))
+                    : super.getHeaders(name);
+        }
+
+        @Override
+        public Enumeration<String> getHeaderNames() {
+            Set<String> names = new LinkedHashSet<>(Collections.list(super.getHeaderNames()));
+            if (names.stream().noneMatch(JsonAccept::isAccept)) {
+                names.add(HttpHeaders.ACCEPT);
+            }
+            return Collections.enumeration(names);
+        }
+
+        private static boolean isAccept(String name) {
+            return HttpHeaders.ACCEPT.equalsIgnoreCase(name);
         }
     }
 }

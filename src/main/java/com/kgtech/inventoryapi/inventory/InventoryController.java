@@ -34,7 +34,12 @@ class InventoryController {
     @ApiResponse(responseCode = "404", description = "SKU not found",
             content = @Content(mediaType = "text/plain", schema = @Schema(implementation = String.class)))
     ResponseEntity<?> get(@PathVariable String skuId) {
-        throw new UnsupportedOperationException("not implemented");
+        if (!SkuId.isValid(skuId)) {
+            return TextErrors.skuNotFound(); // S2: no database access
+        }
+        return service.find(skuId)
+                .<ResponseEntity<?>>map(ResponseEntity::ok)
+                .orElseGet(TextErrors::skuNotFound);
     }
 
     @PostMapping(path = "/{skuId}", consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -44,7 +49,10 @@ class InventoryController {
     @ApiResponse(responseCode = "400", description = "Invalid request",
             content = @Content(mediaType = "text/plain", schema = @Schema(implementation = String.class)))
     ResponseEntity<?> create(@PathVariable String skuId, @Valid @RequestBody InventoryQuantity body) {
-        throw new UnsupportedOperationException("not implemented");
+        if (!SkuId.isValid(skuId)) {
+            return TextErrors.invalidRequest(); // S2; @Valid has already run (G4)
+        }
+        return toResponse(skuId, service.add(skuId, body.quantity()));
     }
 
     @PostMapping(path = "/{skuId}/purchase", consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -56,7 +64,11 @@ class InventoryController {
     @ApiResponse(responseCode = "404", description = "SKU not found",
             content = @Content(mediaType = "text/plain", schema = @Schema(implementation = String.class)))
     ResponseEntity<?> purchase(@PathVariable String skuId, @Valid @RequestBody InventoryQuantity body) {
-        throw new UnsupportedOperationException("not implemented");
+        // U3: @Valid body → [Idempotency-Key format, story 6] → skuId pattern → service
+        if (!SkuId.isValid(skuId)) {
+            return TextErrors.skuNotFound();
+        }
+        return toResponse(skuId, service.purchase(skuId, body.quantity()));
     }
 
     @GetMapping
@@ -64,10 +76,15 @@ class InventoryController {
             content = @Content(mediaType = "application/json",
                     array = @ArraySchema(schema = @Schema(implementation = InventoryItem.class))))
     List<InventoryItem> list() {
-        throw new UnsupportedOperationException("not implemented");
+        return service.findAll();
     }
 
     private static ResponseEntity<?> toResponse(String skuId, StockOutcome outcome) {
-        throw new UnsupportedOperationException("not implemented");
+        return switch (outcome) {
+            case StockOutcome.Ok ok -> ResponseEntity.ok(new InventoryItem(skuId, ok.quantity()));
+            case StockOutcome.NotFound _ -> TextErrors.skuNotFound();
+            case StockOutcome.Insufficient _ -> TextErrors.insufficientInventory();
+            case StockOutcome.Overflow _ -> TextErrors.invalidRequest();
+        };
     }
 }
