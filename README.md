@@ -18,14 +18,21 @@ docker compose up --build
 docker compose down -v   # stop and remove the database
 ```
 
-This builds the app image, starts Postgres 18, waits for its health check and then starts the app on port 8080. Port 8080 must be free. Postgres is published on a random host port (`docker compose port postgres 5432`), so a local Postgres on 5432 doesn't conflict. The database has no volume: every run starts empty.
+This builds the app image, starts Postgres 18, waits for its health check and then starts the app on port 8080. Port 8080 must be free. Postgres is published on a random host port (`docker compose port postgres 5432`), so a local Postgres on 5432 doesn't conflict. There is no named volume: data survives a stop and restart (Ctrl-C, `docker compose stop`) and is removed by `docker compose down -v`.
 
 **Development (JDK 25 + Docker):**
 
 ```bash
 ./gradlew bootRun                         # starts Postgres from compose.yaml, stops it on exit
 ./gradlew clean build --warning-mode=fail # compile with -Werror and run all tests (Testcontainers starts Postgres)
-docker compose up postgres                # Postgres alone, e.g. for a debugger-launched app
+docker compose up -d postgres             # Postgres alone, e.g. for a debugger-launched app
+```
+
+An app started outside `bootRun` (IDE run configuration, `java -jar`) doesn't get the Docker Compose support, so give it the database explicitly:
+
+```bash
+export SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:$(docker compose port postgres 5432 | cut -d: -f2)/inventory"
+export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 ```
 
 `compose.yaml` defines only Postgres; `compose.override.yaml` adds the app, and `docker compose` reads both by default. `bootRun` reads `compose.yaml` only, through Spring Boot's Docker Compose support, which is a development-only dependency and isn't in the jar. Don't run `docker compose up` and `bootRun` together: both want port 8080.
