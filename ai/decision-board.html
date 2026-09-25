@@ -1788,6 +1788,36 @@ DECISIONS.push(
  rec:{k:"B",why:"It gives a one-way web → domain dependency and keeps persistence internals package-private.",change:"The feature stays tiny. Then A."}}
 );
 Object.assign(REFINES,{"Z2:A":[],"Z2:B":[{"id": "D10", "rule": 0, "from": "Package by feature (inventory/, idempotency/). Classes are package-private unless another feature uses them.", "to": "Package by feature (inventory/, idempotency/); inventory/ is split into domain and web sub-packages (Z2). Classes are package-private unless another package uses them: domain contract types the web layer consumes are public, while persistence internals (SkuRepository, JPA entities, repository fragments) stay package-private in the domain package."}]});
+/* Round 11: PR #18 review (GET /inventory query strings it can't read) */
+DECISIONS.push(
+{id:"Z3",kind:"gap",review11:true,finding:"Unreadable query",q:"What does GET /inventory return for a query string it can't read unambiguously?",
+ quote:{text:"[R4] GET /inventory never returns 400. Non-positive or non-numeric limit → ignored. limit above the max → the max. after is compared as a plain string and never validated; after alone returns every row after it.",from:"CLAUDE.md (R4)"},
+ why:"PR #18 review: binding limit and after makes Tomcat parse the query string. A malformed percent-escape or invalid UTF-8 (after=%zz, limit=%FF) throws InvalidParameterException during argument binding, and the catch-all answers 500, which G10 reserves for server faults. A repeated after (after=A&after=B) is joined by Spring as \"A,B\"; the list is ordered by the unique sku_id, so a second cursor value has no meaning.",
+ detail:["Only GET /inventory reads query parameters; GET /inventory/{skuId} and both POSTs never parse the query.","MockMvc does not decode the query the way Tomcat does, so the undecodable case is tested through a real server (RANDOM_PORT, raw HTTP)."],
+ examples:[],
+ by:["R4","G10","S12"],
+ options:[
+  {k:"A",label:"Ignore what can't be read, 200",summary:"The controller reads the raw query, takes the first limit/after pair and treats a value that fails to decode as absent.",
+   pros:["GET /inventory stays 200-only, as the spec lists"],cons:["Hand-written query parsing in the controller","A client typo quietly returns every row"],h:1,risk:"Low",src:[],
+   rules:["GET /inventory reads limit and after from the raw query string; a value that can't be decoded is ignored, and a repeated after uses its first value."],assumption:null},
+  {k:"A2",label:"Catch and ignore both parameters",summary:"Read through the servlet API; on InvalidParameterException treat limit and after as absent.",
+   pros:["Least code"],cons:["One bad unrelated parameter drops a valid limit"],h:0.5,risk:"Med",src:[],
+   rules:["If Tomcat can't decode the query string, GET /inventory treats limit and after as absent."],assumption:null},
+  {k:"B",label:"400 \"Invalid request\"",summary:"The advice maps InvalidParameterException to 400; a repeated after is rejected with the same 400. Both are documented in the OpenAPI.",
+   pros:["Surfaces client bugs instead of guessing","No hand-written query parsing"],cons:["Adds a 400 to an operation the spec lists as 200-only"],h:0.75,risk:"Low",src:[],
+   rules:["InventoryErrorAdvice maps Tomcat's InvalidParameterException (a malformed percent-escape or invalid UTF-8 in the query) to 400 \"Invalid request\" text/plain, ahead of the catch-all. A repeated after on GET /inventory returns the same 400; a repeated limit is still ignored (R4).","The GET /inventory OpenAPI operation documents the 400 (text/plain \"Invalid request\"), and the after parameter's description says it must not be repeated.","Test the undecodable query through a real server (RANDOM_PORT, raw HTTP), since MockMvc doesn't decode the query; test a repeated after, and assert the documented 400 in ApiDocsTest."],assumption:null},
+  {k:"C",label:"Leave the 500",summary:"No change; record it as a known edge.",
+   pros:["No work"],cons:["A client error answers 500, against G10"],h:0,risk:"High",src:[],
+   rules:["A query string Tomcat can't decode returns 500 on GET /inventory (known edge)."],assumption:null}
+ ],
+ rec:{k:"A",why:"It keeps the list operation 200-only, which is all the spec defines.",change:"You'd rather surface client mistakes with a documented 400. Then B."}}
+);
+Object.assign(REFINES,{"Z3:A":[],"Z3:A2":[],"Z3:C":[],"Z3:B":[
+ {"id":"R4","rule":0,"from":"GET /inventory never returns 400.","to":"GET /inventory returns 400 \"Invalid request\" only when its query string can't be decoded or repeats after (Z3)."},
+ {"id":"R4","assumption":true,"from":"Invalid paging values never cause an error:","to":"Invalid paging values never cause an error (a query string that can't be decoded, or a repeated `after`, returns 400, Z3):"},
+ {"id":"G10","rule":1,"from":"(500 only for server faults","to":"(GET /inventory also answers 400 \"Invalid request\" for a query string that can't be decoded or repeats after, Z3; 500 only for server faults"},
+ {"id":"S12","rule":1,"from":"declares @ApiResponse for exactly the spec's codes;","to":"declares @ApiResponse for exactly the spec's codes, plus GET /inventory's 400 (Z3);"}
+]});
 (function(){
 const BUDGET = 16;
 const byId = Object.fromEntries(DECISIONS.map(d=>[d.id,d]));
@@ -1867,7 +1897,7 @@ function renderCard(d){
   const srcs=keys.map((k,i)=>{ const s=SRC[k]; return `<li id="s-${d.id}-${i+1}"><span class="n">[${i+1}]</span><span class="u"><a href="${esc(s.u)}" target="_blank" rel="noopener">${esc(s.t)}</a><span class="vtag ${s.s}">${s.s==="V"?"Verified":"Unverified"}</span>${s.test?`<span class="test"><b>${s.s==="V"?"Confirm":"Test to prove"}:</b> ${esc(s.test)}</span>`:""}</span></li>`; }).join("");
   return `<article class="card" id="${d.id}" data-id="${d.id}">
     <div class="card-h">
-      <div class="card-meta"><span class="cid">${d.id}</span><span class="tag ${d.kind}">${d.kind==="gap"?"Spec gap":"Design choice"}</span>${d.review?'<span class="tag review">Review follow-up</span>':""}${d.review2?`<span class="tag review">Review round 2 · ${esc(d.finding)}</span>`:""}${d.review3?`<span class="tag review">Review round 3</span>`:""}${d.review4?`<span class="tag review">Review round 4</span>`:""}${d.review5?`<span class="tag review">Round 5 · ${esc(d.finding)}</span>`:""}${d.review6?`<span class="tag review">Round 6 · ledger as truth</span>`:""}${d.review7?`<span class="tag review">Round 7 · SERIALIZABLE retries</span>`:""}${d.review8?`<span class="tag review">Round 8 · ${esc(d.finding)}</span>`:""}${d.review9?`<span class="tag review">Round 9 · ${esc(d.finding)}</span>`:""}${d.review10?`<span class="tag review">Round 10 · ${esc(d.finding)}</span>`:""}<span class="pill open" data-role="status">Open</span></div>
+      <div class="card-meta"><span class="cid">${d.id}</span><span class="tag ${d.kind}">${d.kind==="gap"?"Spec gap":"Design choice"}</span>${d.review?'<span class="tag review">Review follow-up</span>':""}${d.review2?`<span class="tag review">Review round 2 · ${esc(d.finding)}</span>`:""}${d.review3?`<span class="tag review">Review round 3</span>`:""}${d.review4?`<span class="tag review">Review round 4</span>`:""}${d.review5?`<span class="tag review">Round 5 · ${esc(d.finding)}</span>`:""}${d.review6?`<span class="tag review">Round 6 · ledger as truth</span>`:""}${d.review7?`<span class="tag review">Round 7 · SERIALIZABLE retries</span>`:""}${d.review8?`<span class="tag review">Round 8 · ${esc(d.finding)}</span>`:""}${d.review9?`<span class="tag review">Round 9 · ${esc(d.finding)}</span>`:""}${d.review10?`<span class="tag review">Round 10 · ${esc(d.finding)}</span>`:""}${d.review11?`<span class="tag review">Round 11 · ${esc(d.finding)}</span>`:""}<span class="pill open" data-role="status">Open</span></div>
       <h2>${md(d.q)}</h2>
     </div>
     <div class="card-b">
@@ -1892,7 +1922,7 @@ function renderCard(d){
   </article>`;
 }
 function renderNav(){
-  const groups=[["gap","Spec gaps",d=>d.kind==="gap"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10],["design","Design choices",d=>d.kind==="design"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10],["review","Review follow-ups",d=>d.review],["review2","Review round 2",d=>d.review2],["review3","Review round 3",d=>d.review3],["review4","Review round 4",d=>d.review4],["review5","Round 5: ledger and bigint",d=>d.review5],["review6","Round 6: ledger as truth",d=>d.review6],["review7","Round 7: SERIALIZABLE retries",d=>d.review7],["review8","Round 8: retry and transaction boundary",d=>d.review8],["review9","Round 9: story review follow-ups",d=>d.review9],["review10","Round 10: PR #14 review",d=>d.review10]];
+  const groups=[["gap","Spec gaps",d=>d.kind==="gap"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10&&!d.review11],["design","Design choices",d=>d.kind==="design"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10&&!d.review11],["review","Review follow-ups",d=>d.review],["review2","Review round 2",d=>d.review2],["review3","Review round 3",d=>d.review3],["review4","Review round 4",d=>d.review4],["review5","Round 5: ledger and bigint",d=>d.review5],["review6","Round 6: ledger as truth",d=>d.review6],["review7","Round 7: SERIALIZABLE retries",d=>d.review7],["review8","Round 8: retry and transaction boundary",d=>d.review8],["review9","Round 9: story review follow-ups",d=>d.review9],["review10","Round 10: PR #14 review",d=>d.review10],["review11","Round 11: PR #18 review",d=>d.review11]];
   document.getElementById("nav").innerHTML=groups.map(([k,t,f])=>`<div class="navgroup"><h3>${t}</h3><ul class="nav">${DECISIONS.filter(f).map(d=>`<li data-nav="${d.id}"><a href="#${d.id}"><span class="nid">${d.id}</span><span class="nt">${esc(d.q)}</span><span class="dot" aria-hidden="true"></span></a></li>`).join("")}</ul></div>`).join("");
 }
 function update(){

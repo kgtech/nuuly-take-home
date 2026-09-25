@@ -69,6 +69,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | Y4 | Design | How does a replayed response get its Content-Type? | A: Store content_type with status and body | Yes |
 | Z1 | Design | Where do Idempotency-Key handling, input checks and the idempotency transaction sit? | B: Service-layer @Idempotent interceptor | Yes |
 | Z2 | Design | How is the inventory feature split between web and domain code? | B: Domain package + web sub-package | Yes |
+| Z3 | Spec gap | What does GET /inventory return for a query string it can't read unambiguously? | B: 400 "Invalid request" | No |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -240,10 +241,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: No auth; framework defaults. Drawback noted in research: Codes outside the contract.
   - C: Static API key header. Drawback noted in research: Adds setup for reviewers.
 - **Matched recommendation:** No
-- **Refined by:** S6, U2
+- **Refined by:** S6, U2, Z3
 - **Current rules (after refinement):**
   - No authentication.
-  - The spec's /inventory/** operations return only the status codes the spec lists for them (500 only for server faults, body "Internal server error"). Other requests under /inventory/** keep standard HTTP codes (404/405; GET ignores Accept, POST answers 400; see U2) with text/plain bodies. /actuator/** and the springdoc paths (/v3/api-docs, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect). (refined by S6, U2)
+  - The spec's /inventory/** operations return only the status codes the spec lists for them (GET /inventory also answers 400 "Invalid request" for a query string that can't be decoded or repeats after, Z3; 500 only for server faults, body "Internal server error"). Other requests under /inventory/** keep standard HTTP codes (404/405; GET ignores Accept, POST answers 400; see U2) with text/plain bodies. /actuator/** and the springdoc paths (/v3/api-docs, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect). (refined by S6, U2, Z3)
 
 ## D0: Where do AI prompts and artifacts live in the repo?
 
@@ -442,6 +443,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Coerce large values, 400 for nonsense. Drawback noted in research: Adds a 400 to an operation that lists only 200.
   - C: Strict 400 for any bad value. Drawback noted in research: Adds a 400 the spec doesn't list.
 - **Matched recommendation:** Yes
+- **Refined by:** Z3
+- **Current rules (after refinement):**
+  - GET /inventory returns 400 "Invalid request" only when its query string can't be decoded or repeats after (Z3). Non-positive or non-numeric limit → ignored. limit above the max → the max. after is compared as a plain string and never validated; after alone returns every row after it. (refined by Z3)
 
 ## R5: G4's reasoning argues the opposite of its choice. Which one stands?
 
@@ -641,6 +645,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Validate every MockMvc response against the original YAML. Drawback noted in research: Uses Jackson 2 (2.21) internally while the app uses Jackson 3; they sit in different packages, but running it on Boot 4.1.1 is unverified..
   - D: Manual review only. Drawback noted in research: Conflicts with priority 3: nothing stops a later change from breaking the contract..
 - **Matched recommendation:** Yes
+- **Refined by:** Z3
+- **Current rules (after refinement):**
+  - A parameterized MockMvc test has one row per response in the original spec and asserts status, Content-Type and exact body.
+  - Set springdoc.override-with-generic-response=false. Each controller method declares @ApiResponse for exactly the spec's codes, plus GET /inventory's 400 (Z3); error responses use mediaType "text/plain". (refined by Z3)
 
 ## T1: How is an expired Idempotency-Key reused without running the request twice?
 
@@ -832,3 +840,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - A: One flat inventory package. Drawback noted in research: Web and domain code mix; nothing stops the domain importing HTTP types.
 - **Matched recommendation:** Yes
+
+## Z3: What does GET /inventory return for a query string it can't read unambiguously?
+
+- **Type:** Spec gap
+- **Choice:** B: 400 "Invalid request"
+- **My reasoning:** The OpenAPI spec needs to be updated to document the 400.
+- **Rejected:**
+  - A: Ignore what can't be read, 200. Drawback noted in research: Hand-written query parsing in the controller.
+  - A2: Catch and ignore both parameters. Drawback noted in research: One bad unrelated parameter drops a valid limit.
+  - C: Leave the 500. Drawback noted in research: A client error answers 500, against G10.
+- **Matched recommendation:** No
