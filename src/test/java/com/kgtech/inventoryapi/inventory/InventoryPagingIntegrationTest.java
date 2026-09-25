@@ -266,6 +266,33 @@ class InventoryPagingIntegrationTest {
                 .andExpect(header().doesNotExist(LINK));
     }
 
+    /**
+     * R4, Z3: a single after containing a comma is one plain-string cursor, not a repeated after. "A-1,B-2" sorts
+     * after "A-1" and before "B-2" in COLLATE "C", so the list starts at B-2.
+     */
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"/inventory?after=A-1%2CB-2", "/inventory?after=A-1,B-2"})
+    void singleAfterWithCommaIsOneCursor(String query) throws Exception {
+        seedMixed();
+
+        Page page = page(URI.create(query));
+
+        assertThat(ids(page)).containsExactly("B-2", "C-3", "Z-9", "a-1", "b-2", "c.3");
+        assertThat(page.next()).isNull();
+    }
+
+    /** R4, Z3: with a limit, the comma cursor pages normally and the Link continues from the last item. */
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"/inventory?limit=2&after=A-1%2CB-2", "/inventory?limit=2&after=A-1,B-2"})
+    void limitWithSingleAfterWithCommaPagesFromCursor(String query) throws Exception {
+        seedMixed();
+
+        Page page = page(URI.create(query));
+
+        assertThat(ids(page)).containsExactly("B-2", "C-3");
+        assertThat(page.next()).isEqualTo(URI.create("http://localhost/inventory?limit=2&after=C-3"));
+    }
+
     /** AC3, R8: limit above 250, even past int and long, is 250; the Link carries limit=250. */
     @ParameterizedTest
     @ValueSource(strings = {"251", "9999", "99999999999", "99999999999999999999"})

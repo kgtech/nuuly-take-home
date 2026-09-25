@@ -186,6 +186,19 @@ class InventoryListPagingTest {
         verifyNoInteractions(service);
     }
 
+    /** R4, Z3: one after value containing a comma is passed through whole, neither split nor rejected. */
+    @ParameterizedTest(name = "?{0}")
+    @ValueSource(strings = {"after=A-1%2CB-2", "after=A-1,B-2"})
+    void singleAfterWithCommaIsPassedWhole(String query) throws Exception {
+        stub(null, "A-1,B-2", Optional.empty());
+
+        mvc.perform(get(URI.create("/inventory?" + query)))
+                .andExpect(status().isOk())
+                .andExpect(content().json(ITEMS_JSON, JsonCompareMode.STRICT));
+
+        verify(service).list(null, "A-1,B-2");
+    }
+
     /** U2: a paged GET ignores Accept and still carries the Link. */
     @Test
     void responseIsJsonEvenWithXmlAccept() throws Exception {
