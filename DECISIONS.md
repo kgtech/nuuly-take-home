@@ -1,6 +1,6 @@
 # DECISIONS
 
-Nuuly inventory API take-home. Generated from the decision board on 2026-09-24.
+Nuuly inventory API take-home. Generated from the decision board on 2026-09-25.
 Each entry records my choice and my reasoning; rejected options list my reason, or the option's main drawback from research when I left it blank.
 
 | ID | Type | Question | Choice | Matched recommendation |
