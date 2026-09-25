@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.kgtech.inventoryapi.idempotency.Idempotent;
@@ -36,15 +37,25 @@ class InventoryService {
     @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
             maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
     public WriteResult add(String skuId, int quantity, String idempotencyKey) {
+        Optional<WriteResult> rejected = SkuId.rejection(Operation.ADD, skuId);
+        if (rejected.isPresent()) {
+            return rejected.get(); // S2: no repository or transaction access
+        }
         requirePositive(quantity);
-        return serializable.execute(status -> skus.add(skuId, quantity));
+        requireNoWeakerTransaction();
+        return serializable.execute(status -> skus.add(skuId, quantity)); // new tx, or joins the @Idempotent tx (X1)
     }
 
     @Idempotent(Operation.PURCHASE)
     @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
             maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
     public WriteResult purchase(String skuId, int quantity, String idempotencyKey) {
+        Optional<WriteResult> rejected = SkuId.rejection(Operation.PURCHASE, skuId);
+        if (rejected.isPresent()) {
+            return rejected.get(); // S2: no repository or transaction access
+        }
         requirePositive(quantity);
+        requireNoWeakerTransaction();
         return serializable.execute(status -> skus.purchase(skuId, quantity));
     }
 
@@ -67,6 +78,16 @@ class InventoryService {
     private static void requirePositive(int quantity) {
         if (quantity < 1) {
             throw new IllegalArgumentException("quantity must be >= 1");
+        }
+    }
+
+    /** X1: the REQUIRED template would silently join a surrounding transaction at its isolation; refuse that. */
+    private static void requireNoWeakerTransaction() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+            if (isolation == null || isolation != TransactionDefinition.ISOLATION_SERIALIZABLE) {
+                throw new IllegalStateException("Stock writes must not join a non-SERIALIZABLE transaction");
+            }
         }
     }
 }

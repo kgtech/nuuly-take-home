@@ -20,6 +20,12 @@ final class SkuId {
 
     /** Malformed skuId: create → InvalidRequest, purchase → NotFound; valid → empty. No I/O (S2). */
     static Optional<WriteResult> rejection(Operation operation, String skuId) {
-        throw new UnsupportedOperationException("not implemented");
+        if (isValid(skuId)) {
+            return Optional.empty();
+        }
+        return Optional.of(switch (operation) {
+            case ADD -> new WriteResult.InvalidRequest();
+            case PURCHASE -> new StockOutcome.NotFound();
+        });
     }
 }
