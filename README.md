@@ -2,7 +2,7 @@
 
 A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring Data JPA and PostgreSQL.
 
-> Status: stories 1–2 (project setup, ledger schema, and SERIALIZABLE ledger writes with retries and service outcomes) are built, and `./gradlew test` works (Testcontainers starts Postgres; JDK 25 + Docker required). `./gradlew bootRun`, `docker compose up --build` and the API arrive in later stories (compose in story 5); those commands below are the planned setup (D8, D9).
+> Status: stories 1–3 are built: the ledger schema, SERIALIZABLE ledger writes with retries, and the four spec operations with text/plain errors. The app serves springdoc-openapi 3.1.x (built with 3.1.1) annotations at `/v3/api-docs` and Swagger UI, checked by tests. `./gradlew build` runs everything (JDK 25 + Docker; Testcontainers starts Postgres). Not built yet: the `Idempotency-Key` header (story 6), paging (story 7), and the `openapi.yaml` export and Swagger UI instructions (story 8). `./gradlew bootRun` and `docker compose up --build` arrive in story 5; the commands below are the planned setup (D8, D9).
 
 ## Build and run
 
