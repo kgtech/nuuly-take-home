@@ -29,7 +29,7 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
  * Issue #6 end to end against Postgres: Idempotency-Key claim, replay, mismatch, expiry and what is never stored
- * (G8, G14, R1, R2, S3, S8, T1, U3, W2, X1, Y1, Y3, Y4). Not @Transactional: every request commits its own
+ * (G8, G14, R1, R2, S2, S3, S8, T1, U3, W2, X1, Y1, Y3, Y4, Z1). Not @Transactional: every request commits its own
  * transaction, so the tables are emptied before each test. Same annotations as InventoryApiIntegrationTest so the
  * context and container are reused.
  */
@@ -449,6 +449,85 @@ class IdempotencyApiIntegrationTest {
 
         assertItem(create("widget", 1, key), "widget", 1);
         assertThat(keyRows()).isEqualTo(1);
+    }
+
+    private void assertNothingWritten() {
+        assertThat(keyRows()).as("idempotency rows").isZero();
+        assertThat(allLedgerRows()).as("ledger rows").isZero();
+        assertThat(allSkuRows()).as("sku rows").isZero();
+    }
+
+    /** U3, Z1: the key check (interceptor) runs before the skuId check, so a bad key wins with 400. */
+    @Test
+    void badKeyWinsOverBadSkuIdOnPurchase() throws Exception {
+        assertText(purchase("-bad", 1, "nope"), 400, INVALID_REQUEST);
+
+        assertNothingWritten();
+    }
+
+    /** S2, U3, Z1: with a valid key, a malformed skuId on purchase is 404 before the claim; nothing is stored. */
+    @Test
+    void validKeyBadSkuIdOnPurchase404() throws Exception {
+        String key = newKey();
+
+        assertText(purchase("-bad", 1, key), 404, "SKU not found");
+        assertText(purchase("a".repeat(65), 1, key), 404, "SKU not found");
+
+        assertNothingWritten();
+    }
+
+    /** S2, U3, Z1: with a valid key, a malformed skuId on create is 400 before the claim; nothing is stored. */
+    @Test
+    void validKeyBadSkuIdOnCreate400() throws Exception {
+        String key = newKey();
+
+        assertText(create("-bad", 1, key), 400, INVALID_REQUEST);
+        assertText(create("a".repeat(65), 1, key), 400, INVALID_REQUEST);
+
+        assertNothingWritten();
+    }
+
+    /** S3: two Idempotency-Key headers reach the service comma-joined and fail the format check. */
+    @ParameterizedTest
+    @EnumSource(Post.class)
+    void duplicateKeyHeaders400(Post op) throws Exception {
+        assertText(send(post(op.path, "widget")
+                        .accept(MediaType.APPLICATION_JSON)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(quantityJson(1))
+                        .header("Idempotency-Key", newKey(), newKey())),
+                400, INVALID_REQUEST);
+
+        assertNothingWritten();
+    }
+
+    /** X1, W2, Z1: a 40001 at commit of the keyed transaction retries claim and write in a new transaction. */
+    @Test
+    void forced40001AtCommitRetriesKeyedWrite() throws Exception {
+        fault.failOnCommit("widget", 1, "40001");
+        String key = newKey();
+
+        Reply first = create("widget", 5, key);
+
+        assertItem(first, "widget", 5);
+        assertThat(fault.attempts()).isEqualTo(2);
+        assertThat(ledgerRows("widget")).isEqualTo(1);
+        assertThat(keyRows()).isEqualTo(1);
+        assertThat(create("widget", 5, key)).isEqualTo(first);
+        assertThat(ledgerRows("widget")).isEqualTo(1);
+    }
+
+    /** X1, Z1: keyed writes run at SERIALIZABLE; the trigger raises P0001 for a ledger insert at any other level. */
+    @Test
+    void keyedWritesRunAtSerializable() throws Exception {
+        fault.failUnlessSerializable("widget");
+
+        assertItem(create("widget", 5, newKey()), "widget", 5);
+        assertItem(purchase("widget", 2, newKey()), "widget", 3);
+
+        assertThat(fault.attempts()).isEqualTo(2);
+        assertThat(ledgerRows("widget")).isEqualTo(2);
+        assertThat(keyRows()).isEqualTo(2);
     }
 
     // ---- G8: without the header nothing changes ----

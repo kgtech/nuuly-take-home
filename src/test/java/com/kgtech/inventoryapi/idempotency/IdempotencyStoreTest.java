@@ -22,7 +22,8 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
  * R2, G14, S8, T1, Y4: claim, replay, mismatch and expiry against Postgres, with {@code execute} run inside a
- * SERIALIZABLE TransactionTemplate as the service runs it (X1). Not @Transactional: each call commits.
+ * SERIALIZABLE TransactionTemplate as the @Idempotent interceptor runs it (X1, Z1). Not @Transactional: each call
+ * commits.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)

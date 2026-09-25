@@ -48,14 +48,14 @@ class StockWriteRetryTest {
 
     /** The two stock writes; purchase runs against 10 seeded units, add against a new SKU. */
     enum Op {
-        ADD((service, sku) -> service.add(sku, 4), 0, 4),
-        PURCHASE((service, sku) -> service.purchase(sku, 4), 10, 6);
+        ADD((service, sku) -> service.add(sku, 4, null), 0, 4),
+        PURCHASE((service, sku) -> service.purchase(sku, 4, null), 10, 6);
 
-        final BiFunction<InventoryService, String, StockOutcome> call;
+        final BiFunction<InventoryService, String, WriteResult> call;
         final long seed;
         final long expectedBalance;
 
-        Op(BiFunction<InventoryService, String, StockOutcome> call, long seed, long expectedBalance) {
+        Op(BiFunction<InventoryService, String, WriteResult> call, long seed, long expectedBalance) {
             this.call = call;
             this.seed = seed;
             this.expectedBalance = expectedBalance;
@@ -123,7 +123,7 @@ class StockWriteRetryTest {
     }
 
     private void assertRetriedOnceInNewTransaction(Op op, String sku, long rowsBefore) {
-        StockOutcome outcome = op.call.apply(service, sku);
+        WriteResult outcome = op.call.apply(service, sku);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(op.expectedBalance));
         assertThat(fault.attempts()).isEqualTo(2);
@@ -157,7 +157,7 @@ class StockWriteRetryTest {
         String sku = newSku("retry-deadlock", 0);
         fault.failOnInsert(sku, 1, DEADLOCK_DETECTED);
 
-        StockOutcome.Add outcome = service.add(sku, 4);
+        WriteResult outcome = service.add(sku, 4, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.Ok(4));
         assertThat(fault.attempts()).isEqualTo(2);
@@ -173,7 +173,7 @@ class StockWriteRetryTest {
         String sku = newSku("noretry", 0);
         fault.failOnInsert(sku, 1000, LOCK_NOT_AVAILABLE);
 
-        assertThatThrownBy(() -> service.add(sku, 4))
+        assertThatThrownBy(() -> service.add(sku, 4, null))
                 .isInstanceOf(DataAccessException.class)
                 .satisfies(thrown -> assertThat(NestedExceptionUtils.getMostSpecificCause(thrown))
                         .isInstanceOfSatisfying(SQLException.class,
@@ -202,12 +202,35 @@ class StockWriteRetryTest {
         String sku = newSku("exhausted", 0);
         fault.failOnInsert(sku, 1000, SERIALIZATION_FAILURE);
 
-        assertThatThrownBy(() -> service.add(sku, 4))
+        assertThatThrownBy(() -> service.add(sku, 4, null))
                 .satisfies(thrown -> assertRootSqlState(thrown, SERIALIZATION_FAILURE));
 
         assertThat(fault.attempts()).isEqualTo(MAX_RETRIES + 1);
         assertThat(ledgerRows(sku)).isZero();
         assertThat(skuRows(sku)).isZero();
+        assertThat(output.getAll().lines())
+                .as(output.getAll())
+                .anyMatch(line -> line.contains("ERROR") && line.contains("Stock write retries exhausted for SKU " + sku));
+    }
+
+    /**
+     * AC8, W2 with an Idempotency-Key: the retry wraps the @Idempotent interceptor, so every attempt claims again and
+     * the exhausted retries log the SKU at ERROR. Nothing is stored against the key and no ledger row is written.
+     */
+    @Test
+    void keyedExhaustedRetriesLogSku(CapturedOutput output) {
+        String sku = newSku("keyed-exhausted", 0);
+        String key = UUID.randomUUID().toString();
+        fault.failOnInsert(sku, 1000, SERIALIZATION_FAILURE);
+
+        assertThatThrownBy(() -> service.add(sku, 4, key))
+                .satisfies(thrown -> assertRootSqlState(thrown, SERIALIZATION_FAILURE));
+
+        assertThat(fault.attempts()).isEqualTo(MAX_RETRIES + 1);
+        assertThat(ledgerRows(sku)).isZero();
+        assertThat(skuRows(sku)).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM idempotency_keys WHERE idempotency_key = ?::uuid")
+                .param(key).query(Long.class).single()).isZero();
         assertThat(output.getAll().lines())
                 .as(output.getAll())
                 .anyMatch(line -> line.contains("ERROR") && line.contains("Stock write retries exhausted for SKU " + sku));
@@ -229,8 +252,8 @@ class StockWriteRetryTest {
                         .isInstanceOfSatisfying(SQLException.class,
                                 sql -> assertThat(sql.getSQLState()).isEqualTo("P0001")));
 
-        assertThat(service.add(sku, 5)).isEqualTo(new StockOutcome.Ok(5));
-        assertThat(service.purchase(sku, 2)).isEqualTo(new StockOutcome.Ok(3));
+        assertThat(service.add(sku, 5, null)).isEqualTo(new StockOutcome.Ok(5));
+        assertThat(service.purchase(sku, 2, null)).isEqualTo(new StockOutcome.Ok(3));
         assertThat(ledgerRows(sku)).isEqualTo(2);
     }
 }

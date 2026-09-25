@@ -1,7 +1,7 @@
 package com.kgtech.inventoryapi.idempotency;
 
 /** Result of a keyed write: run now, replayed from the store, or rejected (S8, T1). */
-public sealed interface KeyedResult {
+sealed interface KeyedResult {
 
     record Executed(StoredResponse response) implements KeyedResult {
     }

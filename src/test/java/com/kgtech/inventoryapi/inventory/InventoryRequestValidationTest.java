@@ -28,8 +28,9 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 /**
- * Request validation at the HTTP edge: G13/G3 bodies (AC3), G11/S2 skuIds, G4/U3 ordering, U2/Y1 Accept handling.
- * Every 400 is text/plain "Invalid request" and never reaches the service.
+ * Request validation at the HTTP edge: G13/G3 bodies (AC3), G4/U3 ordering, U2/Y1 Accept handling. Every body or
+ * Accept 400 is text/plain "Invalid request" and never reaches the service. G11/S2 (Z1): the controller passes a
+ * malformed skuId to the service unchanged and maps the service's outcome; the no-I/O check is in the service tests.
  */
 @WebMvcTest(InventoryController.class)
 class InventoryRequestValidationTest {
@@ -50,17 +51,17 @@ class InventoryRequestValidationTest {
 
         void stubOk(InventoryService service, String skuId, int quantity) {
             if (this == CREATE) {
-                when(service.add(skuId, quantity)).thenReturn(new StockOutcome.Ok(quantity));
+                when(service.add(skuId, quantity, null)).thenReturn(new StockOutcome.Ok(quantity));
             } else {
-                when(service.purchase(skuId, quantity)).thenReturn(new StockOutcome.Ok(quantity));
+                when(service.purchase(skuId, quantity, null)).thenReturn(new StockOutcome.Ok(quantity));
             }
         }
 
         void verifyCalled(InventoryService service, String skuId, int quantity) {
             if (this == CREATE) {
-                verify(service).add(skuId, quantity);
+                verify(service).add(skuId, quantity, null);
             } else {
-                verify(service).purchase(skuId, quantity);
+                verify(service).purchase(skuId, quantity, null);
             }
         }
     }
@@ -184,24 +185,30 @@ class InventoryRequestValidationTest {
 
     @ParameterizedTest
     @MethodSource("invalidSkuIds")
-    void createWithInvalidSkuIdReturns400(String skuId) throws Exception {
+    void createPassesInvalidSkuIdToServiceAndReturns400(String skuId) throws Exception {
+        when(service.add(skuId, 5, null)).thenReturn(new WriteResult.InvalidRequest());
+
         expectInvalidRequest(mvc.perform(jsonPost(Post.CREATE, skuId, VALID_BODY)));
-        verifyNoInteractions(service);
+        verify(service).add(skuId, 5, null);
     }
 
     @ParameterizedTest
     @MethodSource("invalidSkuIds")
-    void getWithInvalidSkuIdReturns404(String skuId) throws Exception {
+    void getPassesInvalidSkuIdToServiceAndReturns404(String skuId) throws Exception {
+        when(service.find(skuId)).thenReturn(Optional.empty());
+
         expectText(mvc.perform(get("/inventory/{skuId}", skuId).accept(MediaType.APPLICATION_JSON)),
                 404, "SKU not found");
-        verifyNoInteractions(service);
+        verify(service).find(skuId);
     }
 
     @ParameterizedTest
     @MethodSource("invalidSkuIds")
-    void purchaseWithInvalidSkuIdReturns404(String skuId) throws Exception {
+    void purchasePassesInvalidSkuIdToServiceAndReturns404(String skuId) throws Exception {
+        when(service.purchase(skuId, 5, null)).thenReturn(new StockOutcome.NotFound());
+
         expectText(mvc.perform(jsonPost(Post.PURCHASE, skuId, VALID_BODY)), 404, "SKU not found");
-        verifyNoInteractions(service);
+        verify(service).purchase(skuId, 5, null);
     }
 
     @Test
@@ -220,7 +227,7 @@ class InventoryRequestValidationTest {
 
     @Test
     void purchaseInvalidBodyOnMissingSkuReturns400() throws Exception {
-        when(service.purchase("missing", 0)).thenReturn(new StockOutcome.NotFound());
+        when(service.purchase("missing", 0, null)).thenReturn(new StockOutcome.NotFound());
 
         expectInvalidRequest(mvc.perform(jsonPost(Post.PURCHASE, "missing", "{\"quantity\":0}")));
         verifyNoInteractions(service);

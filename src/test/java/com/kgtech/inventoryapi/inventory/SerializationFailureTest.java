@@ -17,7 +17,7 @@ class SerializationFailureTest {
     private final SerializationFailure predicate = new SerializationFailure();
 
     private static Method method() throws NoSuchMethodException {
-        return InventoryService.class.getMethod("add", String.class, int.class);
+        return InventoryService.class.getMethod("add", String.class, int.class, String.class);
     }
 
     private static PessimisticLockingFailureException lockFailure(String sqlState) {

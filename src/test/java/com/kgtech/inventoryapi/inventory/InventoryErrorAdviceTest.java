@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -73,8 +74,8 @@ class InventoryErrorAdviceTest {
             switch (this) {
                 case GET_ITEM -> when(service.find(anyString())).thenThrow(failure);
                 case LIST -> when(service.findAll()).thenThrow(failure);
-                case CREATE -> when(service.add(anyString(), anyInt())).thenThrow(failure);
-                case PURCHASE -> when(service.purchase(anyString(), anyInt())).thenThrow(failure);
+                case CREATE -> when(service.add(anyString(), anyInt(), any())).thenThrow(failure);
+                case PURCHASE -> when(service.purchase(anyString(), anyInt(), any())).thenThrow(failure);
             }
         }
     }

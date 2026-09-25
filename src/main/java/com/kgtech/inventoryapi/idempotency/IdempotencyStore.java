@@ -15,7 +15,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * already translates SQL errors, so 40001 still reaches the retry as a PessimisticLockingFailureException.
  */
 @Component
-public class IdempotencyStore {
+class IdempotencyStore {
 
     /** R2: claim the key; no row back means it already exists. */
     static final String CLAIM = """
@@ -40,7 +40,7 @@ public class IdempotencyStore {
 
     private final JdbcClient jdbc;
 
-    public IdempotencyStore(JdbcClient jdbc) {
+    IdempotencyStore(JdbcClient jdbc) {
         this.jdbc = jdbc;
     }
 
@@ -49,7 +49,7 @@ public class IdempotencyStore {
      * row: expired → Rejected; different operation, skuId or hash → Rejected; else Replayed. A missing or incomplete
      * stored row → IllegalStateException.
      */
-    public KeyedResult execute(IdempotentRequest request, Supplier<StoredResponse> action) {
+    KeyedResult execute(IdempotentRequest request, Supplier<StoredResponse> action) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("IdempotencyStore.execute needs an active transaction");
         }
