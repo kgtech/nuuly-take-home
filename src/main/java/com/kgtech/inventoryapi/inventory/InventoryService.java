@@ -13,7 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
+import com.kgtech.inventoryapi.idempotency.IdempotentRequest;
 import com.kgtech.inventoryapi.idempotency.KeyedResult;
+import com.kgtech.inventoryapi.idempotency.Operation;
 
 /**
  * Stock writes: one SERIALIZABLE transaction per attempt, retried on serialization failure (X1, W2, Y2).
@@ -55,14 +57,20 @@ class InventoryService {
     @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
             maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
     public KeyedResult add(String skuId, int quantity, UUID idempotencyKey) {
-        throw new UnsupportedOperationException("not implemented");
+        requirePositive(quantity);
+        IdempotentRequest request = new IdempotentRequest(idempotencyKey, Operation.ADD, skuId, quantity);
+        return serializable.execute(status ->
+                idempotency.execute(request, () -> responses.render(skuId, skus.add(skuId, quantity))));
     }
 
     /** Keyed purchase: claim, write and store in one SERIALIZABLE transaction per attempt (R2, X1). */
     @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
             maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
     public KeyedResult purchase(String skuId, int quantity, UUID idempotencyKey) {
-        throw new UnsupportedOperationException("not implemented");
+        requirePositive(quantity);
+        IdempotentRequest request = new IdempotentRequest(idempotencyKey, Operation.PURCHASE, skuId, quantity);
+        return serializable.execute(status ->
+                idempotency.execute(request, () -> responses.render(skuId, skus.purchase(skuId, quantity))));
     }
 
     @Transactional(readOnly = true)

@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.kgtech.inventoryapi.idempotency.IdempotencyKey;
+import com.kgtech.inventoryapi.idempotency.KeyedResult;
 
 /** The four spec operations (hand-written, D7). */
 @RestController
@@ -67,7 +68,7 @@ class InventoryController {
             return TextErrors.invalidRequest(); // S2; @Valid has already run (G4)
         }
         if (idempotencyKey != null) {
-            throw new UnsupportedOperationException("not implemented");
+            return toResponse(service.add(skuId, body.quantity(), IdempotencyKey.parse(idempotencyKey)));
         }
         return toResponse(skuId, service.add(skuId, body.quantity()));
     }
@@ -93,7 +94,7 @@ class InventoryController {
             return TextErrors.skuNotFound();
         }
         if (idempotencyKey != null) {
-            throw new UnsupportedOperationException("not implemented");
+            return toResponse(service.purchase(skuId, body.quantity(), IdempotencyKey.parse(idempotencyKey)));
         }
         return toResponse(skuId, service.purchase(skuId, body.quantity()));
     }
@@ -112,6 +113,15 @@ class InventoryController {
             case StockOutcome.NotFound _ -> TextErrors.skuNotFound();
             case StockOutcome.Insufficient _ -> TextErrors.insufficientInventory();
             case StockOutcome.Overflow _ -> TextErrors.invalidRequest();
+        };
+    }
+
+    /** First and replayed keyed responses are both rendered from the stored response (Y4). */
+    private static ResponseEntity<String> toResponse(KeyedResult result) {
+        return switch (result) {
+            case KeyedResult.Executed executed -> executed.response().toResponseEntity();
+            case KeyedResult.Replayed replayed -> replayed.response().toResponseEntity();
+            case KeyedResult.Rejected _ -> TextErrors.invalidRequest();
         };
     }
 }
