@@ -1,6 +1,10 @@
 package com.kgtech.inventoryapi.inventory;
 
+import java.math.BigInteger;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.regex.Pattern;
 
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.resilience.annotation.Retryable;
@@ -21,6 +25,16 @@ import com.kgtech.inventoryapi.idempotency.Operation;
  */
 @Service
 public class InventoryService {
+
+    /** R8: the largest page. */
+    private static final int MAX_LIMIT = 250;
+    private static final BigInteger MAX_LIMIT_BIG = BigInteger.valueOf(MAX_LIMIT);
+    /** R4, OQ3: ASCII digits with an optional sign; anything else is ignored. */
+    private static final Pattern LIMIT = Pattern.compile("[+-]?[0-9]+");
+    /** After alone returns every row after it. */
+    private static final long UNBOUNDED = Long.MAX_VALUE;
+    /** Every sku_id is non-empty, so the empty cursor starts before all of them. */
+    private static final String FIRST = "";
 
     private final SkuRepository skus;
     private final TransactionTemplate serializable;
@@ -69,7 +83,46 @@ public class InventoryService {
     /** Every SKU, or one page of them, in sku_id (COLLATE "C") order (G9, R4). */
     @Transactional(readOnly = true)
     public InventoryPage list(String limit, String after) {
-        throw new UnsupportedOperationException("not implemented");
+        OptionalInt pageSize = parseLimit(limit);
+        String cursor = truncateAtNul(after);
+        if (pageSize.isEmpty()) {
+            List<SkuQuantity> rows = cursor == null
+                    ? skus.findAllQuantities()
+                    : skus.findQuantitiesAfter(cursor, UNBOUNDED);
+            return new InventoryPage(toItems(rows), Optional.empty());
+        }
+        int n = pageSize.getAsInt();
+        List<InventoryItem> items = toItems(skus.findQuantitiesAfter(cursor == null ? FIRST : cursor, n + 1L));
+        if (items.size() <= n) {
+            return new InventoryPage(items, Optional.empty());
+        }
+        List<InventoryItem> page = items.subList(0, n);
+        return new InventoryPage(List.copyOf(page), Optional.of(new InventoryPage.Next(n, page.getLast().skuId())));
+    }
+
+    /** R4, R8, OQ3: a positive ASCII integer, clamped to 250; blank, non-numeric, zero or negative is ignored. */
+    private static OptionalInt parseLimit(String raw) {
+        if (raw == null || !LIMIT.matcher(raw).matches()) {
+            return OptionalInt.empty();
+        }
+        BigInteger value = new BigInteger(raw);
+        if (value.signum() <= 0) {
+            return OptionalInt.empty();
+        }
+        return OptionalInt.of(value.min(MAX_LIMIT_BIG).intValueExact());
+    }
+
+    /** OQ2: Postgres text cannot hold NUL; every sku_id sorts above the part before it, so cut there. */
+    private static String truncateAtNul(String after) {
+        if (after == null) {
+            return null;
+        }
+        int nul = after.indexOf('\0');
+        return nul < 0 ? after : after.substring(0, nul);
+    }
+
+    private static List<InventoryItem> toItems(List<SkuQuantity> rows) {
+        return rows.stream().map(row -> new InventoryItem(row.getSkuId(), row.getQuantity())).toList();
     }
 
     private static void requirePositive(int quantity) {

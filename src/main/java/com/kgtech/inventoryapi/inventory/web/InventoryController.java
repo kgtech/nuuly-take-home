@@ -1,6 +1,7 @@
 package com.kgtech.inventoryapi.inventory.web;
 
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
+import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import static org.springframework.http.MediaType.TEXT_PLAIN_VALUE;
 
@@ -8,6 +9,7 @@ import java.util.List;
 
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
+import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -23,8 +25,11 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
+import com.kgtech.inventoryapi.inventory.InventoryPage;
+import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
 import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
@@ -38,6 +43,9 @@ import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 @RestController
 @RequestMapping("/inventory")
 class InventoryController {
+
+    private static final String LIMIT = "limit";
+    private static final String AFTER = "after";
 
     private final InventoryService service;
 
@@ -86,11 +94,33 @@ class InventoryController {
 
     @GetMapping
     @ApiResponse(responseCode = "200", description = "List of all inventory items",
+            headers = @Header(name = LINK, description = "Next page, when there is one: <URL>; rel=\"next\"",
+                    schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE,
                     array = @ArraySchema(schema = @Schema(implementation = InventoryItem.class))))
-    ResponseEntity<List<InventoryItem>> list(@RequestParam(required = false) String limit,
-            @RequestParam(required = false) String after) {
-        throw new UnsupportedOperationException("not implemented");
+    ResponseEntity<List<InventoryItem>> list(
+            @Parameter(description = "Optional page size, 1 to 250. Larger values mean 250; other values are ignored.",
+                    schema = @Schema(type = "integer", minimum = "1", maximum = "250"))
+            @RequestParam(name = LIMIT, required = false) String limit,
+            @Parameter(description = "Optional cursor: return only SKUs whose skuId sorts after this value.",
+                    schema = @Schema(type = "string"))
+            @RequestParam(name = AFTER, required = false) String after) {
+        InventoryPage page = service.list(limit, after);
+        return page.next()
+                .map(next -> ResponseEntity.ok().header(LINK, nextLink(next)).body(page.items()))
+                .orElseGet(() -> ResponseEntity.ok(page.items()));
+    }
+
+    /** G9: absolute next-page URL from the current request; other query params dropped, after strictly encoded. */
+    private static String nextLink(Next next) {
+        String url = ServletUriComponentsBuilder.fromCurrentRequestUri()
+                .replaceQuery(null)
+                .queryParam(LIMIT, next.limit())
+                .queryParam(AFTER, "{after}")
+                .encode()
+                .buildAndExpand(next.after())
+                .toUriString();
+        return "<" + url + ">; rel=\"next\"";
     }
 
     /** Maps every write result; keyed responses (first and replayed) are sent as stored (Y4). */
