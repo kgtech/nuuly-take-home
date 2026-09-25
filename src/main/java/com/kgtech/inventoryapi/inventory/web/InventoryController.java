@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
@@ -98,17 +99,29 @@ class InventoryController {
                     schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE,
                     array = @ArraySchema(schema = @Schema(implementation = InventoryItem.class))))
-    ResponseEntity<List<InventoryItem>> list(
+    @ApiResponse(responseCode = "400", description = "Invalid request: the query string can't be decoded or repeats after",
+            content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
+    ResponseEntity<?> list(
             @Parameter(description = "Optional page size, 1 to 250. Larger values mean 250; other values are ignored.",
                     schema = @Schema(type = "integer", minimum = "1", maximum = "250"))
             @RequestParam(name = LIMIT, required = false) String limit,
-            @Parameter(description = "Optional cursor: return only SKUs whose skuId sorts after this value.",
+            @Parameter(description = "Optional cursor: return only SKUs whose skuId sorts after this value. It must not be repeated.",
                     schema = @Schema(type = "string"))
-            @RequestParam(name = AFTER, required = false) String after) {
+            @RequestParam(name = AFTER, required = false) String after,
+            HttpServletRequest request) {
+        if (isRepeated(request, AFTER)) {
+            return TextErrors.invalidRequest();
+        }
         InventoryPage page = service.list(limit, after);
         return page.next()
-                .map(next -> ResponseEntity.ok().header(LINK, nextLink(next)).body(page.items()))
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next)).body(page.items()))
                 .orElseGet(() -> ResponseEntity.ok(page.items()));
+    }
+
+    /** Z3: the cursor is one sku_id, so a second value (even an empty one) makes the request ambiguous. */
+    private static boolean isRepeated(HttpServletRequest request, String name) {
+        String[] values = request.getParameterValues(name);
+        return values != null && values.length > 1;
     }
 
     /** G9: absolute next-page URL from the current request; other query params dropped, after strictly encoded. */

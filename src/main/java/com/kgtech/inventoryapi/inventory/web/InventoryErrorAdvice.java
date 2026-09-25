@@ -3,6 +3,7 @@ package com.kgtech.inventoryapi.inventory.web;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.servlet.http.HttpServletRequest;
 
+import org.apache.tomcat.util.http.InvalidParameterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpMethod;
@@ -17,7 +18,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/** Maps every thrown error to a text/plain response (D6, S5, S6, G6, T3, U2). */
+/** Maps every thrown error to a text/plain response (D6, S5, S6, G6, T3, U2, Z3). */
 @RestControllerAdvice
 class InventoryErrorAdvice {
 
@@ -28,6 +29,13 @@ class InventoryErrorAdvice {
             HttpMediaTypeNotSupportedException.class})
     ResponseEntity<String> invalidRequest(Exception ex) {
         log.debug("Invalid request: {}", ex.getMessage());
+        return TextErrors.invalidRequest();
+    }
+
+    /** A query string Tomcat can't decode (malformed percent-escape or invalid UTF-8) is a client error (Z3). */
+    @ExceptionHandler(InvalidParameterException.class)
+    ResponseEntity<String> undecodableQuery(InvalidParameterException ex) {
+        log.debug("Undecodable query: {}", ex.getMessage());
         return TextErrors.invalidRequest();
     }
 
