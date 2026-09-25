@@ -1,5 +1,8 @@
 package com.kgtech.inventoryapi.inventory;
 
+import java.util.List;
+import java.util.Optional;
+
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.resilience.annotation.Retryable;
 import org.springframework.stereotype.Service;
@@ -33,6 +36,14 @@ class InventoryService {
     public StockOutcome.Purchase purchase(String skuId, int quantity) {
         requirePositive(quantity);
         return serializable.execute(status -> skus.purchase(skuId, quantity));
+    }
+
+    public Optional<InventoryItem> find(String skuId) {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
+    public List<InventoryItem> findAll() {
+        throw new UnsupportedOperationException("not implemented");
     }
 
     private static void requirePositive(int quantity) {
