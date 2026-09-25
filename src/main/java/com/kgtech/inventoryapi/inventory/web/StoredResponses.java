@@ -1,5 +1,6 @@
 package com.kgtech.inventoryapi.inventory.web;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
@@ -11,6 +12,8 @@ final class StoredResponses {
     }
 
     static ResponseEntity<String> toResponseEntity(StoredResponse response) {
-        throw new UnsupportedOperationException("not implemented");
+        return ResponseEntity.status(response.status())
+                .header(HttpHeaders.CONTENT_TYPE, response.contentType())
+                .body(response.body());
     }
 }

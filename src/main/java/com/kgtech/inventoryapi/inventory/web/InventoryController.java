@@ -98,7 +98,7 @@ class InventoryController {
             case NotFound _ -> TextErrors.skuNotFound();
             case Insufficient _ -> TextErrors.insufficientInventory();
             case Overflow _, InvalidRequest _ -> TextErrors.invalidRequest();
-            case Stored stored -> stored.response().toResponseEntity();
+            case Stored stored -> StoredResponses.toResponseEntity(stored.response());
         };
     }
 }
