@@ -626,11 +626,11 @@ const DECISIONS = [
 
 {id:"D1",kind:"design",q:"Java and Spring Boot versions",
  quote:{text:"build a simple inventory management API using any programming\nlanguage, framework, and data store of your choice",from:BRIEF},
- why:"Sets Jackson 3, Hibernate 7.1, Gradle floor and library versions.",
+ why:"Sets Jackson 3, Hibernate 7.x, Gradle floor and library versions.",
  by:[],
  options:[
   {k:"A",label:"Java 25 + Spring Boot 4.1.1",summary:"Current LTS and current Boot patch (Spring Framework 7).",pros:["Supported (Boot 4.1 works up to Java 26)","Current libraries"],cons:["Needs Gradle ≥ 9.1","Boot 4 moved packages and starters"],h:0.5,risk:"Low",src:["boot41","boot_req","boot40_mig","gradle_compat"],
-   rules:["Java 25 toolchain, Spring Boot 4.1.x (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.1). Use spring-boot-starter-webmvc, not -web."]},
+   rules:["Java 25 toolchain, Spring Boot 4.1.x (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.x (version from the Spring Boot BOM; 7.4.5 with Boot 4.1.1)). Use spring-boot-starter-webmvc, not -web."]},
   {k:"B",label:"Java 21 + Spring Boot 4.1.1",summary:"Older LTS.",pros:["Wider tooling support"],cons:["No reason to go older"],h:0.5,risk:"Low",src:["boot_req"],
    rules:["Java 21 toolchain, Spring Boot 4.1.x."]},
   {k:"C",label:"Java 25 + Spring Boot 4.0.x",summary:"Previous minor.",pros:["Longer in the field"],cons:["Misses 4.1 fixes"],h:0.5,risk:"Low",src:["boot_req"],
@@ -655,7 +655,7 @@ const DECISIONS = [
  why:"Decides how the atomic stock statements are written and how much persistence-context state you have to manage.",
  by:[],
  options:[
-  {k:"A",label:"Spring Data JPA (Hibernate 7.1), native queries for writes",summary:"Entities and repositories; @Modifying native @Query for upsert and purchase.",
+  {k:"A",label:"Spring Data JPA (Hibernate 7.x), native queries for writes",summary:"Entities and repositories; @Modifying native @Query for upsert and purchase.",
    pros:["Familiar repository model","Keyset scrolling built in"],cons:["Upsert and conditional update must be native SQL","Must clear the persistence context after bulk updates","UPDATE … RETURNING via @Query is undocumented"],h:1,risk:"Med",src:["sdj_mod","sdj_ret","sd_scroll"],
    rules:["Spring Data JPA for reads; native @Query for atomic writes with @Modifying(clearAutomatically = true, flushAutomatically = true)."]},
   {k:"B",label:"JdbcClient with hand-written SQL",summary:"Spring's fluent JDBC API.",pros:["The SQL you test is exactly the SQL you ship","No persistence context"],cons:["Manual row mapping"],h:0.75,risk:"Low",src:[],

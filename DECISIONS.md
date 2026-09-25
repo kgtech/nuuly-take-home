@@ -22,7 +22,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | D0 | Design | Where do AI prompts and artifacts live in the repo? | A: agent-prompts.md + CLAUDE.md + DECISIONS.md | Yes |
 | D1 | Design | Java and Spring Boot versions | A: Java 25 + Spring Boot 4.1.1 | Yes |
 | D2 | Design | Build tool | A: Gradle wrapper 9.x (Kotlin DSL) | Yes |
-| D3 | Design | Data access layer | A: Spring Data JPA (Hibernate 7.1), native queries for writes | No |
+| D3 | Design | Data access layer | A: Spring Data JPA (Hibernate 7.x), native queries for writes | No |
 | D4 | Design | How do add and purchase stay correct under concurrency? | D: SERIALIZABLE isolation + retry | No |
 | D5 | Design | How is the schema created and migrated? | A: Flyway migrations + ddl-auto=validate | Yes |
 | D6 | Design | How are errors turned into text/plain responses? | A: One @RestControllerAdvice returning text/plain | Yes |
@@ -268,7 +268,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Matched recommendation:** Yes
 - **Refined by:** S10
 - **Current rules (after refinement):**
-  - Java 25 toolchain, Spring Boot 4.1.x (built with 4.1.1; set in gradle/libs.versions.toml) (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.1). Use spring-boot-starter-webmvc, not -web. (refined by S10)
+  - Java 25 toolchain, Spring Boot 4.1.x (built with 4.1.1; set in gradle/libs.versions.toml) (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.x (version from the Spring Boot BOM; 7.4.5 with Boot 4.1.1)). Use spring-boot-starter-webmvc, not -web. (refined by S10)
 
 ## D2: Build tool
 
@@ -285,7 +285,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## D3: Data access layer
 
 - **Type:** Design choice
-- **Choice:** A: Spring Data JPA (Hibernate 7.1), native queries for writes
+- **Choice:** A: Spring Data JPA (Hibernate 7.x), native queries for writes
 - **My reasoning:** Spring Data JPA.
 - **Rejected:**
   - B: JdbcClient with hand-written SQL. Drawback noted in research: Manual row mapping.
