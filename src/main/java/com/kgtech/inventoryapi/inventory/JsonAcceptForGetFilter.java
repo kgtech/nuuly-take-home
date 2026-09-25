@@ -15,6 +15,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.server.PathContainer;
+import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -30,8 +32,18 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
         if (!HttpMethod.GET.matches(request.getMethod())) {
             return true;
         }
-        String path = request.getRequestURI().substring(request.getContextPath().length());
+        String path = routedPath(request);
         return !(path.equals(BASE) || path.startsWith(BASE + "/"));
+    }
+
+    /** requestURI minus contextPath, decoded and without ";" parameters: the path Spring matches handlers on. */
+    private static String routedPath(HttpServletRequest request) {
+        StringBuilder path = new StringBuilder();
+        for (PathContainer.Element element
+                : RequestPath.parse(request.getRequestURI(), request.getContextPath()).pathWithinApplication().elements()) {
+            path.append(element instanceof PathContainer.PathSegment segment ? segment.valueToMatch() : element.value());
+        }
+        return path.toString();
     }
 
     @Override
