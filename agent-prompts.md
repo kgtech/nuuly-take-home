@@ -451,3 +451,41 @@ Tool: Claude Code (desktop), one orchestrator and 10 subagent runs.
 **My response**
 - Mid-run I added the docs-current and no-silent-decision-change rules. After two review rounds on the version scanner, I dropped the scanner and AC3 instead of extending it again.
 - R1-4 resolved by me. The PR is left unmerged for my review.
+
+## 19. Issue #2 with sequential subagents (2026-09-24)
+
+**Prompt**
+> Implement https://github.com/kgtech/nuuly-take-home/issues/2 using sequential subagents. You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do. Verify the changes from issue-1 are merged into main and main on the local branch are up to date. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md).)
+
+Tool: Claude Code (desktop), one orchestrator and 12 subagent runs.
+
+**Output summary**
+- **Preflight:** issue #1 was merged via PR #9. Local `main` was behind and was fast-forwarded. Push, `gh`, Docker/Testcontainers and the JDK 25 toolchain all passed. No fixes needed.
+- **Plan:** branch `feat/issue-2-ledger-writes`. The planner checked the `@Retryable` attributes against the Spring 7.0.9 jar (`jitter = 5` gives 5–200 ms waits). Tests use a trigger that forces real Postgres 40001, 40P01 and 55P03 errors, raised on the statement and at commit. 9 open questions.
+- **Test author:** 34 new tests failed on stubs or assertions, as planned.
+- **Implementer:** stopped at 61/62. A real 55P03 arrives as `UncategorizedSQLException`, because spring-jdbc 7 only uses the vendor error-code table when the app ships its own `sql-error-codes.xml`. The plan had said `CannotAcquireLockException`. After my decision, the test author relaxed that test and added a mocked-repository test so the retry predicate is exercised. PR [#10](https://github.com/kgtech/nuuly-take-home/pull/10) opened green with 64 tests.
+- **Review round 1:** 4 MINOR. AC8's 500 mapping is untested (deferred to #3). The logger wrote duplicate ERROR stack traces. The index test ran EXPLAIN on copied SQL. `JpaRepository` exposed delete and save. The fixer returned 2 proposals and 1 test request, and all were implemented after my approval.
+- **Review round 2:** all 3 threads resolved; no new findings. Round 2 of fixes was skipped.
+- **Verifier:** green at 64/64. Every claimed fix SHA exists and addresses its finding. AC1–7 and AC9 are covered; AC8 is partial, with the 500 mapping deferred to #3.
+
+**Accepted**
+- The plan, with these decisions:
+  - A `MethodRetryEvent` listener logs the SKU. The 500 mapping is left to #3's catch-all.
+  - Service-level concurrent add and purchase tests are included here; #4 keeps the HTTP versions.
+  - The reads are built in this issue.
+  - `PROPAGATION_REQUIRES_NEW`.
+- 55P03 fix option 1: relax the real-Postgres test and add a mocked `CannotAcquireLockException` test. No production change.
+- Proposal A: ERROR with a stack trace only when retries run out; other failures get one WARN line with the SKU and SQLState.
+- Proposal B: `SkuRepository` extends `Repository` instead of `JpaRepository`.
+- The test request to EXPLAIN the production `ADD`/`PURCHASE` SQL.
+- Recording the AC8 500-mapping test on issue #3.
+- Posting this run's four approved decision changes on issue #2 as `[Decision change]` comments (rule added to the template after the run).
+
+**Rejected**
+- 55P03 options 2 (ship `sql-error-codes.xml`) and 3 (relax the test only).
+- Keeping the logger as planned, or dropping its non-retry branch.
+- Leaving the AC8 follow-up in the orchestrator log only.
+
+**My response**
+- On REQUIRES_NEW, I said it locks in X1-B. Tests that call the service must not be `@Transactional`; they seed data in a committed transaction and clean up afterwards.
+- I chose 55P03 option 1 because it keeps the real-Postgres coverage (D1/S11) and tests both halves of the Y2-A filter without side effects in production code.
