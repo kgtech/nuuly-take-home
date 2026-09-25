@@ -18,6 +18,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.sql.SQLException;
 
+import org.apache.tomcat.util.http.InvalidParameterException;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -151,6 +153,18 @@ class InventoryErrorAdviceTest {
                 new SQLException("could not serialize access", "40001")));
 
         expectText(mvc.perform(operation.request()), 500, "Internal server error");
+    }
+
+    /**
+     * Z3, S5: Tomcat throws InvalidParameterException when the query can't be decoded (it surfaces from the first
+     * parameter read); the advice answers 400 "Invalid request", not the catch-all's 500. The undecodable query
+     * itself is covered through real Tomcat in InventoryListMalformedQueryIntegrationTest.
+     */
+    @Test
+    void invalidParameterExceptionOnListReturns400() throws Exception {
+        Operation.LIST.failWith(service, new InvalidParameterException("Character decoding failed", 400));
+
+        expectText(mvc.perform(Operation.LIST.request()), 400, "Invalid request");
     }
 
     /** D6: ProblemDetail stays off, even when the client asks for it. */

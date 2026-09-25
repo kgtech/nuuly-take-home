@@ -2,6 +2,7 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -17,6 +18,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -33,7 +36,7 @@ import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 
 /**
- * G9, R4, OQ1: GET /inventory passes limit and after to the service as raw strings, answers a bare JSON array and,
+ * G9, R4: GET /inventory passes limit and after to the service as raw strings, answers a bare JSON array and,
  * when the service returns a next cursor, one absolute {@code Link: <…>; rel="next"} built from the request.
  */
 @WebMvcTest(InventoryController.class)
@@ -100,7 +103,7 @@ class InventoryListPagingTest {
                 .andExpect(header().stringValues(LINK, "<http://localhost/inventory?limit=2&after=B>; rel=\"next\""));
     }
 
-    /** OQ1: the Link URL is absolute and reflects the request's scheme, host and port. */
+    /** G9: the Link URL is absolute and reflects the request's scheme, host and port. */
     @Test
     void linkReflectsRequestHost() throws Exception {
         stub("2", "A", Optional.of(new Next(2, "B")));
@@ -168,6 +171,19 @@ class InventoryListPagingTest {
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().string("[]"))
                 .andExpect(header().doesNotExist(LINK));
+    }
+
+    /** Z3, S5: a repeated after is 400 text/plain "Invalid request" and the service is never called. */
+    @ParameterizedTest(name = "?{0} → 400")
+    @ValueSource(strings = {"after=A-1&after=B-2", "limit=2&after=A-1&after=B-2", "after=&after=B-2"})
+    void repeatedAfterReturns400WithoutCallingService(String query) throws Exception {
+        mvc.perform(get(URI.create("/inventory?" + query)).accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(content().string("Invalid request"))
+                .andExpect(header().doesNotExist(LINK));
+
+        verifyNoInteractions(service);
     }
 
     /** U2: a paged GET ignores Accept and still carries the Link. */

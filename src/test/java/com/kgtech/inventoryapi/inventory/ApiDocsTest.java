@@ -29,8 +29,9 @@ import com.jayway.jsonpath.JsonPath;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
- * OQ2, S6, S12: springdoc documents exactly the spec's operations, codes and media types, and its own paths keep
- * library behaviour. Same annotations as InventoryApiIntegrationTest so the context and container are reused.
+ * OQ2, S6, S12, Z3: springdoc documents exactly the spec's operations, codes (plus GET /inventory's 400) and media
+ * types, and its own paths keep library behaviour. Same annotations as InventoryApiIntegrationTest so the context
+ * and container are reused.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -75,7 +76,7 @@ class ApiDocsTest {
         "/inventory/{skuId}          | get  | 200,404",
         "/inventory/{skuId}          | post | 200,400",
         "/inventory/{skuId}/purchase | post | 200,400,404",
-        "/inventory                  | get  | 200"
+        "/inventory                  | get  | 200,400"
     })
     void eachOperationListsExactlyItsSpecCodes(String path, String method, String codes) throws Exception {
         Map<String, Object> responses = JsonPath.read(apiDocs(), "$.paths['" + path + "']." + method + ".responses");
@@ -104,7 +105,7 @@ class ApiDocsTest {
                 }
             }
         }
-        assertThat(checked).isEqualTo(8);
+        assertThat(checked).isEqualTo(9);
     }
 
     /** S6, S12: the @Hidden catch-all and override-with-generic-response=false keep 500 off the operations. */
@@ -180,6 +181,18 @@ class ApiDocsTest {
         });
         assertThat(parameters.get("after").get("schema")).isInstanceOfSatisfying(Map.class,
                 schema -> assertThat(schema.get("type")).isEqualTo("string"));
+    }
+
+    /** Z3, S12: GET /inventory documents its 400 as text/plain, and after says it must not be repeated. */
+    @Test
+    void listDocuments400AndUnrepeatableAfter() throws Exception {
+        String docs = apiDocs();
+        Map<String, Object> responses = JsonPath.read(docs, "$.paths['/inventory'].get.responses");
+        assertThat(responses).containsKey("400");
+        Map<String, Object> content = JsonPath.read(docs, "$.paths['/inventory'].get.responses['400'].content");
+
+        assertThat(content.keySet()).containsExactly(MediaType.TEXT_PLAIN_VALUE);
+        assertThat((String) listQueryParameters().get("after").get("description")).contains("must not be repeated");
     }
 
     /** G9: the 200 response documents the Link header; the other operations have none. */

@@ -241,7 +241,7 @@ class InventoryPagingIntegrationTest {
                 .andExpect(header().doesNotExist(LINK));
     }
 
-    /** R4: a repeated limit arrives as "2,3", which is not a number, so it is ignored. */
+    /** R4, Z3: a repeated limit arrives as "2,3", which is not a number, so it is ignored (unlike a repeated after). */
     @Test
     void repeatedLimitIsIgnored() throws Exception {
         seedMixed();
@@ -250,6 +250,19 @@ class InventoryPagingIntegrationTest {
         list(URI.create("/inventory?limit=2&limit=3"))
                 .andExpect(status().isOk())
                 .andExpect(content().json(unpaged, JsonCompareMode.STRICT))
+                .andExpect(header().doesNotExist(LINK));
+    }
+
+    /** Z3: a repeated after is 400 text/plain "Invalid request"; the cursor must be one sku_id. */
+    @ParameterizedTest(name = "?{0} → 400")
+    @ValueSource(strings = {"after=A-1&after=B-2", "limit=2&after=A-1&after=B-2", "after=&after=B-2"})
+    void repeatedAfterReturns400(String query) throws Exception {
+        seedMixed();
+
+        list(URI.create("/inventory?" + query))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(content().string("Invalid request"))
                 .andExpect(header().doesNotExist(LINK));
     }
 
@@ -341,7 +354,7 @@ class InventoryPagingIntegrationTest {
                 .andExpect(header().doesNotExist(LINK));
     }
 
-    /** OQ2: after is cut at the first NUL, so %00 lists everything and abc%00x is after=abc. Never 500. */
+    /** R4: after is cut at the first NUL, so %00 lists everything and abc%00x is after=abc. Never 500. */
     @ParameterizedTest(name = "{0} = {1}")
     @CsvSource(delimiter = '|', value = {
         "/inventory?after=%00          | /inventory",

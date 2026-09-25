@@ -45,10 +45,10 @@ import com.kgtech.inventoryapi.idempotency.Idempotent;
 import com.kgtech.inventoryapi.idempotency.Operation;
 
 /**
- * OQ5, G11, S2, X1, Z1, G9, R4: the service reads run in a read-only transaction, list parses limit leniently, and {@code find} and the writes reject a
- * malformed skuId before any repository or transaction access. No Docker and no Boot, so no retry or @Idempotent
- * advice; the repository and transaction manager are mocks. SkuRepository is the only path from the service to
- * Postgres, so no interaction with it means no query (NQ1).
+ * OQ5, G11, S2, X1, Z1, G9, R4: the service reads run in a read-only transaction, list parses limit leniently, and
+ * {@code find} and the writes reject a malformed skuId before any repository or transaction access. No Docker and no
+ * Boot, so no retry or @Idempotent advice; the repository and transaction manager are mocks. SkuRepository is the only
+ * path from the service to Postgres, so no interaction with it means no query (NQ1).
  */
 @SpringJUnitConfig(InventoryServiceReadTest.Config.class)
 class InventoryServiceReadTest {
@@ -138,7 +138,7 @@ class InventoryServiceReadTest {
         return rows.stream().map(r -> new InventoryItem(r.getSkuId(), r.getQuantity())).toList();
     }
 
-    /** G9, OQ5: no limit and no after keeps the unpaged query; the items are the projections in order. */
+    /** G9: no limit and no after keeps the unpaged query; the items are the projections in order. */
     @Test
     void listWithoutParamsUsesFindAllQuantities() {
         when(skus.findAllQuantities()).thenReturn(List.of(row("A", 1), row("b", Long.MAX_VALUE)));
@@ -170,7 +170,7 @@ class InventoryServiceReadTest {
     }
 
     /**
-     * R4, OQ3: limit is ASCII digits with an optional sign. Non-positive, non-numeric, blank, padded, decimal,
+     * R4: limit is ASCII digits with an optional sign. Non-positive, non-numeric, blank, padded, decimal,
      * repeated and non-ASCII-digit values are ignored: the whole table, from the unpaged query.
      */
     @ParameterizedTest
@@ -188,7 +188,7 @@ class InventoryServiceReadTest {
         verifyNoMoreInteractions(skus);
     }
 
-    /** R4, R8, OQ3: usable limits query limit + 1; anything above 250, even past int or long, is 250. */
+    /** R4, R8: usable limits query limit + 1; anything above 250, even past int or long, is 250. */
     @ParameterizedTest(name = "limit={0} → query {1}")
     @CsvSource(delimiter = '|', value = {
         "1                     | 2",
@@ -284,7 +284,7 @@ class InventoryServiceReadTest {
                 Arguments.of("a\0\0", "a"));
     }
 
-    /** OQ2: after is cut at the first NUL (Postgres rejects NUL in text); every sku_id sorts above the cut. */
+    /** R4: after is cut at the first NUL (Postgres rejects NUL in text); every sku_id sorts above the cut. */
     @ParameterizedTest
     @MethodSource
     void listTruncatesAfterAtNul(String after, String truncated) {
