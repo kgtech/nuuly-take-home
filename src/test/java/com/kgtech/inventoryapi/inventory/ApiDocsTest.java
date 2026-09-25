@@ -7,11 +7,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -112,6 +114,36 @@ class ApiDocsTest {
                 assertThat(responses).as(method + " " + path.getKey()).doesNotContainKeys("500", "default");
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> idempotencyKeyParameters(String path, String method) throws Exception {
+        Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['" + path + "']." + method);
+        List<Map<String, Object>> parameters =
+                (List<Map<String, Object>>) operation.getOrDefault("parameters", List.of());
+        return parameters.stream().filter(p -> "Idempotency-Key".equals(p.get("name"))).toList();
+    }
+
+    /** G8, S3: both POSTs document the optional Idempotency-Key header as a UUID string. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/inventory/{skuId}", "/inventory/{skuId}/purchase"})
+    void postsDocumentOptionalIdempotencyKeyHeader(String path) throws Exception {
+        List<Map<String, Object>> parameters = idempotencyKeyParameters(path, "post");
+
+        assertThat(parameters).singleElement().satisfies(parameter -> {
+            assertThat(parameter.get("in")).isEqualTo("header");
+            assertThat(parameter.get("required")).as("required absent or false").isIn(null, false);
+            assertThat(parameter.get("schema")).isInstanceOfSatisfying(Map.class, schema -> {
+                assertThat(schema.get("type")).isEqualTo("string");
+                assertThat(schema.get("format")).isEqualTo("uuid");
+            });
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/inventory/{skuId}", "/inventory"})
+    void getsHaveNoIdempotencyKeyHeader(String path) throws Exception {
+        assertThat(idempotencyKeyParameters(path, "get")).isEmpty();
     }
 
     @Test

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
@@ -23,6 +24,7 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.resilience.annotation.Retryable;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -30,6 +32,8 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+
+import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
 
 /**
  * OQ5, G11, X1: the service reads run in a read-only transaction and {@code find} rejects a malformed skuId before
@@ -44,8 +48,9 @@ class InventoryServiceReadTest {
     static class Config {
 
         @Bean
-        InventoryService inventoryService(SkuRepository skus, PlatformTransactionManager tm) {
-            return new InventoryService(skus, tm);
+        InventoryService inventoryService(SkuRepository skus, PlatformTransactionManager tm,
+                IdempotencyStore idempotency, OutcomeResponses responses) {
+            return new InventoryService(skus, tm, idempotency, responses);
         }
     }
 
@@ -68,6 +73,12 @@ class InventoryServiceReadTest {
 
     @MockitoBean
     PlatformTransactionManager transactionManager;
+
+    @MockitoBean
+    IdempotencyStore idempotency;
+
+    @MockitoBean
+    OutcomeResponses responses;
 
     @Autowired
     InventoryService service;
@@ -145,5 +156,19 @@ class InventoryServiceReadTest {
                 .isAnnotationPresent(Transactional.class)).isFalse();
         assertThat(InventoryService.class.getMethod("purchase", String.class, int.class)
                 .isAnnotationPresent(Transactional.class)).isFalse();
+    }
+
+    /** X1, Y2: the keyed overloads carry the same @Retryable as the unkeyed writes and no @Transactional. */
+    @Test
+    void keyedWriteMethodsRetryLikeUnkeyedAndHaveNoTransactionalAnnotation() throws Exception {
+        for (String name : List.of("add", "purchase")) {
+            var unkeyed = InventoryService.class.getMethod(name, String.class, int.class);
+            var keyed = InventoryService.class.getMethod(name, String.class, int.class, UUID.class);
+
+            assertThat(keyed.isAnnotationPresent(Transactional.class)).as(name).isFalse();
+            assertThat(keyed.getAnnotation(Retryable.class)).as(name)
+                    .isNotNull()
+                    .isEqualTo(unkeyed.getAnnotation(Retryable.class));
+        }
     }
 }

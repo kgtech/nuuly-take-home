@@ -37,13 +37,15 @@ class InventoryApplicationTests {
     }
 
     @Test
-    void flywayAppliedOnlyV1Successfully() {
+    void flywayAppliedV1AndV2Successfully() {
         MigrationInfo[] applied = flyway.info().applied();
 
-        assertThat(applied).hasSize(1);
+        assertThat(applied).hasSize(2);
         assertThat(applied[0].getVersion().getVersion()).isEqualTo("1");
         assertThat(applied[0].getDescription()).isEqualTo("inventory");
-        assertThat(applied[0].getState()).isEqualTo(MigrationState.SUCCESS);
+        assertThat(applied[1].getVersion().getVersion()).isEqualTo("2");
+        assertThat(applied[1].getDescription()).isEqualTo("idempotency");
+        assertThat(applied).allSatisfy(info -> assertThat(info.getState()).isEqualTo(MigrationState.SUCCESS));
     }
 
     @Test
@@ -54,7 +56,7 @@ class InventoryApplicationTests {
     }
 
     @Test
-    void migrationCreatesLedgerTables() {
+    void migrationsCreateLedgerAndIdempotencyTables() {
         List<String> tables = jdbc.sql("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public'
@@ -62,7 +64,7 @@ class InventoryApplicationTests {
                 .query(String.class)
                 .list();
 
-        assertThat(tables).containsExactlyInAnyOrder("sku", "inventory_ledger", "flyway_schema_history");
-        assertThat(tables).noneMatch(name -> name.startsWith("idempotency"));
+        assertThat(tables)
+                .containsExactlyInAnyOrder("sku", "inventory_ledger", "idempotency_keys", "flyway_schema_history");
     }
 }

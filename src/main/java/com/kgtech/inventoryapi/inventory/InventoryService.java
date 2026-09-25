@@ -2,6 +2,7 @@ package com.kgtech.inventoryapi.inventory;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.resilience.annotation.Retryable;
@@ -10,6 +11,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
+import com.kgtech.inventoryapi.idempotency.KeyedResult;
 
 /**
  * Stock writes: one SERIALIZABLE transaction per attempt, retried on serialization failure (X1, W2, Y2).
@@ -20,9 +24,14 @@ class InventoryService {
 
     private final SkuRepository skus;
     private final TransactionTemplate serializable;
+    private final IdempotencyStore idempotency;
+    private final OutcomeResponses responses;
 
-    InventoryService(SkuRepository skus, PlatformTransactionManager transactionManager) {
+    InventoryService(SkuRepository skus, PlatformTransactionManager transactionManager, IdempotencyStore idempotency,
+            OutcomeResponses responses) {
         this.skus = skus;
+        this.idempotency = idempotency;
+        this.responses = responses;
         this.serializable = new TransactionTemplate(transactionManager);
         serializable.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
         serializable.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -40,6 +49,20 @@ class InventoryService {
     public StockOutcome.Purchase purchase(String skuId, int quantity) {
         requirePositive(quantity);
         return serializable.execute(status -> skus.purchase(skuId, quantity));
+    }
+
+    /** Keyed add: claim, write and store in one SERIALIZABLE transaction per attempt (R2, X1). skuId stays first. */
+    @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
+            maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
+    public KeyedResult add(String skuId, int quantity, UUID idempotencyKey) {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
+    /** Keyed purchase: claim, write and store in one SERIALIZABLE transaction per attempt (R2, X1). */
+    @Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class,
+            maxRetries = 10, delay = 5, jitter = 5, multiplier = 2, maxDelay = 200)
+    public KeyedResult purchase(String skuId, int quantity, UUID idempotencyKey) {
+        throw new UnsupportedOperationException("not implemented");
     }
 
     @Transactional(readOnly = true)
