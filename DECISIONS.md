@@ -68,6 +68,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | Y3 | Spec gap | What goes into the Idempotency-Key request hash? | A: SHA-256 of (operation, skuId, quantity) after parsing | Yes |
 | Y4 | Design | How does a replayed response get its Content-Type? | A: Store content_type with status and body | Yes |
 | Z1 | Design | Where do Idempotency-Key handling, input checks and the idempotency transaction sit? | B: Service-layer @Idempotent interceptor | Yes |
+| Z2 | Design | How is the inventory feature split between web and domain code? | B: Domain package + web sub-package | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -386,6 +387,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Layered packages + actuator health. Drawback noted in research: Everything must be public.
   - C: Feature packages, no actuator. Drawback noted in research: Compose has no health check to wait on.
 - **Matched recommendation:** Yes
+- **Refined by:** Z2
+- **Current rules (after refinement):**
+  - Package by feature (inventory/, idempotency/); inventory/ is split into domain and web sub-packages (Z2). Classes are package-private unless another package uses them: domain contract types the web layer consumes are public, while persistence internals (SkuRepository, JPA entities, repository fragments) stay package-private in the domain package. (refined by Z2)
+  - Expose /actuator/health (liveness and readiness).
 
 ## R1: When a request fails, what does its Idempotency-Key remember?
 
@@ -817,4 +822,13 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: In the controller. Doesn't align with standard idempotency practices; the key should be passed through so the service can handle conversions.
   - C: MVC HandlerInterceptor. Drawback noted in research: Can't share the ledger write's transaction (G14) without an in-progress state and a 409 the spec doesn't list.
   - D: Redis in front. Drawback noted in research: A new dependency and a 409 the spec doesn't list (G10).
+- **Matched recommendation:** Yes
+
+## Z2: How is the inventory feature split between web and domain code?
+
+- **Type:** Design choice
+- **Choice:** B: Domain package + web sub-package
+- **My reasoning:** In Java, sub-packages are separate packages with no shared package-private visibility, so once inventory is split into domain and web, the domain contract types the web layer consumes (InventoryService, WriteResult, StockOutcome) must be public, while internal domain/persistence mechanics (SkuRepository, JPA entities, repository fragments) stay package-private. Refining D10 documents that public is expected at the web → domain boundary so reviews don't flag it. Splitting web (HTTP controllers, request/response DTOs, TextErrors, OutcomeResponses JSON rendering) from domain (stock business logic, SkuId validation, ledger writes) keeps a one-way dependency so the domain can't import Spring MVC or HTTP transport types. Recording it as a new card that refines D10 follows the Z1 pattern and preserves the history of why the package structure changed after review.
+- **Rejected:**
+  - A: One flat inventory package. Drawback noted in research: Web and domain code mix; nothing stops the domain importing HTTP types.
 - **Matched recommendation:** Yes

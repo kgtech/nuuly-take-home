@@ -64,7 +64,7 @@ Rules for writing code in this repo. Each rule cites the decision in DECISIONS.m
 - [D8] compose.yaml runs Postgres and compose.override.yaml adds the app, so `docker compose up --build` runs both for reviewers; spring-boot-docker-compose (developmentOnly) for bootRun. (refined by S4)
 - [D9] Integration and repository tests run against Postgres via Testcontainers 2.x (version from the Spring Boot BOM) @ServiceConnection, with the Flyway migrations. (refined by S10)
 - [D9] Include a concurrent purchase test: N ≤ 8 threads, stock M < N, assert exactly M succeed and final quantity is 0. (refined by W2)
-- [D10] Package by feature (inventory/, idempotency/). Classes are package-private unless another feature uses them.
+- [D10] Package by feature (inventory/, idempotency/); inventory/ is split into domain and web sub-packages (Z2). Classes are package-private unless another package uses them: domain contract types the web layer consumes are public, while persistence internals (SkuRepository, JPA entities, repository fragments) stay package-private in the domain package. (refined by Z2)
 - [D10] Expose /actuator/health (liveness and readiness).
 - [R6] Build scripts use the Kotlin DSL (build.gradle.kts, settings.gradle.kts).
 - [S1] Atomic writes live in a repository fragment (e.g. InventoryWrites + InventoryWritesImpl) and run through JdbcClient. Reads use Spring Data JPA.
@@ -97,3 +97,6 @@ Rules for writing code in this repo. Each rule cites the decision in DECISIONS.m
 - [Z1] The proxy order on stock writes is [Retry, Idempotency, Tx]. Stock writes return WriteResult outcome values, never exceptions, for bad input, so a 400 or 404 fires no MethodRetryEvent.
 - [Z1] InventoryService's TransactionTemplate uses ISOLATION_SERIALIZABLE and PROPAGATION_REQUIRED; before writing it throws IllegalStateException if an active transaction is not SERIALIZABLE.
 - [Z1] Test: the retry advisor wraps the idempotency advisor on InventoryService; a keyed 40001 retries the claim in a new transaction; a stock write inside a non-SERIALIZABLE transaction fails.
+- [Z2] The inventory feature has a domain package (com.kgtech.inventoryapi.inventory: InventoryService, SkuRepository, InventoryWrites/InventoryWritesImpl, Sku, SkuQuantity, StockOutcome, WriteResult, SkuId, InventoryItem, SerializationFailure, StockWriteFailureLogger) and a web package (com.kgtech.inventoryapi.inventory.web: InventoryController, InventoryErrorAdvice, JsonAcceptForGetFilter, TextErrors, InventoryQuantity, OutcomeResponses). The web layer declares no business types or enums; it imports them from the domain package. The domain package never imports Spring MVC or HTTP transport types.
+- [Z2] Header names are never string literals in code: they come from com.kgtech.inventoryapi.web.HttpConstants (e.g. IDEMPOTENCY_KEY) or Spring's HttpHeaders/MediaType constants, including in springdoc annotations.
+- [Z2] Controllers static-import constants and import nested types, so method bodies and annotations use no qualified names (e.g. case Ok ok ->, APPLICATION_JSON_VALUE).
