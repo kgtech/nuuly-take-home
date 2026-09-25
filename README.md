@@ -85,6 +85,7 @@ These are out of scope for the 24-hour build.
 - [`CLAUDE.md`](CLAUDE.md): coding rules for the AI agent, each tied to a decision ID.
 - [`agent-prompts.md`](agent-prompts.md): each prompt, a summary of the output, what I accepted or rejected, and my response.
 - [`ai/decision-board.html`](ai/decision-board.html): the interactive board I used to make the decisions. Open it in a browser. It opens without my choices, which are recorded in DECISIONS.md.
+- [`ai/export-board.mjs`](ai/export-board.mjs): runs the board's own export functions headless to regenerate DECISIONS.md and CLAUDE.md from the board's saved choices.
 - [`ai/decision-review.md`](ai/decision-review.md): inconsistencies found by a parallel AI review of the decisions, with how each was resolved.
 - [`ai/github-issues.md`](ai/github-issues.md): the build broken into eight GitHub stories in build order, each tied to its decisions.
 - [`ai/research-sources.md`](ai/research-sources.md): the sources behind each option, including unverified claims and the test that would prove each one.
