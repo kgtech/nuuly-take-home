@@ -245,7 +245,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Refined by:** S6, U2, Z3, C1
 - **Current rules (after refinement):**
   - No authentication.
-  - The spec's /inventory/** operations return only the status codes the spec lists for them (GET /inventory also answers 400 "Invalid request" for a query string that can't be decoded or repeats after, Z3; a request Tomcat rejects before routing, such as a malformed percent-escape in the path, answers 400 "Invalid request" on any operation, C1; 500 only for server faults, body "Internal server error"). Other requests under /inventory/** keep standard HTTP codes (404/405; GET ignores Accept, POST answers 400; see U2) with text/plain bodies. Unknown paths follow the same standard-code rule. /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect, Spring Boot's JSON error body), except that a request Tomcat rejects before routing is text/plain (C1). (refined by S6, U2, Z3, C1)
+  - The spec's /inventory/** operations return only the status codes the spec lists for them (GET /inventory also answers 400 "Invalid request" for a query string that can't be decoded or repeats after, Z3; a request Tomcat rejects before routing, such as a malformed percent-escape in the path, answers 400 "Invalid request" on any operation, C1; 500 only for server faults, body "Internal server error"). Other requests under /inventory/** keep standard HTTP codes (404/405; GET ignores Accept, POST answers 400; see U2) with text/plain bodies. Unknown paths follow the same standard-code rule. /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect, Spring Boot's JSON error body), except that a request Tomcat rejects before routing, or a query string Tomcat can't decode, is text/plain (C1). (refined by S6, U2, Z3, C1)
 
 ## D0: Where do AI prompts and artifacts live in the repo?
 
@@ -583,7 +583,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Refined by:** T3, C1
 - **Current rules (after refinement):**
   - The advice has one @Hidden @ExceptionHandler(Exception.class): log the stack trace at ERROR and return 500 text/plain "Internal server error". If the exception is an ErrorResponse, use its status and G6's fixed text, or the status's standard reason phrase when G6 has none. (refined by T3)
-  - G10 and the text/plain error contract cover /inventory/** and every other path except /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**). On those library paths InventoryErrorAdvice rethrows the exception, so their errors keep library behaviour (Spring Boot's /error JSON, an empty 406, health 503 when DOWN, the Swagger UI redirect). A request Tomcat rejects before routing is text/plain on every path (C1). (refined by C1)
+  - G10 and the text/plain error contract cover /inventory/** and every other path except /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**). On those library paths InventoryErrorAdvice rethrows the exception, so their errors keep library behaviour (Spring Boot's /error JSON, an empty 406, health 503 when DOWN, the Swagger UI redirect), except an undecodable query string, which gets 400 text/plain "Invalid request" on every path. A request Tomcat rejects before routing is text/plain on every path (C1). (refined by C1)
 
 ## S7: Where does the one complete add statement (with the G12 overflow guard) and the purchase statement (with RETURNING) get written down?
 
@@ -856,12 +856,17 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A2: Catch and ignore both parameters. Drawback noted in research: One bad unrelated parameter drops a valid limit.
   - C: Leave the 500. Drawback noted in research: A client error answers 500, against G10.
 - **Matched recommendation:** No
+- **Refined by:** C1
+- **Current rules (after refinement):**
+  - InventoryErrorAdvice maps Tomcat's InvalidParameterException (a malformed percent-escape or invalid UTF-8 in the query) to 400 "Invalid request" text/plain, ahead of the catch-all, on every path including /actuator/** and the springdoc paths, and logs one WARN line with the method and path and no stack trace (C1). A repeated after on GET /inventory returns the same 400; a repeated limit is still ignored (R4). (refined by C1)
+  - The GET /inventory OpenAPI operation documents the 400 (text/plain "Invalid request"), and the after parameter's description says it must not be repeated.
+  - Test the undecodable query through a real server (RANDOM_PORT, raw HTTP), since MockMvc doesn't decode the query; test a repeated after, and assert the documented 400 in ApiDocsTest.
 
 ## C1: How are errors that Spring MVC never sees, and errors on library paths, rendered?
 
 - **Type:** Spec gap
 - **Choice:** A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths
-- **My reasoning:** Approved.
+- **My reasoning:** Approved. Undecodable query (PR #31 R1-2): I want the error to be logged in the logs. I want the 400 text response. Use warning instead of error and stack. And I want to apply this across all paths.
 - **Rejected:**
   - B: Leave Tomcat's HTML pages; document them. Drawback noted in research: Breaks D6/S5 (every error is text/plain) and G11's 404 for GET /inventory/A%2FB.
   - C: Hard-code the Allow lists in the valve for TRACE. Drawback noted in research: A second copy of the routing that drifts from the controller.
