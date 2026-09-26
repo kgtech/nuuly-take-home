@@ -927,3 +927,56 @@ Tool: Claude Code (desktop), one orchestrator and 12 subagent runs.
 - Asked to delete the stale draft in the issue-4 worktree.
 - On R1-2, revisited: "The port is 8080 we should reflect the correct port in documentation."
 - "Fix inputs.files in this pr. Approve section 26".
+
+## 27. Issue #21 with sequential subagents: critique fix C-01, C-06, C-07 (2026-09-26)
+
+**Prompt**
+> Implement https://github.com/kgtech/nuuly-take-home/issues/21 using sequential subagents. You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md). Run as step 6 of the codebase critique; see the critique entry.)
+
+Tool: Claude Code (desktop), one orchestrator and 10 subagent runs.
+
+**Output summary**
+- **Plan:**
+  - Branch `feat/issue-21-container-text-errors`.
+  - Replace Tomcat's host `ErrorReportValve` with a text/plain `TextErrorReportValve`.
+  - Set `encodedSolidusHandling=passthrough` so `/inventory/A%2FB` reaches the skuId check (404/400).
+  - Route TRACE through Spring MVC (`allowTrace=true` plus a `dispatcherServlet` whose `doTrace` only calls `processRequest`).
+  - Have `InventoryErrorAdvice` rethrow on `/actuator/**` and the springdoc paths.
+  - No new dependencies. 10 open questions, all resolved by the planner's recommendations.
+- **Decision change (board, S9):**
+  - The unchanged board reproduced `DECISIONS.md` and `CLAUDE.md` byte for byte.
+  - Added decision C1 (round 12, codebase critique) and refined S6, G10, R3 and S5.
+  - Regenerated the exports, republished the board, and posted a `[Decision change]` comment on issue #21.
+- **Test author:**
+  - Added `RawHttp` and three real-server test classes (Tomcat rejections, TRACE, library paths), plus MockMvc rows.
+  - 50 new tests failed at baseline on assertions.
+  - Compared `Allow` headers as sets, and added CONNECT, bad-method-token and `{}`-body cases the plan's table implied.
+- **Implementer:**
+  - Stopped once on a test that expected "HTTP Version Not Supported". The reason phrase T3 requires is "HTTP Version not supported", so the test author fixed the test.
+  - Green at 770; the compose smoke passed. Opened PR [#31](https://github.com/kgtech/nuuly-take-home/pull/31).
+- **Review round 1:** 2 MINOR, 1 NIT.
+  - R1-1: no `agent-prompts.md` entry (added here).
+  - R1-2: rethrowing an undecodable query on library paths made Tomcat log an ERROR with a stack trace.
+  - R1-3: the `A%252FB` row was not an encoded-slash case.
+- **Decision change (R1-2):**
+  - An undecodable query now returns 400 text/plain "Invalid request" on every path, library paths included, with one WARN line (method and path, no stack trace). It is never rethrown.
+  - C1 amended and Z3 refined; exports regenerated, board republished, second `[Decision change]` comment on #21.
+  - The test author changed the library-path test and added a log assertion; the fixer changed `undecodableQuery`. Green at 773.
+  - The 400 fires only where a handler reads the query: `/v3/api-docs?x=%zz` returns 200.
+- **Review round 2:** no new findings. R1-2 and R1-3 resolved. No BLOCKER or MAJOR remained, so round 2 of fixes was skipped.
+- **Verifier:** green at 773, HEAD equals the PR head, no CI checks configured, every fix SHA addresses its finding, and the decision docs match the code.
+
+**Accepted**
+- The plan with the planner's recommendations for OQ1–OQ10, including C1 and the S6/G10/R3/S5 refinements.
+- R1-2: 400 text/plain and one WARN line on every path for an undecodable query.
+- R1-3: the double-encoded slash moved to its own test.
+
+**Rejected**
+- R1-2 proposal as the fixer wrote it: `response.sendError(400)` on library paths so Spring Boot renders its JSON 400 without a Tomcat ERROR log.
+- The planner's OQ5 resolution (accept Spring Boot's JSON 400 and Tomcat's ERROR log on library paths), reversed by the R1-2 decision.
+
+**My response**
+- Approved the plan: "Approved."
+- On R1-2: "The error could be logged to the logging service, so any engineer would be able to see the error in the logs. I'm not as concerned about getting the log to Tomcat."
+- Then: "That isn't what I asked for. I want the error to be logged in the logs. I want the 400 text response."
+- Then: "Use warning instead of error and stack. So we only want the warning. And I want to apply this across all paths. So we get the warning logs."

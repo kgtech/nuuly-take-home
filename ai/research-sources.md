@@ -59,7 +59,7 @@ Sources behind the decision board (checked 2026-09-23). "Unverified" claims incl
 | [PostgreSQL docs: an index supports one collation per column; queries in another collation can't use it](https://www.postgresql.org/docs/current/indexes-collations.html) | Verified | G11 |  |
 | [Java 25 String.compareTo: compares UTF-16 char values (matches "C" order for ASCII)](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/lang/String.html#compareTo(java.lang.String)) | Verified | G11 |  |
 | [Shopify Help Center: "SKUs are case-sensitive"](https://help.shopify.com/en/manual/products/details/sku) | Verified | G1 |  |
-| [An encoded slash (%2F) in the path segment is rejected by the embedded Tomcat by default](https://tomcat.apache.org/tomcat-11.0-doc/config/http.html) | **Unverified** | G11 | GET /inventory/a%2Fb; assert the status and whether your handler is ever reached. |
+| [An encoded slash (%2F) in the path segment is rejected by the embedded Tomcat by default](https://tomcat.apache.org/tomcat-11.0-doc/config/http.html) | Verified | G11, C1 | Verified: Tomcat 11.0.24 rejects %2F with 400 before the servlet (encodedSolidusHandling=reject); the app sets passthrough (C1). Test: TomcatRejectionIntegrationTest. |
 | [Google AIP-158: "Adding pagination to an existing RPC is a backwards-incompatible change"](https://google.aip.dev/158) | Verified | G9 |  |
 | [Google AIP-180: new client-populated fields must default to the previous behaviour](https://google.aip.dev/180) | Verified | G8, G9 |  |
 | [Azure REST guidelines: adding paging later is breaking; list response as object with nextLink](https://github.com/microsoft/api-guidelines/blob/vNext/azure/Guidelines.md) | Verified | G9 |  |
