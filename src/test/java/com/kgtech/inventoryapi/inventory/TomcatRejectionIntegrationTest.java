@@ -111,9 +111,15 @@ class TomcatRejectionIntegrationTest {
 
     /** C1, G11: the encoded slash is part of the SKU ID, which fails the pattern: 404 like any unknown SKU. */
     @ParameterizedTest(name = "GET {0} → 404")
-    @ValueSource(strings = {"/inventory/A%2FB", "/inventory/a%2fb", "/inventory/A%2F", "/inventory/A%252FB"})
+    @ValueSource(strings = {"/inventory/A%2FB", "/inventory/a%2fb", "/inventory/A%2F"})
     void encodedSlashOnGetReturnsSkuNotFound(String path) throws IOException {
         assertText(send("GET", path, null), 404, "SKU not found");
+    }
+
+    /** G11: a double-encoded slash decodes to a literal '%' in one path segment and fails the pattern: 404. */
+    @Test
+    void doubleEncodedSlashStaysOneSegmentAndReturnsSkuNotFound() throws IOException {
+        assertText(send("GET", "/inventory/A%252FB", null), 404, "SKU not found");
     }
 
     @Test
