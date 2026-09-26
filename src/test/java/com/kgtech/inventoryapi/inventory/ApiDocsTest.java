@@ -29,6 +29,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -50,8 +51,19 @@ class ApiDocsTest {
     @Autowired
     MockMvc mvc;
 
+    /** The app's port (compose.override.yaml, README); springdoc derives the documented server URL from the request. */
+    private static final int APP_PORT = 8080;
+
+    /** Every export request and every request compared with the export is issued as if on the app's port. */
+    private static MockHttpServletRequestBuilder docsRequest(String path) {
+        return get(path).with(request -> {
+            request.setServerPort(APP_PORT);
+            return request;
+        });
+    }
+
     private String apiDocs() throws Exception {
-        return mvc.perform(get("/v3/api-docs"))
+        return mvc.perform(docsRequest("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -227,7 +239,7 @@ class ApiDocsTest {
     private static final Path OPENAPI_YAML = Path.of("openapi.yaml");
 
     private byte[] servedYamlBytes() throws Exception {
-        return mvc.perform(get("/v3/api-docs.yaml"))
+        return mvc.perform(docsRequest("/v3/api-docs.yaml"))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
@@ -287,6 +299,17 @@ class ApiDocsTest {
         Map<String, Object> json = JsonPath.read(apiDocs(), "$");
 
         assertThat(exported()).isEqualTo(json);
+    }
+
+    /** R1-2 (#8): the export declares one server, the app on port 8080, not MockMvc's default http://localhost. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void exportDeclaresServerOnPort8080() throws Exception {
+        Object servers = exported().get("servers");
+
+        assertThat(servers).as("servers").isInstanceOf(List.class);
+        assertThat((List<Map<String, Object>>) servers).singleElement()
+                .satisfies(server -> assertThat(server.get("url")).isEqualTo("http://localhost:8080"));
     }
 
     /** S5, S12: 5 error responses, each text/plain only; the 4 successes are application/json only. */
