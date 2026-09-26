@@ -26,7 +26,8 @@ import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * Maps every thrown error to a text/plain response (D6, S5, S6, G6, T3, U2, Z3), except on /actuator/** and the
- * springdoc paths, where it rethrows so Spring Boot's own error handling answers (S6, C1).
+ * springdoc paths, where it rethrows so Spring Boot's own error handling answers (S6, C1). An undecodable query string
+ * is the exception: it is answered here on every path (C1, Z3).
  */
 @RestControllerAdvice
 class InventoryErrorAdvice {
@@ -49,12 +50,14 @@ class InventoryErrorAdvice {
         return TextErrors.invalidRequest();
     }
 
-    /** A query string Tomcat can't decode (malformed percent-escape or invalid UTF-8) is a client error (Z3). */
+    /**
+     * A query string Tomcat can't decode (malformed percent-escape or invalid UTF-8) is a client error on every path,
+     * library paths included: never rethrown, so Tomcat logs no ERROR for it. One WARN line with the method and path;
+     * no stack trace and no raw query (C1, Z3).
+     */
     @ExceptionHandler(InvalidParameterException.class)
-    ResponseEntity<String> undecodableQuery(InvalidParameterException ex, HttpServletRequest request)
-            throws Exception {
-        leaveLibraryPathsToSpring(ex, request);
-        log.debug("Undecodable query: {}", ex.getMessage());
+    ResponseEntity<String> undecodableQuery(HttpServletRequest request) {
+        log.warn("Undecodable query string on {} {}", request.getMethod(), request.getRequestURI());
         return TextErrors.invalidRequest();
     }
 

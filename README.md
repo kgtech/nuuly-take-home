@@ -145,6 +145,7 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - `limit` accepts up to 250. (R8)
 - `Idempotency-Key` must be a UUID. An empty or non-UUID key returns 400. (S3)
 - Unexpected server errors return 500 with the text/plain body `Internal server error`. The contract rules apply to `/inventory` URLs and unknown paths; `/actuator/**` and the springdoc paths keep Spring Boot's own responses (JSON error bodies, `/actuator/health` 503 when the database is down, the `/swagger-ui.html` redirect). (S6)
+- A query string that can't be decoded (e.g. `?x=%zz`) returns 400 text/plain `Invalid request` on any path whose handler reads the query, `/actuator/**` and the springdoc paths included, and logs one WARN line with the method and path (no stack trace). (C1, Z3)
 - A request rejected before routing (a malformed or invalid-UTF-8 percent-escape, `%00` or `%5C` in the path, an oversized request line or header, a missing or repeated `Host`) returns 400 text/plain `Invalid request` on any path. An encoded slash is part of the SKU ID: `GET /inventory/A%2FB` returns 404 `SKU not found`. (C1)
 - An `Idempotency-Key` older than 24 hours can't be reused; sending it again returns 400. (T1)
 - Requests outside the spec's operations return the standard HTTP reason phrase as text, e.g. `Method Not Allowed`. TRACE gets the same 405 as any other unsupported method. (T3)
