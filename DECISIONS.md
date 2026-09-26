@@ -1,6 +1,6 @@
 # DECISIONS
 
-Nuuly inventory API take-home. Generated from the decision board on 2026-09-25.
+Nuuly inventory API take-home. Generated from the decision board on 2026-09-26.
 Each entry records my choice and my reasoning; rejected options list my reason, or the option's main drawback from research when I left it blank.
 
 | ID | Type | Question | Choice | Matched recommendation |
@@ -70,6 +70,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | Z1 | Design | Where do Idempotency-Key handling, input checks and the idempotency transaction sit? | B: Service-layer @Idempotent interceptor | Yes |
 | Z2 | Design | How is the inventory feature split between web and domain code? | B: Domain package + web sub-package | Yes |
 | Z3 | Spec gap | What does GET /inventory return for a query string it can't read unambiguously? | B: 400 "Invalid request" | No |
+| C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -241,10 +242,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: No auth; framework defaults. Drawback noted in research: Codes outside the contract.
   - C: Static API key header. Drawback noted in research: Adds setup for reviewers.
 - **Matched recommendation:** No
-- **Refined by:** S6, U2, Z3
+- **Refined by:** S6, U2, Z3, C1
 - **Current rules (after refinement):**
   - No authentication.
-  - The spec's /inventory/** operations return only the status codes the spec lists for them (GET /inventory also answers 400 "Invalid request" for a query string that can't be decoded or repeats after, Z3; 500 only for server faults, body "Internal server error"). Other requests under /inventory/** keep standard HTTP codes (404/405; GET ignores Accept, POST answers 400; see U2) with text/plain bodies. /actuator/** and the springdoc paths (/v3/api-docs, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect). (refined by S6, U2, Z3)
+  - The spec's /inventory/** operations return only the status codes the spec lists for them (GET /inventory also answers 400 "Invalid request" for a query string that can't be decoded or repeats after, Z3; a request Tomcat rejects before routing, such as a malformed percent-escape in the path, answers 400 "Invalid request" on any operation, C1; 500 only for server faults, body "Internal server error"). Other requests under /inventory/** keep standard HTTP codes (404/405; GET ignores Accept, POST answers 400; see U2) with text/plain bodies. Unknown paths follow the same standard-code rule. /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect, Spring Boot's JSON error body), except that a request Tomcat rejects before routing is text/plain (C1). (refined by S6, U2, Z3, C1)
 
 ## D0: Where do AI prompts and artifacts live in the repo?
 
@@ -430,9 +431,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Only spec codes, everywhere. Drawback noted in research: DELETE on an existing SKU returns 404, which is misleading.
   - C: Keep G3 as written: 400 everywhere. Drawback noted in research: GET returns a code the spec doesn't list.
 - **Matched recommendation:** Yes
-- **Refined by:** U2
+- **Refined by:** U2, C1
 - **Current rules (after refinement):**
-  - Map client errors to 400 only on the two POST operations. Outside the spec's operations keep Spring's 404/405 (GET ignores Accept; POST answers 400; see U2), with text/plain bodies. (refined by U2)
+  - Map client errors to 400 only on the two POST operations; a request Tomcat rejects before routing is 400 "Invalid request" on any method (C1). Outside the spec's operations keep Spring's 404/405 (GET ignores Accept; POST answers 400; see U2), with text/plain bodies. (refined by U2, C1)
 
 ## R4: What does GET /inventory do with a bad limit or after?
 
@@ -564,6 +565,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Write the response directly with HttpServletResponse. Drawback noted in research: Controller outcomes (R1) are return values; writing them through the servlet response is awkward and fights ResponseEntity in the idempotency replay path (G14)..
   - D: A, plus a text/plain ErrorController for /error. Drawback noted in research: About 45 more minutes for a path that should be rare once the advice has a catch-all (S6)..
 - **Matched recommendation:** Yes
+- **Refined by:** C1
+- **Current rules (after refinement):**
+  - Build every error response (advice and controller) with one helper that calls .contentType(MediaType.TEXT_PLAIN); the Tomcat error valve, which can't return a ResponseEntity, takes its body from the same helper's textFor and sets text/plain itself (C1). Never rely on content negotiation for error bodies. (refined by C1)
+  - Test each error status with Accept: application/json and assert Content-Type text/plain and the exact body.
 
 ## S6: What does a 500 look like, and which URLs does the "spec codes only" rule cover?
 
@@ -575,10 +580,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Catch-all → 500 with an empty text/plain body. Drawback noted in research: A client or reviewer sees a bare 500 with nothing to read; an empty body is harder to tell apart from the empty-body bug in S5..
   - D: 503 for database outages, 500 for the rest. Drawback noted in research: Conflicts with G10-D: 503 is not a listed code and G10 allows only 500 for faults. Priority 3 (spec over convention) says no..
 - **Matched recommendation:** Yes
-- **Refined by:** T3
+- **Refined by:** T3, C1
 - **Current rules (after refinement):**
   - The advice has one @Hidden @ExceptionHandler(Exception.class): log the stack trace at ERROR and return 500 text/plain "Internal server error". If the exception is an ErrorResponse, use its status and G6's fixed text, or the status's standard reason phrase when G6 has none. (refined by T3)
-  - G10 covers /inventory/** only. /actuator/** and springdoc paths keep library behaviour.
+  - G10 and the text/plain error contract cover /inventory/** and every other path except /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**). On those library paths InventoryErrorAdvice rethrows the exception, so their errors keep library behaviour (Spring Boot's /error JSON, an empty 406, health 503 when DOWN, the Swagger UI redirect). A request Tomcat rejects before routing is text/plain on every path (C1). (refined by C1)
 
 ## S7: Where does the one complete add statement (with the G12 overflow guard) and the purchase statement (with RETURNING) get written down?
 
@@ -851,3 +856,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A2: Catch and ignore both parameters. Drawback noted in research: One bad unrelated parameter drops a valid limit.
   - C: Leave the 500. Drawback noted in research: A client error answers 500, against G10.
 - **Matched recommendation:** No
+
+## C1: How are errors that Spring MVC never sees, and errors on library paths, rendered?
+
+- **Type:** Spec gap
+- **Choice:** A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths
+- **My reasoning:** Approved.
+- **Rejected:**
+  - B: Leave Tomcat's HTML pages; document them. Drawback noted in research: Breaks D6/S5 (every error is text/plain) and G11's 404 for GET /inventory/A%2FB.
+  - C: Hard-code the Allow lists in the valve for TRACE. Drawback noted in research: A second copy of the routing that drifts from the controller.
+  - D: Keep %2F rejected; map it in the valve. Drawback noted in research: Hand-written path parsing in a Tomcat valve.
+- **Matched recommendation:** Yes
