@@ -59,7 +59,7 @@ export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 
 ## Try it
 
-Start from an empty database (`docker compose up --build`, as above). Each command shows the expected status and body. Error bodies are `text/plain`; successful bodies are JSON.
+Start from an empty database (`docker compose up --build`, as above; if you started it before, run `docker compose down -v` first, since data survives a restart). Each command shows the expected status and body. Error bodies are `text/plain`; successful bodies are JSON.
 
 **The four operations:**
 
@@ -173,7 +173,7 @@ Nothing. Every decision in [`DECISIONS.md`](DECISIONS.md) is built, in the build
 | 5. Docker Compose, health checks and a clean-clone run | D8, S4, D10, S6 | [#13](https://github.com/kgtech/nuuly-take-home/pull/13) |
 | 6. Optional Idempotency-Key on both POSTs | G8, G14, R1, R2, R9, S3, S8, T1, U1, U3, W1, W2, X1, Y1, Y3, Y4, S11 (and Z1, Z2) | [#14](https://github.com/kgtech/nuuly-take-home/pull/14), review follow-ups [#16](https://github.com/kgtech/nuuly-take-home/pull/16) |
 | 7. Opt-in keyset paging for `GET /inventory` | G9, R4, R8, S11 (and Z3) | [#18](https://github.com/kgtech/nuuly-take-home/pull/18) |
-| 8. OpenAPI export, final README and agent-prompts.md | D7, S12, D0, S9, S10, T6, R2, T1, D4, V1 | [issue #8](https://github.com/kgtech/nuuly-take-home/issues/8) |
+| 8. OpenAPI export, final README and agent-prompts.md | D7, S12, D0, S9, S10, T6, R2, T1, D4, V1 | [#19](https://github.com/kgtech/nuuly-take-home/pull/19) |
 
 Z1 and Z2 were decided during story 6 and Z3 during story 7, and each was built in that story's pull request. R5 and T2 only settle the wording of other decisions (G4 and S2) and have nothing to build. The items under Future improvements were never part of the design.
 
