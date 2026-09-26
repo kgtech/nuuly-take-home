@@ -12,12 +12,17 @@ import static org.springframework.http.MediaType.APPLICATION_XML_VALUE;
 import static org.springframework.http.MediaType.TEXT_PLAIN;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -27,11 +32,13 @@ import com.kgtech.inventoryapi.RawHttp.Response;
 
 /**
  * S6, C1, G10 through real Tomcat: errors on /actuator/** and the springdoc paths keep library behaviour (Spring
- * Boot's /error JSON, the empty 406), while /inventory/** and unknown paths keep the text/plain contract. The /error
- * dispatch only happens in a real servlet container, so every request is written to a raw socket. Reads no tables.
+ * Boot's /error JSON, the empty 406), except an undecodable query, which is 400 text/plain on every path (C1, Z3);
+ * /inventory/** and unknown paths keep the text/plain contract. The /error dispatch only happens in a real servlet
+ * container, so every request is written to a raw socket. Reads no tables.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
+@ExtendWith(OutputCaptureExtension.class)
 class LibraryPathErrorsIntegrationTest {
 
     @LocalServerPort
@@ -78,13 +85,40 @@ class LibraryPathErrorsIntegrationTest {
         assertBootJson(send("GET", "/actuator/nope", APPLICATION_JSON_VALUE), 404, "/actuator/nope");
     }
 
-    /** OQ5: an undecodable query on a library path is Boot's JSON 400, not the inventory "Invalid request". */
-    @Test
-    void actuatorUndecodableQueryUsesBootErrorJson() throws IOException {
-        Response response = send("GET", "/actuator/health?x=%zz", APPLICATION_JSON_VALUE);
+    /** C1, Z3: an undecodable query is 400 text/plain "Invalid request" on library paths too, never Boot's JSON. */
+    @ParameterizedTest(name = "GET {0} → 400 Invalid request")
+    @ValueSource(strings = {"/actuator/health?x=%zz", "/swagger-ui.html?x=%zz"})
+    void libraryPathUndecodableQueryReturnsInvalidRequest(String target) throws IOException {
+        Response response = send("GET", target, APPLICATION_JSON_VALUE);
 
-        assertBootJson(response, 400, "/actuator/health");
-        assertThat(response.body()).isNotEqualTo("Invalid request");
+        assertThat(response.status()).as(response.toString()).isEqualTo(400);
+        assertThat(isTextPlain(response)).as(response.toString()).isTrue();
+        assertThat(response.body()).isEqualTo("Invalid request");
+    }
+
+    /**
+     * C1, Z3: an undecodable query logs exactly one WARN line from InventoryErrorAdvice with the method and path, no
+     * stack trace after it, and no Tomcat "Servlet.service() ... threw exception" ERROR.
+     */
+    @ParameterizedTest(name = "GET {0}{1} → one WARN line")
+    @CsvSource({
+        "/actuator/health, ?x=%zz",
+        "/inventory, ?after=%zz"
+    })
+    void undecodableQueryLogsOneWarnLine(String path, String query, CapturedOutput output) throws IOException {
+        Response response = send("GET", path + query, APPLICATION_JSON_VALUE);
+        assertThat(response.status()).as(response.toString()).isEqualTo(400);
+
+        List<String> lines = output.getAll().lines().toList();
+        List<String> warnings = lines.stream()
+                .filter(line -> line.contains(" WARN ") && line.contains("InventoryErrorAdvice"))
+                .toList();
+        assertThat(warnings).as(output.getAll()).singleElement()
+                .satisfies(line -> assertThat(line).contains("GET").contains(path));
+        assertThat(lines).as(output.getAll())
+                .noneMatch(line -> line.contains("Servlet.service()") || line.contains("threw exception"));
+        List<String> afterWarning = lines.subList(lines.indexOf(warnings.getFirst()) + 1, lines.size());
+        assertThat(afterWarning).as(output.getAll()).noneMatch(line -> line.startsWith("\tat "));
     }
 
     @Test
