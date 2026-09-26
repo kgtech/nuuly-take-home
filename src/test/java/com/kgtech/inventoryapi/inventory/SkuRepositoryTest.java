@@ -105,4 +105,59 @@ class SkuRepositoryTest {
                 tuple(lowerA, 0L),
                 tuple(lowerB, 4L));
     }
+
+    /**
+     * G9, D3: one page is the next {@code limit} SKUs strictly after the cursor in COLLATE "C" order, with ::bigint
+     * ledger sums (0 for a SKU without ledger rows). The unique prefix keeps other tests' rows out of the window.
+     */
+    @Test
+    void findQuantitiesAfterPagesInCCollationOrder() {
+        String prefix = "q" + suffix() + "-";
+        String upperA = prefix + "A";
+        String upperB = prefix + "B";
+        String upperZ = prefix + "Z";
+        String lowerA = prefix + "a";
+        String lowerB = prefix + "b";
+        for (String sku : List.of(lowerB, upperZ, upperA, lowerA, upperB)) {
+            seedSku(sku);
+        }
+        seedLedger(upperA, 3);
+        seedLedger(upperB, 10);
+        seedLedger(upperB, -4);
+        seedLedger(upperZ, Long.MAX_VALUE);
+        seedLedger(lowerB, 2);
+
+        assertThat(repository.findQuantitiesAfter(prefix, 3))
+                .extracting(SkuQuantity::getSkuId, SkuQuantity::getQuantity)
+                .containsExactly(tuple(upperA, 3L), tuple(upperB, 6L), tuple(upperZ, Long.MAX_VALUE));
+        assertThat(repository.findQuantitiesAfter(upperA, 2)).extracting(SkuQuantity::getSkuId)
+                .containsExactly(upperB, upperZ);
+        assertThat(repository.findQuantitiesAfter(upperZ, 2))
+                .extracting(SkuQuantity::getSkuId, SkuQuantity::getQuantity)
+                .containsExactly(tuple(lowerA, 0L), tuple(lowerB, 2L));
+    }
+
+    /** R4: after alone is the page query with an unbounded limit: every SKU after the cursor, in order. */
+    @Test
+    void findQuantitiesAfterUnboundedReturnsRest() {
+        String prefix = "r" + suffix() + "-";
+        List<String> mine = List.of(prefix + "A", prefix + "Z", prefix + "a", prefix + "b");
+        for (String sku : mine) {
+            seedSku(sku);
+        }
+
+        List<String> rest = repository.findQuantitiesAfter(prefix + "A", Long.MAX_VALUE).stream()
+                .map(SkuQuantity::getSkuId)
+                .toList();
+
+        assertThat(rest).isSorted();
+        assertThat(rest).allSatisfy(sku -> assertThat(sku).isGreaterThan(prefix + "A"));
+        assertThat(rest.stream().filter(sku -> sku.startsWith(prefix)).toList())
+                .containsExactly(prefix + "Z", prefix + "a", prefix + "b");
+    }
+
+    @Test
+    void findQuantitiesAfterBeyondLastIsEmpty() {
+        assertThat(repository.findQuantitiesAfter("\u007f", 5)).isEmpty();
+    }
 }

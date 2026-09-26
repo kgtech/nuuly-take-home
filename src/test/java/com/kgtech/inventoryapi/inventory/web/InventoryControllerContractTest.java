@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
+import com.kgtech.inventoryapi.inventory.InventoryPage;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
 
@@ -87,11 +88,11 @@ class InventoryControllerContractTest {
                         s -> when(s.purchase("widget", 3, null)).thenReturn(new StockOutcome.NotFound()),
                         404, "SKU not found"),
                 json("GET list 200", HttpMethod.GET, "/inventory", null,
-                        s -> when(s.findAll())
-                                .thenReturn(List.of(new InventoryItem("A", 1), new InventoryItem("b", 0))),
+                        s -> when(s.list(null, null)).thenReturn(new InventoryPage(
+                                List.of(new InventoryItem("A", 1), new InventoryItem("b", 0)), Optional.empty())),
                         "[{\"skuId\":\"A\",\"quantity\":1},{\"skuId\":\"b\",\"quantity\":0}]"),
                 json("GET list 200 empty", HttpMethod.GET, "/inventory", null,
-                        s -> when(s.findAll()).thenReturn(List.of()),
+                        s -> when(s.list(null, null)).thenReturn(new InventoryPage(List.of(), Optional.empty())),
                         "[]"));
     }
 

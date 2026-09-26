@@ -2,7 +2,7 @@
 
 A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring Data JPA and PostgreSQL.
 
-> Status: stories 1–6 are built: the ledger schema, SERIALIZABLE ledger writes with retries, the four spec operations with text/plain errors, concurrent add and purchase tests over HTTP against Postgres, Docker Compose with health checks, and the optional `Idempotency-Key` header on both POSTs. The spec is complete and the repo is submittable (build step 6 in [`ai/decision-review.md`](ai/decision-review.md)). The app serves springdoc-openapi 3.1.x (built with 3.1.1) annotations at `/v3/api-docs` and Swagger UI, checked by tests. Not built yet: paging (story 7), and the `openapi.yaml` export and Swagger UI instructions (story 8).
+> Status: stories 1–7 are built: the ledger schema, SERIALIZABLE ledger writes with retries, the four spec operations with text/plain errors, concurrent add and purchase tests over HTTP against Postgres, Docker Compose with health checks, the optional `Idempotency-Key` header on both POSTs, and opt-in keyset paging for `GET /inventory`. The spec is complete and the repo is submittable (build step 6 in [`ai/decision-review.md`](ai/decision-review.md)). The app serves springdoc-openapi 3.1.x (built with 3.1.1) annotations at `/v3/api-docs` and Swagger UI, checked by tests. Not built yet: the `openapi.yaml` export and Swagger UI instructions (story 8).
 
 ## Build and run
 
@@ -51,6 +51,16 @@ curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/jso
 
 The controller passes the raw header and SKU ID to the service. An `@Idempotent` interceptor on the service's stock-write methods checks the key, then the SKU ID, and then claims the key, changes stock and stores the response in one SERIALIZABLE transaction, which is retried as a whole on a serialization failure. Without a key, the service runs the same stock write on its own. (Z1)
 
+**Paging.** `GET /inventory` without parameters returns every SKU, sorted by SKU ID. Add `limit` (1–250) to get one page; when more SKUs follow, the response has a `Link` header with the next page's URL, and the last page has none:
+
+```bash
+curl -i 'localhost:8080/inventory?limit=2'
+# Link: <http://localhost:8080/inventory?limit=2&after=B-2>; rel="next"
+curl -i 'localhost:8080/inventory?limit=2&after=B-2'   # the next two SKUs after B-2
+```
+
+Every page is a plain JSON array of items. `after` is the last SKU ID of the previous page. SKUs created behind the cursor during a walk are not seen by that walk. A query string that can't be decoded (e.g. `after=%zz`) or that repeats `after` returns 400 `Invalid request`. (G9, R4, Z3)
+
 Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), Gradle 9.1+, PostgreSQL 18, Docker Compose v2.
 
 ## Assumptions
@@ -69,12 +79,12 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - Concurrent purchases never oversell, however many app instances run. (G7)
 - Both POST endpoints accept an optional `Idempotency-Key` header. Repeating a request with the same key returns the first response and doesn't change stock again. (G8)
 - Reusing an `Idempotency-Key` with a different body, SKU or endpoint returns 400. Keys expire after 24 hours and can't be reused after that. (G14)
-- The list is sorted by SKU ID. Optional `limit` and `after` query parameters page through it; without them every SKU is returned. The next page's URL is in the `Link` header. (G9)
-- There is no authentication. Each operation in the spec returns only the status codes the spec lists for it (500 only for unexpected server errors); requests outside those operations get standard HTTP codes. (G10)
+- The list is sorted by SKU ID. Optional `limit` and `after` query parameters page through it; without them every SKU is returned. `after` is exclusive: the page starts with the first SKU ID after it. The next page's absolute URL, built from the request, is in the `Link` header. (G9)
+- There is no authentication. Each operation in the spec returns only the status codes the spec lists for it, plus a 400 on `GET /inventory` for an undecodable query or a repeated `after` (500 only for unexpected server errors); requests outside those operations get standard HTTP codes. (G10, Z3)
 - A retried request with the same key returns the first response, including 404 and 400 "Insufficient inventory". Requests rejected by validation are not remembered and can be retried. (R1)
 - Two simultaneous requests with the same key produce one change; the second gets the first one's response. (R2)
 - Requests outside the spec's operations get standard HTTP codes: unknown paths 404, wrong methods 405. GET ignores the Accept header; a POST whose Accept excludes JSON returns 400 (U2). (R3)
-- Invalid paging values never cause an error: a bad `limit` is ignored, a `limit` above the maximum is reduced to it, and `after` alone returns every SKU after it. (R4)
+- Invalid paging values don't cause an error: a bad or repeated `limit` is ignored, a `limit` above the maximum is reduced to it, and `after` alone returns every SKU after it. `GET /inventory` returns 400 `Invalid request` only when its query string can't be decoded or repeats `after`. (R4, Z3)
 - `limit` accepts up to 250. (R8)
 - `Idempotency-Key` must be a UUID. An empty or non-UUID key returns 400. (S3)
 - Unexpected server errors return 500 with the text/plain body `Internal server error`. The contract rules apply to `/inventory` URLs; `/actuator/health` returns 503 when the database is down, and `/swagger-ui.html` redirects to the UI. (S6)

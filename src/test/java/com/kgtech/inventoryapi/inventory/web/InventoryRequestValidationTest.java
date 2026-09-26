@@ -29,6 +29,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
+import com.kgtech.inventoryapi.inventory.InventoryPage;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
@@ -266,7 +267,8 @@ class InventoryRequestValidationTest {
     @MethodSource
     void getIgnoresAcceptHeader(String path, String accept, String expectedJson) throws Exception {
         when(service.find(SKU)).thenReturn(Optional.of(new InventoryItem(SKU, 3)));
-        when(service.findAll()).thenReturn(List.of(new InventoryItem(SKU, 3)));
+        when(service.list(null, null))
+                .thenReturn(new InventoryPage(List.of(new InventoryItem(SKU, 3)), Optional.empty()));
 
         mvc.perform(get(path).header(ACCEPT, accept))
                 .andExpect(status().isOk())

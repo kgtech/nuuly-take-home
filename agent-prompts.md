@@ -752,3 +752,98 @@ Tool: Claude Code (desktop), one orchestrator and 7 subagent runs (plus one resu
 
 **My response**
 - Asked for a new issue and a new PR to fix the three round-3 findings after PR #14 merged with my review still pending.
+
+## 25. Issue #7 with sequential subagents (2026-09-25)
+
+**Prompt**
+> Implement https://github.com/kgtech/nuuly-take-home/issues/7 using sequential subagents. You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md).)
+
+Tool: Claude Code (desktop), one orchestrator and 13 subagent runs.
+
+**Output summary**
+- **Preflight:**
+  - Push, `gh`, Docker/Testcontainers (OrbStack), the JDK 25 toolchain and Node/Playwright all passed.
+  - Local `main` was fast-forwarded.
+  - Port 8080 was held by an unrelated local container.
+  - `agent-prompts.md` had no entries for issues #3, #4, #6 and #15. The pending draft was committed in its own docs PR, [#17](https://github.com/kgtech/nuuly-take-home/pull/17), before the run started.
+  - The issue-4 worktree was kept because it has an uncommitted `agent-prompts.md` change.
+- **Plan:**
+  - Branch `feat/issue-7-keyset-paging`.
+  - A native keyset query over `sku` (`sku_id > :after ORDER BY sku_id LIMIT :limit + 1`) that sums each page's ledger rows with `::bigint`.
+  - `InventoryService.list(String limit, String after)` returns a new `InventoryPage` with an optional `Next` cursor.
+  - The controller binds both parameters as strings and adds an absolute `Link: <…>; rel="next"` header, with `after` URL-encoded.
+  - No new dependencies and no migration. 6 open questions.
+- **Decision change (Z2):**
+  - Added `InventoryPage` to Z2's list of domain-package classes on the board.
+  - The unchanged board reproduced `DECISIONS.md` and `CLAUDE.md` byte for byte. I then regenerated both, committed them and republished the board (version 23).
+  - Posted as a `[Decision change]` comment on issue #7.
+- **Test author:**
+  - Added `InventoryPagingIntegrationTest` (Testcontainers) and `InventoryListPagingTest` (WebMvc).
+  - Added the limit-parsing table to `InventoryServiceReadTest`, and new cases to `SkuRepositoryTest`, `LedgerQueryPlanTest`, `ApiDocsTest` and `PackageBoundaryTest`.
+  - 124 tests failed on the stubs.
+- **Implementer:**
+  - Stopped on a test bug: the paging test's URI helper filled template variables by position, so `uri(null, "X")` sent `after=` instead of `after=X`.
+  - The test author fixed the helper to fill variables by name.
+  - The implementer then added the README section. The build went green at 664 tests and the compose smoke passed, including `after=%00` through real Tomcat.
+  - Opened PR [#18](https://github.com/kgtech/nuuly-take-home/pull/18).
+- **Review round 1:** 1 MAJOR, 4 NIT.
+  - R1-1 (MAJOR): a malformed percent-escape in the query string (`after=%zz`) made Tomcat throw during parameter binding, and the response was a 500.
+  - R1-2: a repeated `after` was joined with a comma.
+  - R1-3: Javadoc cited plan question IDs instead of decision IDs.
+  - R1-4: test imports were out of order.
+  - R1-5: a test Javadoc line was too long.
+  - The fixer fixed R1-3, returned a proposal for R1-1 and R1-2, and returned 2 test requests.
+- **Decision change (Z3):**
+  - New board card Z3. GET /inventory now answers 400 "Invalid request" (text/plain) for a query string it can't decode or one that repeats `after`. A repeated `limit` is still ignored.
+  - Z3 refines R4, G10 and S12. The OpenAPI output documents the 400.
+  - Same S9 flow: byte-for-byte check, regenerate, commit, republish (version 24), and an issue comment.
+  - The test author added a raw-socket Testcontainers test, repeated-`after` tests, the advice mapping test, the ApiDocs assertions, and the two round-1 NIT fixes.
+  - The fixer implemented Z3 and updated the README and PR body. The build went green at 682 tests, and the smoke passed.
+- **Review round 2:**
+  - All 5 round-1 findings were confirmed fixed.
+  - 1 new MINOR, R2-1: nothing tests that a single `after` containing a comma returns 200.
+  - No BLOCKER or MAJOR remained, so round 2 of fixes was skipped.
+- **Verifier:**
+  - Green at 682, and the compose smoke and Z3 checks passed.
+  - All 4 acceptance criteria map to passing Testcontainers tests.
+  - No CI checks are configured.
+  - R2-1 was open at that point.
+- **R2-1 follow-up:** at my request, the test author added 6 cases showing that a single `after` containing a comma (encoded or raw) is one cursor and is passed to the service unsplit. Green at 688 tests.
+- **Permission blocks:**
+  - Agents were not allowed to stop the port-8080 container, so I stopped it myself.
+  - Agents were not allowed to resolve review threads through GraphQL, so the four fixed round-1 threads stay unresolved.
+
+**Accepted**
+- The plan, with these decisions:
+  - An absolute `Link` URL built from the request.
+  - `after` cut at the first NUL.
+  - ASCII-digit `limit` parsing, capped at 250.
+  - The Z2 change, with limit parsing folded into `InventoryService`.
+  - `findAll()` replaced by `list(limit, after)`.
+- Letting agents stop the container holding port 8080.
+- Committing the missing agent-prompts entries in a separate docs PR.
+- Z3: 400 "Invalid request" for a GET /inventory query string that can't be decoded, documented in the OpenAPI.
+- A single `sku_id` cursor, where a repeated `after` returns 400.
+
+**Rejected**
+- R1-1 option A, the recommended one: ignore an undecodable `limit` or `after` and return 200.
+- R1-1 option A′: treat both parameters as absent when Tomcat can't decode the query.
+- R1-1 option C: leave the 500.
+- R1-2: document "first value wins" for a repeated `after`, the recommended option; keep the comma-joined value; add a composite cursor.
+- Committing the backlog entries on the issue-7 branch.
+- Resolving the four fixed round-1 threads.
+
+**My response**
+- Chose to let agents stop and restart `season-draft-web` for the smoke check.
+- Chose to handle the agent-prompts backlog first, approved the drafts as written, and asked for a separate docs PR.
+- On OQ2, asked for an explanation because the recommended option didn't seem to mesh with SKUs that allow `-`, then chose to truncate at NUL.
+- Approved the plan, the absolute Link URL, and the Z2 update with limit parsing folded into the service.
+- On R1-1, chose B: "Add card Z3, The Open API Spec needs to be updated to document the 400. Refine r4, g10, s12. Regenerate claude.md and decisions.md. republish board, post [decision change] on #7".
+- On R1-2, asked for `after` to be defined, then asked:
+  - what `after` does when it is repeated,
+  - how that would be documented in the OpenAPI spec,
+  - how the service interprets `after`.
+- Proposed a multi-cursor filter that pairs a non-unique sort column with a unique tie-breaker. After hearing that the list is ordered by the unique `sku_id`, chose "Single cursor; 400 if repeated".
+- When agents were blocked from stopping the container: "I've stopped season draft. Free to proceed".
+- Chose to leave the round-1 threads unresolved.
+- Asked for a test for R2-1.
