@@ -428,6 +428,31 @@ class ApiDocsTest {
         assertThat(info.get("version")).isEqualTo("1.0.0");
     }
 
+    /** R1-4 (#8): every operation is tagged "inventory", and no tag is springdoc's generated "…-controller" name. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void operationsTaggedInventory() throws Exception {
+        Map<String, Object> doc = exported();
+        Map<String, Object> paths = map(doc, "paths");
+        List<String> allTags = new ArrayList<>();
+        int checked = 0;
+        for (String path : paths.keySet()) {
+            Map<String, Object> methods = map(paths, path);
+            for (String method : methods.keySet()) {
+                Object tags = map(methods, method).get("tags");
+
+                assertThat(tags).as(method + " " + path).isEqualTo(List.of("inventory"));
+                allTags.addAll((List<String>) tags);
+                checked++;
+            }
+        }
+        for (Map<String, Object> tag : (List<Map<String, Object>>) doc.getOrDefault("tags", List.of())) {
+            allTags.add((String) tag.get("name"));
+        }
+        assertThat(checked).as("operations").isEqualTo(4);
+        assertThat(allTags).noneMatch(tag -> tag.contains("controller"));
+    }
+
     @Test
     void swaggerUiRedirectKeepsLibraryBehaviour() throws Exception {
         mvc.perform(get("/swagger-ui.html"))
