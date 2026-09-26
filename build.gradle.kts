@@ -38,6 +38,7 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.test {
     useJUnitPlatform()
     systemProperty("inventory.test.postgres-image", "postgres:${libs.versions.postgres.get()}")
-    // ApiDocsTest compares the committed export with the code: an edit to it must re-run the test (D7)
-    inputs.file("openapi.yaml").withPropertyName("openapiExport").withPathSensitivity(PathSensitivity.RELATIVE)
+    // ApiDocsTest compares the committed export with the code: an edit to it, or its removal, must re-run the test (D7).
+    // inputs.files, not inputs.file, so a missing openapi.yaml reaches the test instead of failing Gradle validation.
+    inputs.files("openapi.yaml").withPropertyName("openapiExport").withPathSensitivity(PathSensitivity.RELATIVE)
 }
