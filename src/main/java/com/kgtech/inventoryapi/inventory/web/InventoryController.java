@@ -7,13 +7,17 @@ import static org.springframework.http.MediaType.TEXT_PLAIN_VALUE;
 
 import java.util.List;
 
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.info.Info;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
@@ -40,7 +44,9 @@ import com.kgtech.inventoryapi.inventory.WriteResult;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
-/** The four spec operations (hand-written, D7). */
+/** The four spec operations (hand-written, D7), with the spec's info, operationIds and summaries. */
+@OpenAPIDefinition(info = @Info(title = "Inventory API", version = "1.0.0"))
+@Tag(name = "inventory")
 @RestController
 @RequestMapping("/inventory")
 class InventoryController {
@@ -55,6 +61,7 @@ class InventoryController {
     }
 
     @GetMapping("/{skuId}")
+    @Operation(operationId = "getInventory", summary = "Get inventory for a SKU")
     @ApiResponse(responseCode = "200", description = "Current inventory state for the sku",
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
     @ApiResponse(responseCode = "404", description = "SKU not found",
@@ -66,6 +73,7 @@ class InventoryController {
     }
 
     @PostMapping(path = "/{skuId}", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+    @Operation(operationId = "createInventory", summary = "Create or update inventory for a SKU")
     @ApiResponse(responseCode = "200", description = "Current state of the item after update",
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
     @ApiResponse(responseCode = "400", description = "Invalid request",
@@ -79,6 +87,7 @@ class InventoryController {
     }
 
     @PostMapping(path = "/{skuId}/purchase", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+    @Operation(operationId = "purchaseItem", summary = "Purchase a quantity of a SKU")
     @ApiResponse(responseCode = "200", description = "Purchase successful; remaining inventory for the item",
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
     @ApiResponse(responseCode = "400", description = "Insufficient inventory or invalid request",
@@ -94,6 +103,7 @@ class InventoryController {
     }
 
     @GetMapping
+    @Operation(operationId = "listInventory", summary = "List all inventory")
     @ApiResponse(responseCode = "200", description = "List of all inventory items",
             headers = @Header(name = LINK, description = "Next page, when there is one: <URL>; rel=\"next\"",
                     schema = @Schema(type = "string")),

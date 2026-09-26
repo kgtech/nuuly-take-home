@@ -16,6 +16,7 @@ spring:
       enabled: false                      # explicit "ProblemDetail stays off"
 springdoc:
   override-with-generic-response: false
+  writer-with-order-by-keys: true         # OQ2 (#8): byte-stable openapi.yaml export
 management:
   endpoints:
     web:

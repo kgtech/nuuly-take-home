@@ -264,7 +264,7 @@ _None yet._
 - Nothing yet.
 
 **My response**
-_U1–U3 still unanswered on the board._
+Answered U1–U3 on the board in the next session (section 12).
 
 ---
 
@@ -847,3 +847,83 @@ Tool: Claude Code (desktop), one orchestrator and 13 subagent runs.
 - When agents were blocked from stopping the container: "I've stopped season draft. Free to proceed".
 - Chose to leave the round-1 threads unresolved.
 - Asked for a test for R2-1.
+
+## 26. Issue #8 with sequential subagents (2026-09-25)
+
+**Prompt**
+> Implement https://github.com/kgtech/nuuly-take-home/issues/8 using sequential subagents. You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md).)
+
+Tool: Claude Code (desktop), one orchestrator and 12 subagent runs.
+
+**Output summary**
+- **Preflight:**
+  - Push, `gh`, Docker/Testcontainers (OrbStack), the JDK 25 toolchain and Node/Playwright all passed. Port 8080 was free.
+  - Local `main` was already at `origin/main`.
+  - Two worktrees were kept: the issue-4 worktree has an uncommitted `agent-prompts.md` draft, and a live critique session was using the other.
+- **Plan:**
+  - Branch `feat/issue-8-openapi-readme`.
+  - Most of the scope was already on `main`: springdoc 3.1.1, exactly the spec's codes plus Z3's 400, text/plain errors, int64 and int32 quantities.
+  - Still missing: the `openapi.yaml` export test and file, a README rewrite, and the "Designed, not built" section.
+  - No new dependencies. 5 open questions.
+- **DECISIONS.md check:** I dumped the board's 65 decisions and ran `ai/export-board.mjs` against the unchanged board. `DECISIONS.md` and `CLAUDE.md` matched byte for byte, so the board did not change.
+- **Test author:**
+  - Added 15 `ApiDocsTest` cases.
+  - 7 failed on `main`: the export test, sorted keys, the operationIds and summaries, and the info block.
+  - 8 already passed as regression guards.
+  - Corrected my prompt's "9 error responses" to 5 errors and 4 successes.
+- **Implementer:**
+  - Added `@Operation` operationIds and summaries matching the spec, `@OpenAPIDefinition` info "Inventory API" 1.0.0, `springdoc.writer-with-order-by-keys` and `.gitattributes eol=lf`, and committed `openapi.yaml`.
+  - Rewrote the README: prerequisites, a curl walk-through, API docs, future improvements (R2/T1, D4, V1), and "Designed, not built".
+  - Green at 703 tests, and the fresh-clone smoke passed.
+  - Opened PR [#19](https://github.com/kgtech/nuuly-take-home/pull/19).
+- **Review round 1:** 1 MAJOR, 2 MINOR, 2 NIT.
+  - R1-1 (MAJOR): `openapi.yaml` was not a Gradle test input, so a non-clean build skipped the stale-file check.
+  - R1-2: the committed `servers` URL was `http://localhost`.
+  - R1-3: the story 8 row linked the issue instead of the PR.
+  - R1-4: a generated `inventory-controller` tag.
+  - R1-5: no `docker compose down -v` hint.
+  - The fixer fixed R1-1, R1-3 and R1-5, and returned proposals for R1-2 and R1-4.
+- **Decision change (R1-4):**
+  - `@Tag(name = "inventory")` on `InventoryController`.
+  - Posted as a `[Decision change]` comment on issue #8.
+  - The test author added `operationsTaggedInventory`, and the fixer made it pass.
+  - R1-2 got a README note instead of an OpenAPI change. Green at 704 tests.
+- **Review round 2:**
+  - Resolved R1-1, R1-3, R1-4 and R1-5. R1-2 stays open by owner decision.
+  - 1 new MINOR, R2-1: `inputs.file` fails Gradle validation when `openapi.yaml` is deleted, before the test can say "regenerated; commit it".
+  - No BLOCKER or MAJOR remained, so round 2 of fixes was skipped.
+- **Verifier:**
+  - Green at 704, and the fresh-clone smoke passed by following the README alone.
+  - `openapi.yaml` is unchanged after the test runs, and `DECISIONS.md`/`CLAUDE.md` are unchanged against `main`.
+  - Every claimed fix SHA addresses its finding.
+  - No CI checks are configured.
+  - R2-1 is open, and R1-2 is open by owner decision.
+- **Follow-up after verification:**
+  - R1-2 revised: the test author made `ApiDocsTest` export as port 8080 and assert the committed `servers` URL `http://localhost:8080`. The regenerated `openapi.yaml` and the README replace the placeholder note, with no production change. Posted as a `[Decision change]` comment on issue #8.
+  - R2-1 fixed with `inputs.files`: deleting `openapi.yaml` now reaches the test's "regenerated; commit it" failure.
+  - The verifier re-ran at the new head: green at 705, the fresh-clone smoke passed, and every fix SHA was checked.
+  - Removed the stale issue-4 worktree draft and then the clean worktree.
+
+**Accepted**
+- The plan, with these decisions:
+  - OpenAPI operationIds, summaries and info aligned with the spec. OpenAPI stays 3.1.
+  - A byte-stable export: sorted keys and LF line endings.
+  - The export test always writes the file and fails if it changed.
+  - "Designed, not built" says nothing is left unbuilt and lists the rejected P1/P2 proposals as considered, not adopted.
+  - Fixing the section 11 placeholder.
+- R1-4: tag the operations `inventory`.
+- R1-2: first a README note that the committed `servers` URL is a placeholder, then the export declaring `http://localhost:8080` from a test-side request port.
+- R2-1: `inputs.files` in this PR.
+
+**Rejected**
+- OQ1 A (leave the metadata) and C (`minimum 0` on the domain `InventoryItem`, OpenAPI 3.0).
+- OQ4: "None" without the rejected proposals.
+- An entry of its own for commit `1925464`.
+- R1-2 proposal: declare `servers` as `http://localhost:8080`.
+
+**My response**
+- Chose OQ1 B, OQ3 A, OQ4 B, and fixing the section 11 placeholder only.
+- On R1-2, chose "Leave, add README note". On R1-4, chose `@Tag(name = "inventory")`.
+- Asked to delete the stale draft in the issue-4 worktree.
+- On R1-2, revisited: "The port is 8080 we should reflect the correct port in documentation."
+- "Fix inputs.files in this pr. Approve section 26".
