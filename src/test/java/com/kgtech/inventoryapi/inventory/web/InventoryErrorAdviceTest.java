@@ -25,6 +25,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -119,6 +120,28 @@ class InventoryErrorAdviceTest {
     @ParameterizedTest
     @CsvSource({"/nope", "/inventory/a/b"})
     void unknownPathReturns404NotFound(String path) throws Exception {
+        expectText(mvc.perform(get(path).accept(MediaType.APPLICATION_JSON)), 404, "Not Found");
+    }
+
+    /**
+     * S6, C1: errors on /actuator/** and the springdoc paths are left to Spring (the advice rethrows), so no
+     * text/plain body is written; MockMvc does not dispatch /error, so the body stays empty. Real-server behaviour is
+     * in LibraryPathErrorsIntegrationTest.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuator/nope", "/actuator", "/v3/api-docs/nope", "/v3/api-docs.yaml",
+        "/swagger-ui.html", "/swagger-ui/nope.js"})
+    void libraryPathErrorsAreLeftToSpring(String path) throws Exception {
+        mvc.perform(get(path).accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotFound())
+                .andExpect(content().string(""));
+    }
+
+    /** S6, C1: paths that only look like library paths keep the text/plain contract. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/actuatorx", "/v3/api-docsx", "/v3/api-docs.yaml/x", "/swagger-uix",
+        "/swagger-ui.htmlx"})
+    void lookalikePathsKeepTextPlain(String path) throws Exception {
         expectText(mvc.perform(get(path).accept(MediaType.APPLICATION_JSON)), 404, "Not Found");
     }
 
