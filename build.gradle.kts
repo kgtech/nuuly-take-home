@@ -38,4 +38,6 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.test {
     useJUnitPlatform()
     systemProperty("inventory.test.postgres-image", "postgres:${libs.versions.postgres.get()}")
+    // ApiDocsTest compares the committed export with the code: an edit to it must re-run the test (D7)
+    inputs.file("openapi.yaml").withPropertyName("openapiExport").withPathSensitivity(PathSensitivity.RELATIVE)
 }
