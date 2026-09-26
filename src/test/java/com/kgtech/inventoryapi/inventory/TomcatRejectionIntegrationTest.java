@@ -32,6 +32,7 @@ import org.springframework.boot.tomcat.TomcatWebServer;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.RawHttp;
@@ -221,7 +222,7 @@ class TomcatRejectionIntegrationTest {
                 + RawHttp.header(HOST, "localhost:" + port)
                 + RawHttp.header(CONNECTION, "close");
 
-        assertText(RawHttp.send(port, head, ""), 505, "HTTP Version Not Supported");
+        assertText(RawHttp.send(port, head, ""), 505, HttpStatus.HTTP_VERSION_NOT_SUPPORTED.getReasonPhrase());
     }
 
     @Test
