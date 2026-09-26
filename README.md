@@ -116,6 +116,7 @@ Every page is a plain JSON array of items. `after` is the last SKU ID of the pre
 - Swagger UI: http://localhost:8080/swagger-ui.html (redirects to `/swagger-ui/index.html`).
 - OpenAPI JSON: http://localhost:8080/v3/api-docs; YAML: http://localhost:8080/v3/api-docs.yaml.
 - [`openapi.yaml`](openapi.yaml) at the repo root is the committed export. `ApiDocsTest` regenerates it on every test run and fails with "openapi.yaml regenerated; commit it" when the file changed, so the committed copy always matches the code. Keys are sorted so the export is byte-stable. (D7, S12)
+- The committed file's `servers` URL, `http://localhost`, is a placeholder from the MockMvc export. Point tools at http://localhost:8080; the running app's `/v3/api-docs` reports the host and port it was requested on.
 
 The docs are generated from the hand-written controllers (code-first, springdoc-openapi). They keep the original spec's title, version, operationIds and summaries, and list exactly the status codes the spec lists for each operation, with error responses as `text/plain`. The one addition is a 400 `Invalid request` on `GET /inventory` for an undecodable query or a repeated `after` (Z3). The export is OpenAPI 3.1, where the original spec is 3.0.3.
 
