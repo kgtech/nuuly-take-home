@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: inventory-api
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  jackson:
+    mapper:
+      allow-coercion-of-scalars: false
+    deserialization:
+      accept-float-as-int: false
+      fail-on-unknown-properties: false   # explicit G13 (already the default)
+  mvc:
+    problemdetails:
+      enabled: false                      # explicit "ProblemDetail stays off"
+springdoc:
+  override-with-generic-response: false
+  writer-with-order-by-keys: true         # OQ2 (#8): byte-stable openapi.yaml export
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health                   # D10: health only
+  endpoint:
+    health:
+      probes:
+        enabled: true                     # D10: /actuator/health/liveness and /readiness
