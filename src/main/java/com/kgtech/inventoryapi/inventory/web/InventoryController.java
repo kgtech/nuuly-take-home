@@ -17,6 +17,7 @@ import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
@@ -45,6 +46,7 @@ import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
 /** The four spec operations (hand-written, D7), with the spec's info, operationIds and summaries. */
 @OpenAPIDefinition(info = @Info(title = "Inventory API", version = "1.0.0"))
+@Tag(name = "inventory")
 @RestController
 @RequestMapping("/inventory")
 class InventoryController {

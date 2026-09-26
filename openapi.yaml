@@ -50,7 +50,7 @@ paths:
             \ after"
       summary: List all inventory
       tags:
-      - inventory-controller
+      - inventory
   /inventory/{skuId}:
     get:
       operationId: getInventory
@@ -75,7 +75,7 @@ paths:
           description: SKU not found
       summary: Get inventory for a SKU
       tags:
-      - inventory-controller
+      - inventory
     post:
       operationId: createInventory
       parameters:
@@ -114,7 +114,7 @@ paths:
           description: Invalid request
       summary: Create or update inventory for a SKU
       tags:
-      - inventory-controller
+      - inventory
   /inventory/{skuId}/purchase:
     post:
       operationId: purchaseItem
@@ -160,7 +160,7 @@ paths:
           description: SKU not found
       summary: Purchase a quantity of a SKU
       tags:
-      - inventory-controller
+      - inventory
 components:
   schemas:
     InventoryItem:
