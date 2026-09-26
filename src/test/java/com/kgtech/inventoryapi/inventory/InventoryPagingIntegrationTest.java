@@ -37,9 +37,10 @@ import com.jayway.jsonpath.JsonPath;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
- * G9, R4, R8, AC1–AC4 against Postgres (S11): keyset pages over the sku table in COLLATE "C" order, balances from the
- * ledger SUM, a Link on every page but the last, and a lenient limit. Not @Transactional: every request commits its
- * own transaction, so the tables are emptied before each test.
+ * G9, R4, R8, C2, AC1–AC4 against Postgres (S11): keyset pages over the sku table in COLLATE "C" order, balances from
+ * the ledger SUM, a Link on every page but the last, a lenient limit, and a default page of 250 when limit is absent
+ * or ignored. Not @Transactional: every request commits its own transaction, so the tables are emptied before each
+ * test.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -109,11 +110,25 @@ class InventoryPagingIntegrationTest {
         return mvc.perform(get(uri).accept(MediaType.APPLICATION_JSON));
     }
 
-    private String unpagedBody() throws Exception {
+    private String defaultPageBody() throws Exception {
         return list(URI.create("/inventory"))
                 .andExpect(status().isOk())
                 .andExpect(header().doesNotExist(LINK))
                 .andReturn().getResponse().getContentAsString();
+    }
+
+    /** Seeds count SKUs p001, p002, … with no ledger rows (quantity 0); ids sort numerically in COLLATE "C". */
+    private void seedNumbered(int count) {
+        jdbc.sql("INSERT INTO sku (sku_id) SELECT 'p' || lpad(g::text, 3, '0') FROM generate_series(1, ?) g")
+                .param(count).update();
+    }
+
+    private static List<String> numbered(int from, int to) {
+        List<String> ids = new ArrayList<>();
+        for (int i = from; i <= to; i++) {
+            ids.add(String.format("p%03d", i));
+        }
+        return ids;
     }
 
     private static List<String> skuIds(String json) {
@@ -174,7 +189,7 @@ class InventoryPagingIntegrationTest {
     @ValueSource(ints = {1, 2, 3, 6, 7, 8, 250})
     void walkFollowingLinkVisitsEverySkuOnce(int limit) throws Exception {
         seedMixed();
-        String unpaged = unpagedBody();
+        String unpaged = defaultPageBody();
         assertThat(skuIds(unpaged)).containsExactlyElementsOf(MIXED);
 
         List<Page> pages = walk(uri(Integer.toString(limit), null));
@@ -227,12 +242,12 @@ class InventoryPagingIntegrationTest {
                 tuple("c.3", 1L));
     }
 
-    /** AC3, R4: an unusable limit is ignored: 200, every SKU, no Link. Never 400. */
+    /** AC3, R4, C2: an unusable limit is ignored: 200, the default page (here every SKU), no Link. Never 400. */
     @ParameterizedTest
     @ValueSource(strings = {"0", "-1", "-0", "abc", "", " ", "1.5", " 5", "5 ", "1e3", "٣"})
     void lenientLimitAlwaysReturns200(String limit) throws Exception {
         seedMixed();
-        String unpaged = unpagedBody();
+        String unpaged = defaultPageBody();
 
         list(uri(limit, null))
                 .andExpect(status().isOk())
@@ -245,7 +260,7 @@ class InventoryPagingIntegrationTest {
     @Test
     void repeatedLimitIsIgnored() throws Exception {
         seedMixed();
-        String unpaged = unpagedBody();
+        String unpaged = defaultPageBody();
 
         list(URI.create("/inventory?limit=2&limit=3"))
                 .andExpect(status().isOk())
@@ -297,8 +312,7 @@ class InventoryPagingIntegrationTest {
     @ParameterizedTest
     @ValueSource(strings = {"251", "9999", "99999999999", "99999999999999999999"})
     void limitAboveMaxIsClampedTo250(String limit) throws Exception {
-        jdbc.sql("INSERT INTO sku (sku_id) SELECT 'p' || lpad(g::text, 3, '0') FROM generate_series(1, 251) g")
-                .update();
+        seedNumbered(251);
 
         Page first = page(uri(limit, null));
 
@@ -311,7 +325,10 @@ class InventoryPagingIntegrationTest {
         assertThat(last.next()).isNull();
     }
 
-    /** AC4, R4: after alone returns every SKU after it (exclusive; the cursor need not exist) and no Link. */
+    /**
+     * AC4, R4, C2: after alone returns the SKUs after it (exclusive; the cursor need not exist), up to the default page
+     * of 250; with 7 SKUs that is all of them and no Link.
+     */
     @ParameterizedTest(name = "after={0}")
     @CsvSource(delimiter = '|', value = {
         "B-2 | C-3,Z-9,a-1,b-2,c.3",
@@ -321,7 +338,7 @@ class InventoryPagingIntegrationTest {
         "zzz | ''",
         "''  | A-1,B-2,C-3,Z-9,a-1,b-2,c.3"
     })
-    void afterAloneReturnsEverySkuAfterIt(String after, String expected) throws Exception {
+    void afterAloneReturnsSkusAfterIt(String after, String expected) throws Exception {
         seedMixed();
 
         Page page = page(uri(null, after));
@@ -356,7 +373,7 @@ class InventoryPagingIntegrationTest {
         assertThat(ids(page(uri(null, after)))).containsExactly(expected.split(","));
     }
 
-    /** G9: without params the response is today's: every SKU, a bare array, no Link. */
+    /** G9, C2: without params the response is the first page (here every SKU), a bare array, no Link. */
     @Test
     void noParamsReturnsBareArrayWithoutLink() throws Exception {
         seedMixed();
@@ -370,6 +387,81 @@ class InventoryPagingIntegrationTest {
                                 + "{\"skuId\":\"Z-9\",\"quantity\":9223372036854775807},"
                                 + "{\"skuId\":\"a-1\",\"quantity\":0},{\"skuId\":\"b-2\",\"quantity\":5},"
                                 + "{\"skuId\":\"c.3\",\"quantity\":1}]"))
+                .andExpect(header().doesNotExist(LINK));
+    }
+
+    /** C2, AC2: over 250 SKUs without limit → the first 250 and a Link with limit=250; the Link reaches the rest. */
+    @Test
+    void noParamsOver250ReturnsDefaultPageAndLink() throws Exception {
+        seedNumbered(251);
+
+        Page first = page(URI.create("/inventory"));
+
+        assertThat(ids(first)).containsExactlyElementsOf(numbered(1, 250));
+        assertThat(first.next()).isEqualTo(URI.create("http://localhost/inventory?limit=250&after=p250"));
+
+        Page last = page(first.next());
+        assertThat(ids(last)).containsExactly("p251");
+        assertThat(last.next()).isNull();
+    }
+
+    /** C2, AC2: following Link from an unpaged GET visits every SKU exactly once, in pages of 250. */
+    @Test
+    void walkWithoutLimitVisitsEverySkuOnce() throws Exception {
+        seedNumbered(600);
+
+        List<Page> pages = walk(URI.create("/inventory"));
+
+        assertThat(pages).extracting(p -> p.items().size()).containsExactly(250, 250, 100);
+        assertThat(pages.stream().flatMap(p -> ids(p).stream()).toList())
+                .containsExactlyElementsOf(numbered(1, 600))
+                .doesNotHaveDuplicates();
+        assertThat(pages.getLast().next()).isNull();
+    }
+
+    /** C2, R4: after alone is capped at 250 with a Link; following it returns the rest and no Link. */
+    @Test
+    void afterAloneOver250IsCapped() throws Exception {
+        seedNumbered(300);
+
+        Page first = page(uri(null, "p010"));
+
+        assertThat(ids(first)).containsExactlyElementsOf(numbered(11, 260));
+        assertThat(first.next()).isEqualTo(URI.create("http://localhost/inventory?limit=250&after=p260"));
+
+        Page last = page(first.next());
+        assertThat(ids(last)).containsExactlyElementsOf(numbered(261, 300));
+        assertThat(last.next()).isNull();
+    }
+
+    /** R4, C2: an ignored limit means the default page of 250, with a Link carrying limit=250. */
+    @ParameterizedTest(name = "limit={0}")
+    @ValueSource(strings = {"0", "-1", "abc", ""})
+    void ignoredLimitUsesDefaultPage(String limit) throws Exception {
+        seedNumbered(251);
+
+        Page first = page(uri(limit, null));
+
+        assertThat(ids(first)).containsExactlyElementsOf(numbered(1, 250));
+        assertThat(first.next()).isEqualTo(URI.create("http://localhost/inventory?limit=250&after=p250"));
+    }
+
+    /** C2: exactly 250 SKUs without limit fill one page, which is the last: no Link. */
+    @Test
+    void exactly250HasNoLink() throws Exception {
+        seedNumbered(250);
+
+        Page page = page(URI.create("/inventory"));
+
+        assertThat(ids(page)).containsExactlyElementsOf(numbered(1, 250));
+        assertThat(page.next()).isNull();
+    }
+
+    @Test
+    void emptyTableWithoutParamsReturnsEmptyArrayWithoutLink() throws Exception {
+        list(URI.create("/inventory"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("[]"))
                 .andExpect(header().doesNotExist(LINK));
     }
 

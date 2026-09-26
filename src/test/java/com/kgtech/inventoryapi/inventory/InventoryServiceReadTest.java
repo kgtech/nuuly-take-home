@@ -45,7 +45,7 @@ import com.kgtech.inventoryapi.idempotency.Idempotent;
 import com.kgtech.inventoryapi.idempotency.Operation;
 
 /**
- * OQ5, G11, S2, X1, Z1, G9, R4: the service reads run in a read-only transaction, list parses limit leniently, and
+ * OQ5, G11, S2, X1, Z1, G9, R4, C2: the service reads run in a read-only transaction, list parses limit leniently, and
  * {@code find} and the writes reject a malformed skuId before any repository or transaction access. No Docker and no
  * Boot, so no retry or @Idempotent advice; the repository and transaction manager are mocks. SkuRepository is the only
  * path from the service to Postgres, so no interaction with it means no query (NQ1).
@@ -66,7 +66,7 @@ class InventoryServiceReadTest {
     /** The reads, with the repository call each one must make inside the transaction. */
     enum Read {
         FIND(service -> service.find("widget"), skus -> skus.findQuantity("widget")),
-        LIST(service -> service.list(null, null), SkuRepository::findAllQuantities),
+        LIST(service -> service.list(null, null), skus -> skus.findQuantitiesAfter("", 251)),
         LIST_PAGE(service -> service.list("2", "B"), skus -> skus.findQuantitiesAfter("B", 3));
 
         final Consumer<InventoryService> call;
@@ -138,18 +138,40 @@ class InventoryServiceReadTest {
         return rows.stream().map(r -> new InventoryItem(r.getSkuId(), r.getQuantity())).toList();
     }
 
-    /** G9: no limit and no after keeps the unpaged query; the items are the projections in order. */
+    /** G9, C2: no limit and no after asks for the default page of 250 plus one; items keep the row order. */
     @Test
-    void listWithoutParamsUsesFindAllQuantities() {
-        when(skus.findAllQuantities()).thenReturn(List.of(row("A", 1), row("b", Long.MAX_VALUE)));
+    void listWithoutParamsQueriesDefaultPagePlusOne() {
+        when(skus.findQuantitiesAfter("", 251)).thenReturn(List.of(row("A", 1), row("b", Long.MAX_VALUE)));
 
         InventoryPage page = service.list(null, null);
 
         assertThat(page.items())
                 .containsExactly(new InventoryItem("A", 1), new InventoryItem("b", Long.MAX_VALUE));
         assertThat(page.next()).isEmpty();
-        verify(skus).findAllQuantities();
+        verify(skus).findQuantitiesAfter("", 251);
         verifyNoMoreInteractions(skus);
+    }
+
+    /** G9, C2: without limit, a 251st row means a next page at the default size; the cursor is the 250th row. */
+    @Test
+    void listWithoutLimitSetsNextAtDefault() {
+        when(skus.findQuantitiesAfter("", 251)).thenReturn(rows(251));
+
+        InventoryPage page = service.list(null, null);
+
+        assertThat(page.items()).isEqualTo(items(rows(250)));
+        assertThat(page.next()).contains(new InventoryPage.Next(250, "S250"));
+    }
+
+    /** C2: exactly 250 rows without limit is the last page. */
+    @Test
+    void listWithoutLimitExactly250HasNoNext() {
+        when(skus.findQuantitiesAfter("", 251)).thenReturn(rows(250));
+
+        InventoryPage page = service.list(null, null);
+
+        assertThat(page.items()).isEqualTo(items(rows(250)));
+        assertThat(page.next()).isEmpty();
     }
 
     /** G9: a limit of n asks for n + 1 rows after the cursor; no cursor starts before every sku_id. */
@@ -171,20 +193,20 @@ class InventoryServiceReadTest {
 
     /**
      * R4: limit is ASCII digits with an optional sign. Non-positive, non-numeric, blank, padded, decimal,
-     * repeated and non-ASCII-digit values are ignored: the whole table, from the unpaged query.
+     * repeated and non-ASCII-digit values are ignored, so the default page of 250 applies (C2).
      */
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = {"", " ", "abc", "0", "-1", "-0", "+0", "00", "+", "-", "1.5", "1e3", "0x10", " 5", "5 ",
         "2,3", "\u0663", "\uff15", "\u0665\u0660", "-99999999999999999999"})
-    void listIgnoresUnusableLimit(String limit) {
-        when(skus.findAllQuantities()).thenReturn(List.of(row("A", 1)));
+    void listTreatsUnusableLimitAsDefault(String limit) {
+        when(skus.findQuantitiesAfter("", 251)).thenReturn(List.of(row("A", 1)));
 
         InventoryPage page = service.list(limit, null);
 
         assertThat(page.items()).containsExactly(new InventoryItem("A", 1));
         assertThat(page.next()).isEmpty();
-        verify(skus).findAllQuantities();
+        verify(skus).findQuantitiesAfter("", 251);
         verifyNoMoreInteractions(skus);
     }
 
@@ -211,28 +233,39 @@ class InventoryServiceReadTest {
         verifyNoMoreInteractions(skus);
     }
 
-    /** R4, AC4: after alone returns every row after it (unbounded, never validated) and never a next cursor. */
+    /** R4, C2: after alone (never validated) returns up to the default page of 250 after it. */
     @ParameterizedTest
     @ValueSource(strings = {"B-2", "", "zzz", "not a sku id!", "a+b&c=d"})
-    void listWithAfterOnlyIsUnbounded(String after) {
-        when(skus.findQuantitiesAfter(after, Long.MAX_VALUE)).thenReturn(rows(3));
+    void listWithAfterOnlyUsesDefaultLimit(String after) {
+        when(skus.findQuantitiesAfter(after, 251)).thenReturn(rows(3));
 
         InventoryPage page = service.list(null, after);
 
         assertThat(page.items()).isEqualTo(items(rows(3)));
         assertThat(page.next()).isEmpty();
-        verify(skus).findQuantitiesAfter(after, Long.MAX_VALUE);
+        verify(skus).findQuantitiesAfter(after, 251);
         verifyNoMoreInteractions(skus);
     }
 
-    /** R4: an ignored limit with after behaves as after alone. */
+    /** C2: after alone is capped at 250; a 251st row sets the next cursor at the default size. */
+    @Test
+    void listWithAfterOnlySetsNextAtDefault() {
+        when(skus.findQuantitiesAfter("A", 251)).thenReturn(rows(251));
+
+        InventoryPage page = service.list(null, "A");
+
+        assertThat(page.items()).isEqualTo(items(rows(250)));
+        assertThat(page.next()).contains(new InventoryPage.Next(250, "S250"));
+    }
+
+    /** R4, C2: an ignored limit with after behaves as after alone. */
     @ParameterizedTest
     @ValueSource(strings = {"0", "abc", ""})
-    void listWithIgnoredLimitAndAfterIsUnbounded(String limit) {
+    void listWithIgnoredLimitAndAfterUsesDefaultLimit(String limit) {
         InventoryPage page = service.list(limit, "B-2");
 
         assertThat(page.next()).isEmpty();
-        verify(skus).findQuantitiesAfter("B-2", Long.MAX_VALUE);
+        verify(skus).findQuantitiesAfter("B-2", 251);
         verifyNoMoreInteractions(skus);
     }
 
@@ -292,7 +325,7 @@ class InventoryServiceReadTest {
         service.list(null, after);
 
         verify(skus).findQuantitiesAfter(truncated, 3);
-        verify(skus).findQuantitiesAfter(truncated, Long.MAX_VALUE);
+        verify(skus).findQuantitiesAfter(truncated, 251);
         verifyNoMoreInteractions(skus);
     }
 
@@ -300,7 +333,6 @@ class InventoryServiceReadTest {
     @EnumSource(Read.class)
     void readMethodsRunInReadOnlyTransaction(Read read) {
         when(skus.findQuantity("widget")).thenReturn(Optional.of(5L));
-        when(skus.findAllQuantities()).thenReturn(List.of());
         when(skus.findQuantitiesAfter(any(), anyLong())).thenReturn(List.of());
 
         read.call.accept(service);
