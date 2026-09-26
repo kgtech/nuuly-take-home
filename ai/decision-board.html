@@ -1818,7 +1818,7 @@ Object.assign(REFINES,{"Z3:A":[],"Z3:A2":[],"Z3:C":[],"Z3:B":[
  {"id":"G10","rule":1,"from":"(500 only for server faults","to":"(GET /inventory also answers 400 \"Invalid request\" for a query string that can't be decoded or repeats after, Z3; 500 only for server faults"},
  {"id":"S12","rule":1,"from":"declares @ApiResponse for exactly the spec's codes;","to":"declares @ApiResponse for exactly the spec's codes, plus GET /inventory's 400 (Z3);"}
 ]});
-/* Round 12: codebase critique (PR #20, issue #21) */
+/* Round 12: codebase critique (PR #20, issues #21, #22) */
 DECISIONS.push(
 {id:"C1",kind:"gap",review12:true,finding:"Errors outside Spring MVC",q:"How are errors that Spring MVC never sees, and errors on library paths, rendered?",
  quote:{text:"[S6] G10 covers /inventory/** only. /actuator/** and springdoc paths keep library behaviour.",from:"CLAUDE.md (S6)"},
@@ -1843,6 +1843,43 @@ DECISIONS.push(
  rec:{k:"A",why:"It makes every /inventory/** error text/plain with the statuses G10 and G11 allow, without duplicating routing or parsing paths by hand.",change:"You'd rather not override Boot's dispatcherServlet bean. Then C."}}
 );
 Object.assign(REFINES,{"C1:B": [], "C1:C": [], "C1:D": [], "C1:A": [{"id": "S6", "rule": 1, "from": "G10 covers /inventory/** only. /actuator/** and springdoc paths keep library behaviour.", "to": "G10 and the text/plain error contract cover /inventory/** and every other path except /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**). On those library paths InventoryErrorAdvice rethrows the exception, so their errors keep library behaviour (Spring Boot's /error JSON, an empty 406, health 503 when DOWN, the Swagger UI redirect), except an undecodable query string, which gets 400 text/plain \"Invalid request\" on every path. A request Tomcat rejects before routing is text/plain on every path (C1)."}, {"id": "G10", "rule": 1, "from": "500 only for server faults, body \"Internal server error\")", "to": "a request Tomcat rejects before routing, such as a malformed percent-escape in the path, answers 400 \"Invalid request\" on any operation, C1; 500 only for server faults, body \"Internal server error\")"}, {"id": "G10", "rule": 1, "from": "/actuator/** and the springdoc paths (/v3/api-docs, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect).", "to": "Unknown paths follow the same standard-code rule. /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**) are outside this rule and keep their library behaviour (health 503 when DOWN, the Swagger UI redirect, Spring Boot's JSON error body), except that a request Tomcat rejects before routing, or a query string Tomcat can't decode, is text/plain (C1)."}, {"id": "R3", "rule": 0, "from": "Map client errors to 400 only on the two POST operations.", "to": "Map client errors to 400 only on the two POST operations; a request Tomcat rejects before routing is 400 \"Invalid request\" on any method (C1)."}, {"id": "S5", "rule": 0, "from": "Build every error response (advice and controller) with one helper that calls .contentType(MediaType.TEXT_PLAIN).", "to": "Build every error response (advice and controller) with one helper that calls .contentType(MediaType.TEXT_PLAIN); the Tomcat error valve, which can't return a ResponseEntity, takes its body from the same helper's textFor and sets text/plain itself (C1)."}, {"id": "Z3", "rule": 0, "from": "to 400 \"Invalid request\" text/plain, ahead of the catch-all.", "to": "to 400 \"Invalid request\" text/plain, ahead of the catch-all, on every path including /actuator/** and the springdoc paths, and logs one WARN line with the method and path and no stack trace (C1)."}]});
+DECISIONS.push(
+{id:"C2",kind:"gap",review12:true,finding:"Unbounded list",q:"What does GET /inventory return when no limit is given?",
+ quote:{text:"[G9] Optional `limit` (1–250) and `after` (last skuId) query params. Without them return every row. (refined by R8)",from:"CLAUDE.md (G9)"},
+ why:"Codebase critique (PR #20, C-02): without limit, and with after alone, list() loads every SKU and sums the whole ledger. There is no auth (G10) and SKUs are never deleted (G5), so any client can grow the table. With 1,000,000 SKUs and a 2 GB heap, one GET /inventory took 4.3 s and 35 MB, and 8 concurrent calls all returned 500 with OutOfMemoryError.",
+ detail:["The spec's operation is \"List all inventory\" with no paging parameters, so a default page means a client that ignores Link sees only the first 250 SKUs.","G9's research: Shopify, BigCommerce, commercetools and Salesforce OCAPI page by default; AIP-158 and the Azure guidelines treat adding paging later as breaking."],
+ examples:[],
+ by:["G9","R4","R8","G5","G10"],
+ options:[
+  {k:"A",label:"Default page of 250 (the R8 maximum), Link for the rest",summary:"An absent or ignored limit means 250; after alone is capped the same way. The body stays a bare array and the Link carries limit=250.",
+   pros:["Bounded memory and query time per request","Clients already walk Link","No new status codes"],cons:["A client that ignores Link sees only the first 250 SKUs, unlike the spec's \"all SKUs\""],h:1.5,risk:"Low",src:["shop_page","aip158"],
+   rules:[
+    "GET /inventory always runs the keyset query with a page size: limit when R4 accepts it, otherwise 250 (R8's maximum). The next-page Link carries the page size used, e.g. limit=250.",
+    "The next-page Link is built from the request's scheme, host, port and context path plus the routed path /inventory, never from the raw request URI, so an encoded request path (/%69nventory) still yields a working /inventory Link. It carries only limit and after, with after strictly encoded.",
+    "The OpenAPI documents G11 on every skuId path parameter with @Parameter(schema = @Schema(pattern, minLength 1, maxLength 64)) built from SkuId's constants, never @Pattern (S2); InventoryItem.quantity has minimum 0 as in the spec; GET /inventory's description and limit parameter (default 250) document the default page. ApiDocsTest asserts each.",
+    "Test with more than 250 SKUs: GET /inventory without limit, and with after alone, returns 250 and a Link, and following Links visits every SKU once; exactly 250 SKUs gives no Link."],
+   assumption:"`GET /inventory` returns at most 250 SKUs per response; when more follow, the `Link` header has the next page's URL, and following it lists all inventory."},
+  {k:"B",label:"Keep every row; document the risk",summary:"No change; record the unbounded response as a known edge.",
+   pros:["Matches the spec's \"all SKUs\" literally"],cons:["Any unauthenticated client can exhaust the heap (C-02)"],h:0,risk:"High",src:[],
+   rules:["GET /inventory without limit returns every row (known edge: unbounded memory)."],assumption:null},
+  {k:"C",label:"Stream every row",summary:"Keep the contract; write the JSON array from a database cursor.",
+   pros:["Keeps \"all SKUs\" in one response","Heap stays bounded"],cons:["Response time and database load still grow with the table","Streaming from a read-only transaction through the JSON writer is more code"],h:3,risk:"Med",src:[],
+   rules:["GET /inventory without limit streams every row from a server-side cursor."],assumption:null},
+  {k:"D",label:"Default page of 50",summary:"Industry-typical default below the maximum.",
+   pros:["Smallest responses"],cons:["More round trips; a second number to document next to R8's 250"],h:1.5,risk:"Low",src:["shop_page","aip158"],
+   rules:["GET /inventory without limit returns at most 50 rows, with a Link when more exist."],assumption:null}
+ ],
+ rec:{k:"A",why:"It bounds every response with the paging clients already use, at the largest page the API allows, so the fewest clients notice.",change:"You must return every SKU in one response. Then C."}}
+);
+Object.assign(REFINES,{"C2:A":[{"id":"G9","rule":0,"from":"Without them return every row.","to":"Without limit (or with one R4 ignores) the page size is 250, the R8 maximum, with the same Link when more rows exist; after alone is capped the same way (C2)."},
+{"id":"G9","assumption":true,"from":"without them every SKU is returned.","to":"without `limit`, a response holds at most 250 SKUs (C2)."},
+{"id":"R4","rule":0,"from":"Non-positive or non-numeric limit → ignored.","to":"Non-positive or non-numeric limit → ignored, so the default page of 250 applies (C2)."},
+{"id":"R4","rule":0,"from":"after alone returns every row after it.","to":"after alone returns the next 250 rows after it, with a Link when more exist (C2)."},
+{"id":"R4","assumption":true,"from":"a bad `limit` is ignored,","to":"a bad `limit` is ignored (the default of 250 applies),"},
+{"id":"R4","assumption":true,"from":"`after` alone returns every SKU after it.","to":"`after` alone returns up to 250 SKUs after it (C2)."},
+{"id":"R8","rule":0,"from":"limit range is 1–250.","to":"limit range is 1–250; 250 is also the page size when limit is absent or ignored (C2)."},
+{"id":"R8","assumption":true,"from":"`limit` accepts up to 250.","to":"`limit` accepts up to 250, which is also the default page size (C2)."},
+{"id":"S11","rule":0,"from":"keyset query and Link header (last page has no Link);","to":"keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2);"}],"C2:B":[],"C2:C":[],"C2:D":[]});
 (function(){
 const BUDGET = 16;
 const byId = Object.fromEntries(DECISIONS.map(d=>[d.id,d]));
