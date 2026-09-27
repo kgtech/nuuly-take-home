@@ -4,7 +4,14 @@ import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
 import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_TITLE;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_VERSION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_SUMMARY;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.GET_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.GET_SUMMARY;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT_DESCRIPTION;
@@ -12,7 +19,13 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LINK_DESCRIPTIO
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_INVALID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_SUMMARY;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_SUMMARY;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_ID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_NOT_FOUND_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.TAG;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
@@ -58,8 +71,8 @@ import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
 /** The four spec operations (hand-written, D7), with the spec's info, operationIds and summaries. */
-@OpenAPIDefinition(info = @Info(title = "Inventory API", version = "1.0.0"))
-@Tag(name = "inventory")
+@OpenAPIDefinition(info = @Info(title = API_TITLE, version = API_VERSION))
+@Tag(name = TAG)
 @RestController
 @RequestMapping(BASE_PATH)
 class InventoryController {
@@ -71,10 +84,10 @@ class InventoryController {
     }
 
     @GetMapping("/{skuId}")
-    @Operation(operationId = "getInventory", summary = "Get inventory for a SKU")
-    @ApiResponse(responseCode = "200", description = "Current inventory state for the sku",
+    @Operation(operationId = "getInventory", summary = GET_SUMMARY)
+    @ApiResponse(responseCode = "200", description = GET_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
-    @ApiResponse(responseCode = "404", description = "SKU not found",
+    @ApiResponse(responseCode = "404", description = SKU_NOT_FOUND_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
     ResponseEntity<?> get(
             @Parameter(description = SKU_ID_DESCRIPTION,
@@ -86,10 +99,10 @@ class InventoryController {
     }
 
     @PostMapping(path = "/{skuId}", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
-    @Operation(operationId = "createInventory", summary = "Create or update inventory for a SKU")
-    @ApiResponse(responseCode = "200", description = "Current state of the item after update",
+    @Operation(operationId = "createInventory", summary = CREATE_SUMMARY)
+    @ApiResponse(responseCode = "200", description = CREATE_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
-    @ApiResponse(responseCode = "400", description = "Invalid request",
+    @ApiResponse(responseCode = "400", description = CREATE_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
     ResponseEntity<?> create(
             @Parameter(description = SKU_ID_DESCRIPTION,
@@ -104,12 +117,12 @@ class InventoryController {
     }
 
     @PostMapping(path = "/{skuId}/purchase", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
-    @Operation(operationId = "purchaseItem", summary = "Purchase a quantity of a SKU")
-    @ApiResponse(responseCode = "200", description = "Purchase successful; remaining inventory for the item",
+    @Operation(operationId = "purchaseItem", summary = PURCHASE_SUMMARY)
+    @ApiResponse(responseCode = "200", description = PURCHASE_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
-    @ApiResponse(responseCode = "400", description = "Insufficient inventory or invalid request",
+    @ApiResponse(responseCode = "400", description = PURCHASE_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
-    @ApiResponse(responseCode = "404", description = "SKU not found",
+    @ApiResponse(responseCode = "404", description = SKU_NOT_FOUND_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
     ResponseEntity<?> purchase(
             @Parameter(description = SKU_ID_DESCRIPTION,
@@ -124,7 +137,7 @@ class InventoryController {
     }
 
     @GetMapping
-    @Operation(operationId = "listInventory", summary = "List all inventory", description = LIST_DESCRIPTION)
+    @Operation(operationId = "listInventory", summary = LIST_SUMMARY, description = LIST_DESCRIPTION)
     @ApiResponse(responseCode = "200", description = LIST_OK_DESCRIPTION,
             headers = @Header(name = LINK, description = LINK_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE,

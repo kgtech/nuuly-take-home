@@ -9,11 +9,26 @@ final class InventoryApi {
     static final String LIMIT = "limit";
     static final String AFTER = "after";
 
+    static final String API_TITLE = "Inventory API";
+    static final String API_VERSION = "1.0.0";
+    static final String TAG = "inventory";
+
+    static final String GET_SUMMARY = "Get inventory for a SKU";
+    static final String GET_OK_DESCRIPTION = "Current inventory state for the sku";
+    static final String SKU_NOT_FOUND_DESCRIPTION = "SKU not found";
+    static final String CREATE_SUMMARY = "Create or update inventory for a SKU";
+    static final String CREATE_OK_DESCRIPTION = "Current state of the item after update";
+    static final String CREATE_INVALID_DESCRIPTION = "Invalid request";
+    static final String PURCHASE_SUMMARY = "Purchase a quantity of a SKU";
+    static final String PURCHASE_OK_DESCRIPTION = "Purchase successful; remaining inventory for the item";
+    static final String PURCHASE_INVALID_DESCRIPTION = "Insufficient inventory or invalid request";
+
     static final String SKU_ID_DESCRIPTION = "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', "
             + "starting with a letter or digit. Case-sensitive.";
     static final String IDEMPOTENCY_KEY_DESCRIPTION = "Optional UUID. The same key with the same request replays "
             + "the first response. A different request, or a key older than 24h, returns 400.";
 
+    static final String LIST_SUMMARY = "List all inventory";
     static final String LIST_DESCRIPTION = "Returns SKUs sorted by skuId, at most 250 per response. When more SKUs "
             + "follow, the Link header holds the next page's URL; follow it until a response has no Link to list all "
             + "inventory. If no SKUs exist, returns an empty array.";
