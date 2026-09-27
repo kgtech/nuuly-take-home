@@ -157,7 +157,7 @@ class IdempotencyInterceptorTest {
     private void storeExecutes() {
         when(store.execute(any(), any())).thenAnswer(invocation -> {
             Supplier<StoredResponse> action = invocation.getArgument(1);
-            return new KeyedResult.Executed(action.get());
+            return new KeyedResult.Executed(action.get(), java.time.Instant.now());
         });
     }
 
@@ -282,7 +282,7 @@ class IdempotencyInterceptorTest {
     @Test
     void replayedMapsToStoredWithoutCallingTarget() {
         StoredResponse response = new StoredResponse(404, "text/plain", "SKU not found");
-        when(store.execute(any(), any())).thenReturn(new KeyedResult.Replayed(response));
+        when(store.execute(any(), any())).thenReturn(new KeyedResult.Replayed(response, java.time.Instant.now()));
 
         Result result = proxy.purchase("widget", 5, KEY);
 

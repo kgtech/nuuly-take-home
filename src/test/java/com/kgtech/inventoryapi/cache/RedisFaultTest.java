@@ -148,6 +148,8 @@ class RedisFaultTest {
                 .isEqualTo(new Reply(200, "application/json", "{\"skuId\":\"w\",\"quantity\":7}"));
         assertThat(read("ghost")).isEqualTo(new Reply(404, "text/plain", "SKU not found"));
         assertThat(send(get("/inventory").accept(APPLICATION_JSON)).status()).isEqualTo(200);
+        assertThat(send(get("/actuator/health/readiness")).status()).as("A4: still ready without Redis").isEqualTo(200);
+        assertThat(send(get("/actuator/health")).status()).as("health reports the Redis component").isEqualTo(503);
 
         assertThat(quantity("w")).isEqualTo(7);
         assertThat(ledgerRows()).isEqualTo(3);
@@ -182,8 +184,9 @@ class RedisFaultTest {
         read("w");
 
         restartRedis();
-        assertThat(redis.getConnection().keyCommands().exists(("stock:w").getBytes())).as("restart emptied Redis")
-                .isFalse();
+        try (var connection = redis.getConnection()) {
+            assertThat(connection.keyCommands().exists("stock:w".getBytes())).as("restart emptied Redis").isFalse();
+        }
 
         assertThat(read("w")).isEqualTo(new Reply(200, "application/json", "{\"skuId\":\"w\",\"quantity\":3}"));
         assertThat(purchase("w", 2, key)).isEqualTo(new Reply(200, "application/json", "{\"skuId\":\"w\",\"quantity\":3}"));

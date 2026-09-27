@@ -64,8 +64,10 @@ final class IdempotencyInterceptor implements MethodInterceptor {
         KeyedResult result = cache.lookup(request).orElseGet(() -> requiresNew().execute(status -> {
             KeyedResult keyed = store.getObject().execute(request, () -> results.toStored(skuId, proceed(invocation)));
             switch (keyed) {
-                case KeyedResult.Executed executed -> AfterCommit.run(() -> cache.put(request, executed.response()));
-                case KeyedResult.Replayed replayed -> AfterCommit.run(() -> cache.put(request, replayed.response()));
+                case KeyedResult.Executed executed ->
+                        AfterCommit.run(() -> cache.put(request, executed.response(), executed.createdAt()));
+                case KeyedResult.Replayed replayed ->
+                        AfterCommit.run(() -> cache.put(request, replayed.response(), replayed.createdAt()));
                 case KeyedResult.Rejected _ -> { }
             }
             return keyed;

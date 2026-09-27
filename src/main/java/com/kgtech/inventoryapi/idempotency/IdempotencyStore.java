@@ -1,6 +1,8 @@
 package com.kgtech.inventoryapi.idempotency;
 
 import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -28,10 +30,13 @@ class IdempotencyStore {
 
     /** T1: expiry uses the database clock (transaction start time). */
     static final String STORED = """
-            SELECT operation, sku_id, request_hash, status, content_type, body,
+            SELECT operation, sku_id, request_hash, status, content_type, body, created_at,
                    created_at < now() - interval '24 hours' AS expired
             FROM idempotency_keys WHERE idempotency_key = :key
             """;
+
+    /** The claim's created_at by the database clock, for the replay copy's remaining TTL. */
+    static final String CREATED = "SELECT created_at FROM idempotency_keys WHERE idempotency_key = :key";
 
     /** Y4: the response columns are set in the claim's transaction. */
     static final String COMPLETE = """
@@ -58,7 +63,7 @@ class IdempotencyStore {
         if (claim(request, hash)) {
             StoredResponse response = action.get();
             complete(request, response);
-            return new KeyedResult.Executed(response);
+            return new KeyedResult.Executed(response, createdAt(request));
         }
         StoredRow row = stored(request).orElseThrow(
                 () -> new IllegalStateException("Idempotency-Key " + request.key() + " neither claimed nor stored"));
@@ -72,7 +77,7 @@ class IdempotencyStore {
         if (response == null) {
             throw new IllegalStateException("Idempotency-Key " + request.key() + " has no stored response");
         }
-        return new KeyedResult.Replayed(response);
+        return new KeyedResult.Replayed(response, row.createdAt());
     }
 
     private boolean claim(IdempotentRequest request, byte[] hash) {
@@ -96,8 +101,13 @@ class IdempotencyStore {
                         rs.getObject("status", Integer.class),
                         rs.getString("content_type"),
                         rs.getString("body"),
-                        rs.getBoolean("expired")))
+                        rs.getBoolean("expired"),
+                        rs.getObject("created_at", OffsetDateTime.class).toInstant()))
                 .optional();
+    }
+
+    private Instant createdAt(IdempotentRequest request) {
+        return jdbc.sql(CREATED).param("key", request.key()).query(OffsetDateTime.class).single().toInstant();
     }
 
     private void complete(IdempotentRequest request, StoredResponse response) {

@@ -7,5 +7,7 @@ elseif tonumber(current) >= tonumber(ARGV[2]) then
   return 0
 end
 redis.call('HSET', KEYS[1], 'q', ARGV[1], 'v', ARGV[2])
-redis.call('PEXPIRE', KEYS[1], ARGV[3])
+if ARGV[4] ~= '1' then
+  redis.call('PEXPIRE', KEYS[1], ARGV[3]) -- the TTL is set by a populate (a read); a refresh keeps the remaining TTL
+end
 return 1

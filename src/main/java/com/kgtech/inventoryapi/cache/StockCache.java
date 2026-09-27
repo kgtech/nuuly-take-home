@@ -32,9 +32,10 @@ public class StockCache {
 
     /** The cached quantity, or empty on a miss or when Redis is unavailable. */
     public Optional<Long> get(String skuId) {
-        return guard.call("stock read", () -> redis.<String, String>opsForHash().entries(key(skuId)))
-                .map(entries -> entries.get("q"))
-                .map(Long::parseLong);
+        return guard.call("stock read", () -> {
+            String q = redis.<String, String>opsForHash().entries(key(skuId)).get("q");
+            return q == null ? null : Long.parseLong(q); // a malformed field is a cache failure, not a 500
+        });
     }
 
     /** After a read miss: cache {@code quantity} at {@code version} unless a newer version is already cached. */

@@ -34,7 +34,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * AC4, R2, W2 over real HTTP: concurrent requests with the same fresh Idempotency-Key produce one stock change and
- * the same response; the losers replay after their 40001 retry. Not @Transactional: tables are emptied before each
+ * the same response; the losers block on the claim row and replay once it is committed. Not @Transactional: tables are emptied before each
  * test (S11). At most 8 threads per SKU (W2).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)

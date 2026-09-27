@@ -34,7 +34,7 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * D9, S11, W2 over real HTTP (#4): concurrent purchases and adds through Tomcat, the filter chain and the Hikari
  * pool, asserting the client only ever sees the spec's 200 and 400 (never a 500). Not @Transactional: every request
- * commits its own SERIALIZABLE transaction, so the tables are emptied before each test.
+ * commits its own READ COMMITTED (row-locked) transaction, so the tables are emptied before each test.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)

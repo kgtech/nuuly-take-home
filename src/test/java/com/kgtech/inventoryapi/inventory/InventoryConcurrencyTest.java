@@ -26,7 +26,7 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
  * S11, D9, W2 (owner decision OQ2): concurrent stock writes through the service; the HTTP versions come in #4.
- * Not @Transactional: every thread commits its own SERIALIZABLE transaction. Tables are emptied before each test.
+ * Not @Transactional: every thread commits its own READ COMMITTED transaction. Tables are emptied before each test.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -77,7 +77,7 @@ class InventoryConcurrencyTest {
                 failures.add(e.getCause());
             }
         }
-        assertThat(failures).as("exceptions thrown by writer threads (retries must not run out)").isEmpty();
+        assertThat(failures).as("exceptions thrown by writer threads (a row lock never fails a write)").isEmpty();
         return results;
     }
 

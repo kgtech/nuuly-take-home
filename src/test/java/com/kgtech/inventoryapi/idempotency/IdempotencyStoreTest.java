@@ -91,7 +91,7 @@ class IdempotencyStoreTest {
         UUID key = UUID.randomUUID();
         IdempotentRequest request = add(key, "widget", 5);
 
-        assertThat(execute(request, OK)).isEqualTo(new KeyedResult.Executed(OK));
+        assertThat(execute(request, OK)).isInstanceOfSatisfying(KeyedResult.Executed.class, e -> assertThat(e.response()).isEqualTo(OK));
 
         assertThat(actionRuns).hasValue(1);
         Map<String, Object> row = row(key);
@@ -110,7 +110,7 @@ class IdempotencyStoreTest {
 
         KeyedResult replay = execute(add(key, "widget", 5), new StoredResponse(400, "text/plain", "changed"));
 
-        assertThat(replay).isEqualTo(new KeyedResult.Replayed(OK));
+        assertThat(replay).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(OK));
         assertThat(actionRuns).hasValue(1);
         assertThat(rows()).isEqualTo(1);
     }
@@ -123,7 +123,7 @@ class IdempotencyStoreTest {
         IdempotentRequest request = new IdempotentRequest(key, Operation.PURCHASE, "ghost", 1);
         execute(request, notFound);
 
-        assertThat(execute(request, OK)).isEqualTo(new KeyedResult.Replayed(notFound));
+        assertThat(execute(request, OK)).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(notFound));
         assertThat(actionRuns).hasValue(1);
     }
 
@@ -191,7 +191,7 @@ class IdempotencyStoreTest {
         execute(add(key, "widget", 5), OK);
         backdate(key, "23 hours 59 minutes");
 
-        assertThat(execute(add(key, "widget", 5), OK)).isEqualTo(new KeyedResult.Replayed(OK));
+        assertThat(execute(add(key, "widget", 5), OK)).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(OK));
         assertThat(actionRuns).hasValue(1);
     }
 
@@ -205,7 +205,7 @@ class IdempotencyStoreTest {
         })).isInstanceOf(IllegalStateException.class).hasMessage("boom");
 
         assertThat(rows()).isZero();
-        assertThat(execute(add(key, "widget", 5), OK)).isEqualTo(new KeyedResult.Executed(OK));
+        assertThat(execute(add(key, "widget", 5), OK)).isInstanceOfSatisfying(KeyedResult.Executed.class, e -> assertThat(e.response()).isEqualTo(OK));
     }
 
     @Test

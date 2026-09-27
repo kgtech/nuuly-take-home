@@ -182,9 +182,15 @@ class IdempotencyApiIntegrationTest {
                 .params(interval, key)
                 .update();
         assertThat(updated).as("key row to backdate").isEqualTo(1);
-        // Time has passed for the Redis copy too: its TTL equals T1's 24 hours, so it is gone by then (DESIGN-V2 §2).
+        // Time has passed for the Redis copy too: backdate its claim time the same way, so the lookup's age check
+        // (not a deleted key) is what sends an expired key to Postgres (DESIGN-V2 §2, review F-01).
+        long created = jdbc.sql("SELECT (EXTRACT(EPOCH FROM created_at) * 1000)::bigint FROM idempotency_keys "
+                + "WHERE idempotency_key = ?::uuid").param(key).query(Long.class).single();
         try (var connection = redisConnections.getConnection()) {
-            connection.keyCommands().del(("idem:" + key.toLowerCase()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] redisKey = ("idem:" + key.toLowerCase()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            if (Boolean.TRUE.equals(connection.keyCommands().exists(redisKey))) {
+                connection.hashCommands().hSet(redisKey, "created".getBytes(), Long.toString(created).getBytes());
+            }
         }
     }
 

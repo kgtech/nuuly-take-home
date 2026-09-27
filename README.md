@@ -129,7 +129,8 @@ The spec leaves these open; V2 keeps the first build's answers ([`DECISIONS.md`]
 - `Idempotency-Key` is optional and must be a UUID; a repeated request replays the first response, including 404 and 400 outcomes; a different body, SKU or endpoint, or a key older than 24 h, returns 400 (G8, G14, R1, S3, T1, U1, Y3). Two simultaneous requests with the same key produce one change (R2).
 - The list is sorted by SKU ID with at most 250 per response and a `Link` to the next page built from the request's `Host` (no `X-Forwarded-*` handling); a bad `limit` is ignored, a repeated `after` or an undecodable query is 400 (G9, R4, R8, Z3, C2).
 - No authentication (G10). Requests outside the spec's operations get standard codes with the reason phrase as text; `/actuator/**` and the springdoc paths keep Spring Boot's own responses, except Tomcat-level rejections and undecodable queries, which are text/plain everywhere (S6, T3, C1).
-- A cached count may lag a committed write by up to `inventory.cache.stock-ttl` (5 s) if the post-commit refresh fails; otherwise reads are fresh within milliseconds (DESIGN-V2 §3).
+- A cached count may lag a committed write by up to `inventory.cache.stock-ttl` (5 s, measured from the read that cached it) if the post-commit refresh fails or raced a read miss; otherwise reads are fresh within milliseconds (DESIGN-V2 §3).
+- The app listens on 0.0.0.0:8080 with no authentication (G10) so reviewers can reach it; Postgres and Redis are on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
 
 ## AI use
 

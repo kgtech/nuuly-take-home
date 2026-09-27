@@ -13,6 +13,15 @@ import org.springframework.scripting.support.ResourceScriptSource;
 @EnableConfigurationProperties(CacheProperties.class)
 class CacheConfiguration {
 
+    /** The atomic write of a replay copy with its TTL (DESIGN-V2 §2). */
+    @Bean
+    RedisScript<Long> replayPutScript() {
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptSource(new ResourceScriptSource(new ClassPathResource("redis/replay-put.lua")));
+        script.setResultType(Long.class);
+        return script;
+    }
+
     /** The versioned, TTL-setting write of a stock count (DESIGN-V2 §3), loaded once and EVALSHA'd by Redis. */
     @Bean
     RedisScript<Long> stockSetScript() {
