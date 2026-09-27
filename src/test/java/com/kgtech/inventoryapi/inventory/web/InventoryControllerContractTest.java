@@ -17,6 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -35,6 +36,7 @@ import com.kgtech.inventoryapi.inventory.StockOutcome;
  * request sends Accept: application/json; error rows must still answer text/plain (S5).
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 class InventoryControllerContractTest {
 
     private static final String PURCHASE = "/inventory/widget/purchase";

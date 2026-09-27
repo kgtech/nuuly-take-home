@@ -21,6 +21,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
@@ -40,6 +41,7 @@ import com.kgtech.inventoryapi.inventory.WriteResult;
  * malformed skuId to the service unchanged and maps the service's outcome; the no-I/O check is in the service tests.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 class InventoryRequestValidationTest {
 
     private static final String SKU = "widget";
