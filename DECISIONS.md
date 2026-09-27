@@ -1,6 +1,6 @@
 # DECISIONS
 
-Nuuly inventory API take-home. Generated from the decision board on 2026-09-26.
+Nuuly inventory API take-home. Generated from the decision board on 2026-09-27.
 Each entry records my choice and my reasoning; rejected options list my reason, or the option's main drawback from research when I left it blank.
 
 | ID | Type | Question | Choice | Matched recommendation |
@@ -849,6 +849,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - A: One flat inventory package. Drawback noted in research: Web and domain code mix; nothing stops the domain importing HTTP types.
 - **Matched recommendation:** Yes
+- **Refined by:** C2
+- **Current rules (after refinement):**
+  - The inventory feature has a domain package (com.kgtech.inventoryapi.inventory: InventoryService, SkuRepository, InventoryWrites/InventoryWritesImpl, Sku, SkuQuantity, StockOutcome, WriteResult, SkuId, InventoryItem, InventoryPage, SerializationFailure, StockWriteFailureLogger) and a web package (com.kgtech.inventoryapi.inventory.web: InventoryController, InventoryErrorAdvice, JsonAcceptForGetFilter, TextErrors, InventoryQuantity, OutcomeResponses, InventoryApi (API paths, parameter names and OpenAPI texts, C2)). The web layer declares no business types or enums; it imports them from the domain package. The domain package never imports Spring MVC or HTTP transport types. (refined by C2)
+  - Header names are never string literals in code: they come from com.kgtech.inventoryapi.web.HttpConstants (e.g. IDEMPOTENCY_KEY) or Spring's HttpHeaders/MediaType constants, including in springdoc annotations.
+  - Controllers static-import constants and import nested types, so method bodies and annotations use no qualified names (e.g. case Ok ok ->, APPLICATION_JSON_VALUE).
 
 ## Z3: What does GET /inventory return for a query string it can't read unambiguously?
 
@@ -881,7 +886,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** A: Default page of 250 (the R8 maximum), Link for the rest
-- **My reasoning:** Revise G9 — apply a default page limit (e.g., 250) when limit is absent.
+- **My reasoning:** Revise G9 — apply a default page limit (e.g., 250) when limit is absent. Constants (Q22-03): If the constants work we need to have a centralized location for all constants. Otherwise this should be a string literal. Constants need to be together for readability for human readers.
 - **Rejected:**
   - B: Keep every row; document the risk. Drawback noted in research: Any unauthenticated client can exhaust the heap (C-02).
   - C: Stream every row. Drawback noted in research: Response time and database load still grow with the table.
