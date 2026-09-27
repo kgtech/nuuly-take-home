@@ -31,11 +31,10 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_NOT_FOUND_D
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.TAG;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import static org.springframework.http.MediaType.TEXT_PLAIN_VALUE;
-
-import java.util.List;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,6 +51,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.server.PathContainer.PathSegment;
+import org.springframework.http.server.RequestPath;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -96,8 +98,9 @@ class InventoryController {
     ResponseEntity<?> get(
             @Parameter(description = SKU_ID_DESCRIPTION,
                     schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
-            @PathVariable String skuId) {
-        return service.find(skuId)
+            @PathVariable String skuId, // routes and documents the parameter; the service gets rawSkuId (C3)
+            HttpServletRequest request) {
+        return service.find(rawSkuId(request))
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
                 .orElseGet(TextErrors::skuNotFound);
     }
@@ -111,13 +114,15 @@ class InventoryController {
     ResponseEntity<?> create(
             @Parameter(description = SKU_ID_DESCRIPTION,
                     schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
-            @PathVariable String skuId,
+            @PathVariable String skuId, // routes and documents the parameter; the service gets rawSkuId (C3)
             @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
                     description = IDEMPOTENCY_KEY_DESCRIPTION,
                     schema = @Schema(type = "string", format = "uuid"))
-            @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
-        return toResponse(skuId, service.add(skuId, body.quantity(), idempotencyKey));
+            @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            HttpServletRequest request) {
+        String raw = rawSkuId(request);
+        return toResponse(raw, service.add(raw, body.quantity(), idempotencyKey));
     }
 
     @PostMapping(path = PURCHASE_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
@@ -131,13 +136,15 @@ class InventoryController {
     ResponseEntity<?> purchase(
             @Parameter(description = SKU_ID_DESCRIPTION,
                     schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
-            @PathVariable String skuId,
+            @PathVariable String skuId, // routes and documents the parameter; the service gets rawSkuId (C3)
             @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
                     description = IDEMPOTENCY_KEY_DESCRIPTION,
                     schema = @Schema(type = "string", format = "uuid"))
-            @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
-        return toResponse(skuId, service.purchase(skuId, body.quantity(), idempotencyKey));
+            @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey,
+            HttpServletRequest request) {
+        String raw = rawSkuId(request);
+        return toResponse(raw, service.purchase(raw, body.quantity(), idempotencyKey));
     }
 
     @GetMapping
@@ -185,6 +192,21 @@ class InventoryController {
                 .buildAndExpand(next.after())
                 .toUriString();
         return "<" + url + ">; rel=\"next\"";
+    }
+
+    /**
+     * G11, S2, C3: the skuId segment as sent, percent-decoded with any ";" content kept; Spring strips that content
+     * from @PathVariable, so /inventory/ABC-1;lot=7 would otherwise act on ABC-1. The segment after BASE_PATH's single
+     * segment is the skuId once a handler matched (an empty segment matches no handler).
+     */
+    private static String rawSkuId(HttpServletRequest request) {
+        return RequestPath.parse(request.getRequestURI(), request.getContextPath()).pathWithinApplication().elements()
+                .stream()
+                .filter(PathSegment.class::isInstance)
+                .skip(1)
+                .findFirst()
+                .map(segment -> StringUtils.uriDecode(segment.value(), UTF_8))
+                .orElseThrow();
     }
 
     /** Maps every write result; keyed responses (first and replayed) are sent as stored (Y4). */
