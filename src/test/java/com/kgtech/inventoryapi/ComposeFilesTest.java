@@ -17,7 +17,7 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 /**
- * D8, S4, S10: compose.yaml runs only Postgres (read by bootRun), compose.override.yaml adds the app (read by
+ * D8, S4, S10: compose.yaml runs Postgres and Redis (read by bootRun), compose.override.yaml adds the app (read by
  * `docker compose up --build`). Structural checks only; the running stack is verified by the manual smoke.
  */
 class ComposeFilesTest {
@@ -152,6 +152,18 @@ class ComposeFilesTest {
         Map<String, Object> postgres = map(dependsOn.get("postgres"), "app depends_on postgres");
 
         assertThat(postgres.get("condition")).isEqualTo("service_healthy");
+        assertThat(map(dependsOn.get("redis"), "app depends_on redis").get("condition")).isEqualTo("service_healthy");
+    }
+
+    /** C-39: the app container has a readiness healthcheck (bash /dev/tcp; the JRE image has no curl) and a heap policy. */
+    @Test
+    void appHasHealthcheckAndHeapPolicy() throws IOException {
+        Map<String, Object> app = service(OVERRIDE, "app");
+        List<String> test = strings(map(app.get("healthcheck"), "app healthcheck").get("test"), "app healthcheck test");
+        assertThat(test).first().isEqualTo("CMD");
+        assertThat(String.join(" ", test)).contains("/dev/tcp/127.0.0.1/8080").contains("/actuator/health/readiness");
+        assertThat(String.valueOf(map(app.get("environment"), "app environment").get("JAVA_TOOL_OPTIONS")))
+                .contains("-XX:MaxRAMPercentage=");
     }
 
     @Test

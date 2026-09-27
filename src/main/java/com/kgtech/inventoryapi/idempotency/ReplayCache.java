@@ -7,6 +7,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -27,6 +28,9 @@ import com.kgtech.inventoryapi.cache.RedisGuard;
 class ReplayCache {
 
     static final String PREFIX = "idem:";
+    /** What the Postgres row's CHECK allows; anything else in Redis is treated as a miss, never replayed. */
+    private static final Set<Integer> ALLOWED_STATUS = Set.of(200, 400, 404);
+    private static final Set<String> ALLOWED_TYPES = Set.of("application/json", "text/plain");
 
     private final StringRedisTemplate redis;
     private final RedisScript<Long> replayPut;
@@ -61,10 +65,15 @@ class ReplayCache {
             if (Duration.between(created, clock.instant()).compareTo(IdempotencyStore.KEY_VALIDITY) >= 0) {
                 return null; // T1: as old as the row's validity, so Postgres decides (and rejects)
             }
-            return matches(m, request)
-                    ? new KeyedResult.Replayed(new StoredResponse(Integer.parseInt(m.get("status")), m.get("ct"),
-                            m.get("body")), created)
-                    : new KeyedResult.Rejected();
+            if (!matches(m, request)) {
+                return new KeyedResult.Rejected();
+            }
+            int status = Integer.parseInt(m.get("status"));
+            String contentType = m.get("ct");
+            if (!ALLOWED_STATUS.contains(status) || !ALLOWED_TYPES.contains(contentType) || m.get("body") == null) {
+                return null; // not a shape the store could have written (the DB CHECK allows only these): miss
+            }
+            return new KeyedResult.Replayed(new StoredResponse(status, contentType, m.get("body")), created);
         });
     }
 

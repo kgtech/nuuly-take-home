@@ -15,5 +15,7 @@ COPY --from=build /workspace/extracted/spring-boot-loader/ ./
 COPY --from=build /workspace/extracted/snapshot-dependencies/ ./
 COPY --from=build /workspace/extracted/application/ ./
 USER app
+# Heap policy travels with the image, not only with compose (C-39).
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0"
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "inventory-api.jar"]

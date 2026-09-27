@@ -41,7 +41,7 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 /**
  * Z1, S3, U3, S2, X1, R2, Y4: the @Idempotent advice on its own. A test target is proxied with the advisor from
  * IdempotencyConfiguration; the store and transaction manager are mocks and the IdempotentResults is a recording
- * fake. No Docker and no Boot. The Postgres behaviour of the same chain is in IdempotencyWiringTest and
+ * fake. No Docker and no Boot. The Postgres behaviour of the same chain is in IdempotencyApiIntegrationTest and
  * IdempotencyApiIntegrationTest.
  */
 class IdempotencyInterceptorTest {

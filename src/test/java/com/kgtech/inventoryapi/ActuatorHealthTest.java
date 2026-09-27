@@ -56,10 +56,12 @@ class ActuatorHealthTest {
 
     /** show-details stays at its default (never): no db or disk details leak. */
     @Test
-    void healthHidesComponentDetails() throws Exception {
+    void healthNamesComponentsButHidesDetails() throws Exception {
         mvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.components").doesNotExist())
+                .andExpect(jsonPath("$.components.db.status").value("UP"))
+                .andExpect(jsonPath("$.components.redis.status").value("UP"))
+                .andExpect(jsonPath("$.components.db.details").doesNotExist())
                 .andExpect(jsonPath("$.details").doesNotExist());
     }
 

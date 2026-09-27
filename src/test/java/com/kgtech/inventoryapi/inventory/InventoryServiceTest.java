@@ -32,7 +32,6 @@ class InventoryServiceTest {
     @BeforeEach
     void clean() {
         Tables.reset(jdbc);
-        Tables.flush(redis);
     }
 
     private Map<String, Object> row(String sku) {

@@ -36,6 +36,8 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
 
     private static final String BASE_SEGMENT = BASE_PATH.substring(1);
     private static final String PURCHASE_SEGMENT = "purchase";
+    /** The largest JSON body a spec request needs, with room for whitespace and ignored fields (G13). */
+    static final long MAX_BODY_BYTES = 4096;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -58,6 +60,10 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
             }
             if (post && !acceptsJson(request)) {
                 write(response, TextErrors.invalidRequest());
+                return;
+            }
+            if (post && request.getContentLengthLong() > MAX_BODY_BYTES) {
+                write(response, TextErrors.invalidRequest()); // the body is {"quantity":n}; anything larger is not ours
                 return;
             }
         }

@@ -79,7 +79,8 @@ class IdempotencyStore {
         }
         StoredResponse response = row.response();
         if (response == null) {
-            throw new IllegalStateException("Idempotency-Key " + request.key() + " has no stored response");
+            // A committed row without a response is a tombstone (the README's clean-up ran early): the key is used up.
+            return new KeyedResult.Rejected();
         }
         return new KeyedResult.Replayed(response, row.createdAt());
     }

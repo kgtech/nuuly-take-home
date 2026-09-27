@@ -57,7 +57,6 @@ class RedisFaultTest {
     void clean() {
         unpause();
         Tables.reset(jdbc);
-        Tables.flush(redis);
     }
 
     @AfterEach
@@ -159,7 +158,6 @@ class RedisFaultTest {
         Reply first = add("w", 5, key);
         assertThat(first.status()).isEqualTo(200);
 
-        Tables.flush(redis);
         assertThat(add("w", 5, key)).isEqualTo(first);
 
         pause();
