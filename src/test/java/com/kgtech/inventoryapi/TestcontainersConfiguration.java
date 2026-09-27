@@ -54,6 +54,21 @@ public class TestcontainersConfiguration {
         return REDIS;
     }
 
+    /**
+     * Connection properties for a second application instance started outside the test context (a plain
+     * SpringApplication must not import this configuration: Boot's Testcontainers lifecycle would stop the shared
+     * containers when that instance closes).
+     */
+    public static String[] connectionProperties() {
+        return new String[] {
+            "spring.datasource.url=" + POSTGRES.getJdbcUrl(),
+            "spring.datasource.username=" + POSTGRES.getUsername(),
+            "spring.datasource.password=" + POSTGRES.getPassword(),
+            "spring.data.redis.host=" + REDIS.getHost(),
+            "spring.data.redis.port=" + REDIS.getMappedPort(REDIS_PORT),
+        };
+    }
+
     private static int freePort() {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();

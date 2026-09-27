@@ -558,4 +558,48 @@ class IdempotencyApiIntegrationTest {
         assertThat(keyRows()).isEqualTo(1);
         assertThat(ledgerRows("widget")).isEqualTo(1);
     }
+
+    // ---- DESIGN-V2 §2 step 2: the Redis replay copy answers repeats without Postgres (critique V-10) ----
+
+    /** After a keyed write the copy exists with the time left until created + 24h, and it alone can replay or reject. */
+    @Test
+    void redisCopyReplaysAndRejectsWithoutPostgres() throws Exception {
+        String key = newKey();
+        Reply first = create("widget", 5, key);
+        assertItem(first, "widget", 5);
+
+        byte[] redisKey = ("idem:" + key.toLowerCase()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try (var connection = redisConnections.getConnection()) {
+            assertThat(connection.keyCommands().exists(redisKey)).isTrue();
+            Long ttl = connection.keyCommands().pTtl(redisKey);
+            assertThat(ttl).as("PTTL = time left until created + 24h")
+                    .isBetween(java.time.Duration.ofHours(24).minusMinutes(1).toMillis(), java.time.Duration.ofHours(24).toMillis());
+            assertThat(connection.hashCommands().hKeys(redisKey)).extracting(String::new)
+                    .containsExactlyInAnyOrder("op", "sku", "hash", "status", "ct", "body", "created");
+        }
+
+        // Remove the Postgres row behind the app's back: only the Redis copy can now answer.
+        jdbc.sql("TRUNCATE idempotency_keys").update();
+
+        assertThat(create("widget", 5, key)).as("replayed from Redis").isEqualTo(first);
+        assertText(create("widget", 6, key), 400, INVALID_REQUEST);
+        assertThat(keyRows()).as("Postgres was not asked").isZero();
+        assertThat(ledgerRows("widget")).isEqualTo(1);
+    }
+
+    /** A copy whose claim time is a day old is ignored, so the (missing) row decides: the key claims afresh. */
+    @Test
+    void redisCopyOlderThanValidityIsIgnored() throws Exception {
+        String key = newKey();
+        assertItem(create("widget", 5, key), "widget", 5);
+        jdbc.sql("TRUNCATE idempotency_keys").update();
+        byte[] redisKey = ("idem:" + key.toLowerCase()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        try (var connection = redisConnections.getConnection()) {
+            connection.hashCommands().hSet(redisKey, "created".getBytes(),
+                    Long.toString(System.currentTimeMillis() - java.time.Duration.ofHours(24).toMillis()).getBytes());
+        }
+
+        assertItem(create("widget", 5, key), "widget", 10);
+        assertThat(keyRows()).isEqualTo(1);
+    }
 }
