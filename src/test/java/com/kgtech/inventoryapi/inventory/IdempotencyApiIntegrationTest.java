@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import java.net.URI;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -427,6 +428,23 @@ class IdempotencyApiIntegrationTest {
         assertThat(keyRows()).isEqualTo(1);
     }
 
+    /** C3, Y1: an Accept that gives JSON q=0 fails before the claim like one that excludes JSON. */
+    @ParameterizedTest
+    @EnumSource(Post.class)
+    void keyedPostRefusingJsonIsNotStored(Post op) throws Exception {
+        seedLedger("widget", 10);
+        String key = newKey();
+
+        assertText(postTo(op, "widget", quantityJson(1), key, MediaType.parseMediaType("application/json;q=0")),
+                400, INVALID_REQUEST);
+
+        assertThat(keyRows()).isZero();
+        assertThat(ledgerRows("widget")).isEqualTo(1);
+
+        assertItem(postTo(op, "widget", quantityJson(1), key), "widget", op == Post.CREATE ? 11 : 9);
+        assertThat(keyRows()).isEqualTo(1);
+    }
+
     // ---- validation failures are not stored (R1, U3) ----
 
     @ParameterizedTest
@@ -450,6 +468,29 @@ class IdempotencyApiIntegrationTest {
         assertText(purchase("-bad", 1, key), 404, "SKU not found");
         assertThat(keyRows()).isZero();
         assertThat(allSkuRows()).isZero();
+
+        assertItem(create("widget", 1, key), "widget", 1);
+        assertThat(keyRows()).isEqualTo(1);
+    }
+
+    /**
+     * AC1, S2, R1, C3: ";" content in the skuId segment is part of the ID, so the keyed request is rejected before the
+     * claim (create 400, purchase 404), nothing is stored and ABC-1 is untouched; the key stays usable.
+     */
+    @Test
+    void semicolonSkuIdNotStored() throws Exception {
+        seedLedger("ABC-1", 10);
+        String key = newKey();
+
+        assertText(send(post(URI.create("/inventory/ABC-1;lot=7")).accept(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON).content(quantityJson(5)).header(IDEMPOTENCY_KEY, key)),
+                400, INVALID_REQUEST);
+        assertText(send(post(URI.create("/inventory/ABC-1;x/purchase")).accept(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON).content(quantityJson(2)).header(IDEMPOTENCY_KEY, key)),
+                404, "SKU not found");
+        assertThat(keyRows()).isZero();
+        assertThat(ledgerRows("ABC-1")).isEqualTo(1);
+        assertThat(allSkuRows()).isEqualTo(1);
 
         assertItem(create("widget", 1, key), "widget", 1);
         assertThat(keyRows()).isEqualTo(1);

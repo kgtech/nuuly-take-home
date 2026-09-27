@@ -1,11 +1,13 @@
 package com.kgtech.inventoryapi.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.URI;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -170,19 +173,43 @@ class InventoryApiIntegrationTest {
         assertThat(ledgerRows("big")).isEqualTo(2);
     }
 
-    /** AC4, Y1: a POST whose Accept excludes JSON fails before any write. */
-    @Test
-    void postWithXmlAcceptWritesNoRows() throws Exception {
-        expectText(mvc.perform(post("/inventory/{skuId}", "new").accept(MediaType.APPLICATION_XML)
+    /** AC4, Y1, C3: a POST whose Accept excludes JSON, or gives it q=0, fails before any write. */
+    @ParameterizedTest(name = "Accept {0}")
+    @ValueSource(strings = {MediaType.APPLICATION_XML_VALUE, "application/json;q=0"})
+    void postRefusingJsonWritesNoRows(String accept) throws Exception {
+        expectText(mvc.perform(post("/inventory/{skuId}", "new").header(ACCEPT, accept)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}")), 400, "Invalid request");
         assertThat(skuRows("new")).isZero();
         assertThat(ledgerRows("new")).isZero();
 
         seedLedger("stocked", 10);
-        expectText(mvc.perform(post("/inventory/{skuId}/purchase", "stocked").accept(MediaType.APPLICATION_XML)
+        expectText(mvc.perform(post("/inventory/{skuId}/purchase", "stocked").header(ACCEPT, accept)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}")), 400, "Invalid request");
         assertThat(ledgerRows("stocked")).isEqualTo(1);
         expectJson(find("stocked"), item("stocked", 10));
+    }
+
+    /**
+     * AC1, G11, C3: ";" content in the skuId segment is part of the ID, so it never reaches ABC-1: create 400, purchase
+     * and GET 404, and no sku or ledger row is written. URI.create keeps the raw ";" in the request path.
+     */
+    @Test
+    void semicolonInSkuIdSegmentNeverReachesAnotherSku() throws Exception {
+        seedLedger("ABC-1", 10);
+
+        expectText(mvc.perform(post(URI.create("/inventory/ABC-1;lot=7")).accept(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}")), 400, "Invalid request");
+        expectText(mvc.perform(post(URI.create("/inventory/ABC-1;")).accept(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":1}")), 400, "Invalid request");
+        expectText(mvc.perform(post(URI.create("/inventory/ABC-1;x/purchase")).accept(MediaType.APPLICATION_JSON)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":2}")), 404, "SKU not found");
+        expectText(mvc.perform(get(URI.create("/inventory/ABC-1;x=y")).accept(MediaType.APPLICATION_JSON)),
+                404, "SKU not found");
+
+        assertThat(ledgerRows("ABC-1")).isEqualTo(1);
+        assertThat(allSkuRows()).isEqualTo(1);
+        assertThat(allLedgerRows()).isEqualTo(1);
+        expectJson(find("ABC-1"), item("ABC-1", 10));
     }
 
     /** AC4, U2: GET ignores the Accept header. */

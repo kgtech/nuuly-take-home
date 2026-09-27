@@ -26,8 +26,10 @@ class JsonAcceptForGetFilterTest {
         return request;
     }
 
+    /** C3, C-13: the routed path, not the raw URI, decides: ";" on /inventory and an escaped letter still route. */
     @ParameterizedTest
-    @ValueSource(strings = {"/inventory", "/inventory/x", "/inventory/x/purchase"})
+    @ValueSource(strings = {"/inventory", "/inventory/x", "/inventory/x/purchase", "/inventory;v=1/x", "/%69nventory/x",
+        "/inventory;v=1"})
     void rewritesAcceptOnInventoryGets(String path) throws Exception {
         MockFilterChain chain = new MockFilterChain();
 

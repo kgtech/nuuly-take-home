@@ -2,6 +2,7 @@ package com.kgtech.inventoryapi.inventory;
 
 import java.math.BigInteger;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -20,7 +21,8 @@ import com.kgtech.inventoryapi.idempotency.Operation;
 /**
  * Stock writes: one SERIALIZABLE transaction per attempt, retried on serialization failure (X1, W2, Y2); the
  * Idempotency-Key is handled by the @Idempotent interceptor (Z1). Reads run in a read-only transaction and return
- * balances from the ledger SUM (D3).
+ * balances from the ledger SUM (D3); find checks the skuId before its transaction starts, so an invalid ID borrows no
+ * connection (G11, C3).
  */
 @Service
 public class InventoryService {
@@ -37,12 +39,15 @@ public class InventoryService {
 
     private final SkuRepository skus;
     private final TransactionTemplate serializable;
+    private final TransactionTemplate readOnly;
 
     InventoryService(SkuRepository skus, PlatformTransactionManager transactionManager) {
         this.skus = skus;
         this.serializable = new TransactionTemplate(transactionManager);
         serializable.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
         serializable.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+        this.readOnly = new TransactionTemplate(transactionManager);
+        readOnly.setReadOnly(true);
     }
 
     @Idempotent(Operation.ADD)
@@ -71,12 +76,13 @@ public class InventoryService {
         return serializable.execute(status -> skus.purchase(skuId, quantity));
     }
 
-    @Transactional(readOnly = true)
+    /** G11, S2, C3: no @Transactional, so a malformed or oversized ID returns before any transaction or query. */
     public Optional<InventoryItem> find(String skuId) {
         if (!SkuId.isValid(skuId)) {
-            return Optional.empty(); // G11: no repository call for a malformed or oversized ID
+            return Optional.empty();
         }
-        return skus.findQuantity(skuId).map(quantity -> new InventoryItem(skuId, quantity));
+        Optional<Long> quantity = readOnly.execute(status -> skus.findQuantity(skuId));
+        return Objects.requireNonNull(quantity).map(q -> new InventoryItem(skuId, q));
     }
 
     /** One page of SKUs in sku_id (COLLATE "C") order, at most 250 (G9, R4, C2). */

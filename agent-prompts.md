@@ -1050,3 +1050,34 @@ Tool: Claude Code (desktop), one orchestrator and 11 subagent runs (including re
   - defer R1-1
   - move every OpenAPI text
   - move the path templates
+
+## 29. Issue #23 with sequential subagents: critique fix C-04, C-05, C-34, C-13 (2026-09-27)
+
+**Prompt**
+> Implement https://github.com/kgtech/nuuly-take-home/issues/23 using sequential subagents. You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md). Run as step 6 of the codebase critique.)
+
+Tool: Claude Code (desktop), one orchestrator and 11 subagent runs (including resumes). Decision queue: [ai/decision-queues/issue-23.md](ai/decision-queues/issue-23.md).
+
+**Output summary**
+- **Plan:** branch `feat/issue-23-raw-skuid-and-accept-q0`. The controller passes the decoded raw skuId segment with any `;` content, so `/inventory/ABC-1;lot=7` is an invalid ID instead of ABC-1. `find` checks the skuId before a read-only `TransactionTemplate`. A POST-only `HandlerInterceptor` refuses JSON at `q=0`. Filter regression rows. No new dependencies. Every baseline behaviour was probed on compose; two claims left unverified became the first tests.
+- **Decision change (board, S9):** the unchanged board reproduced the exports byte for byte. Added C3 (round 12), refining G11, S2, U2 and Y1; C3 rule 3 was later amended to state isCompatibleWith matching and the tie rule. Two `[Decision change]` comments on #23.
+- **Test author:** 41 new or changed tests failed at baseline on assertions; confirmed that MockMvc keeps a literal `;` with `URI.create` and that `/inventory//ABC-1` routes nowhere.
+- **Implementer:** green at 865; smoke passed (with Postgres stopped, `GET /inventory/-bad` answered 404 in 4 ms instead of 500 after 30 s). Opened PR [#34](https://github.com/kgtech/nuuly-take-home/pull/34). The orchestrator verified the branch after the implementer restored main's sources for a baseline mutation run and amended an unpushed commit.
+- **Review round 1:** 3 MINOR (`rawSkuId` hard-coded segment index; `includes` vs `isCompatibleWith`, so `application/*+json;q=0` still wrote stock; a test that could not fail), 2 NIT, 1 DECISION CHALLENGE (U3's order omits the Accept gates).
+- **Fixes, round 1:** `isCompatibleWith` matching; `rawSkuId` reads the matched request path; the owner's test decisions (plan test name, extra rows dropped, tie-rule row) and the review's test removals. Green at 860.
+- **Review round 2:** no new findings; all round-1 threads resolved. A servlet-path probe confirmed `rawSkuId` and found older gaps elsewhere, documented in the README.
+- **Verifier:** nothing unresolved; HEAD equals the PR head; no CI checks configured.
+
+**Accepted**
+- The plan and C3 with the planner's recommendations; the q=0 check as a `HandlerInterceptor`.
+- The tie-rule row; leaving Z2's class list to #28; comparing mutation scores against current main.
+- Documenting that a servlet path is not supported; stating isCompatibleWith and the tie rule in C3 rule 3.
+
+**Rejected**
+- The test author's renamed test (`nonPostIsNeverChecked`) and extra rows beyond the plan.
+- Refining U3 to list the Accept gates (R1-6); U3 stays as written.
+- Building servlet-path support now.
+
+**My response**
+- Queue answers, no reasons given: approve the plan and C3; the interceptor for q=0; revert the test author's departures (option B); add the tie-rule row and keep the Z2 list for #28; leave U3 unchanged (option B); document that a servlet path is not supported; amend C3 rule 3.
+- "done" and "Continue" to move the run on after each set of answers.
