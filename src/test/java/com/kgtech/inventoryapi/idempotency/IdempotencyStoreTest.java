@@ -236,16 +236,21 @@ class IdempotencyStoreTest {
         assertThat(rows()).isZero();
     }
 
-    /** A committed row without a response cannot occur (Y4 CHECK + same transaction); if it does, fail loudly. */
+    /**
+     * A committed row without a response is a tombstone: the README's clean-up cleared it (#56, C-16). The key stays
+     * used up (400), whether or not the row is older than 24h, and the action never runs.
+     */
     @Test
-    void incompleteStoredRowThrows() {
+    void tombstonedRowIsRejectedNotReplayed() {
         UUID key = UUID.randomUUID();
         IdempotentRequest request = add(key, "widget", 5);
-        jdbc.sql("INSERT INTO idempotency_keys (idempotency_key, operation, sku_id, request_hash) VALUES (?, ?, ?, ?)")
-                .params(key, "add", "widget", request.requestHash())
-                .update();
+        execute(request, OK);
+        jdbc.sql("UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL WHERE idempotency_key = ?")
+                .param(key).update();
 
-        assertThatThrownBy(() -> execute(request, OK)).isInstanceOf(IllegalStateException.class);
-        assertThat(actionRuns).hasValue(0);
+        assertThat(execute(request, OK)).isInstanceOf(KeyedResult.Rejected.class);
+        backdate(key, "25 hours");
+        assertThat(execute(request, OK)).isInstanceOf(KeyedResult.Rejected.class);
+        assertThat(actionRuns).hasValue(1);
     }
 }
