@@ -18,6 +18,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
@@ -46,8 +47,7 @@ class IdempotencyStoreTest {
 
     @BeforeEach
     void setUp() {
-        // test-only delete; the application never purges keys (R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
+        TestDatabase.truncateAll(jdbc);
         serializable = new TransactionTemplate(transactionManager);
         serializable.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
         actionRuns.set(0);

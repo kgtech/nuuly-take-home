@@ -33,6 +33,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
@@ -59,10 +60,7 @@ class IdempotencyWiringTest {
 
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        TestDatabase.truncateAll(jdbc);
     }
 
     private MockHttpServletResponse create(String skuId, int quantity, String key) throws Exception {

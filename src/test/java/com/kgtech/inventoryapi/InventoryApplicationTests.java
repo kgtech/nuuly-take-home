@@ -37,14 +37,16 @@ class InventoryApplicationTests {
     }
 
     @Test
-    void flywayAppliedV1AndV2Successfully() {
+    void flywayAppliedAllMigrationsSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
 
-        assertThat(applied).hasSize(2);
+        assertThat(applied).hasSize(3);
         assertThat(applied[0].getVersion().getVersion()).isEqualTo("1");
         assertThat(applied[0].getDescription()).isEqualTo("inventory");
         assertThat(applied[1].getVersion().getVersion()).isEqualTo("2");
         assertThat(applied[1].getDescription()).isEqualTo("idempotency");
+        assertThat(applied[2].getVersion().getVersion()).isEqualTo("3");
+        assertThat(applied[2].getDescription()).isEqualTo("append only");
         assertThat(applied).allSatisfy(info -> assertThat(info.getState()).isEqualTo(MigrationState.SUCCESS));
     }
 

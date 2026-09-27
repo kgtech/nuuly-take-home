@@ -26,6 +26,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
@@ -50,10 +51,7 @@ class TraceIntegrationTest {
 
     @BeforeEach
     void seed() {
-        // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        TestDatabase.truncateAll(jdbc);
         jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(SEEDED).update();
         jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
                 .param(SEEDED).update();

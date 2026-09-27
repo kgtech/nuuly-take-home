@@ -20,7 +20,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
@@ -40,11 +42,12 @@ class InventoryConcurrencyTest {
     @Autowired
     JdbcTemplate jdbc;
 
+    @Autowired
+    JdbcClient jdbcClient;
+
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.update("DELETE FROM inventory_ledger");
-        jdbc.update("DELETE FROM sku");
+        TestDatabase.truncateAll(jdbcClient);
     }
 
     private static String newSku(String prefix) {

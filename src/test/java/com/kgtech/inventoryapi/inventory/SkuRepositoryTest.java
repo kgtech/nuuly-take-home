@@ -3,17 +3,17 @@ package com.kgtech.inventoryapi.inventory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /** D3 reads (SUM(quantity_delta)::bigint) and AC9 COLLATE "C" order, against Postgres (S11). */
@@ -27,14 +27,9 @@ class SkuRepositoryTest {
     @Autowired
     JdbcClient jdbc;
 
-    private final List<String> skus = new ArrayList<>();
-
-    @AfterEach
-    void cleanUp() {
-        for (String sku : skus) {
-            jdbc.sql("DELETE FROM inventory_ledger WHERE sku_id = ?").param(sku).update();
-            jdbc.sql("DELETE FROM sku WHERE sku_id = ?").param(sku).update();
-        }
+    @BeforeEach
+    void cleanTables() {
+        TestDatabase.truncateAll(jdbc);
     }
 
     private static String suffix() {
@@ -42,7 +37,6 @@ class SkuRepositoryTest {
     }
 
     private void seedSku(String sku) {
-        skus.add(sku);
         jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(sku).update();
     }
 

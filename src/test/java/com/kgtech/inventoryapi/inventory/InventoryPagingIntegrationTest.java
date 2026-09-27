@@ -34,6 +34,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.jayway.jsonpath.JsonPath;
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
@@ -60,9 +61,7 @@ class InventoryPagingIntegrationTest {
 
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        TestDatabase.truncateAll(jdbc);
     }
 
     private void create(String skuId, int quantity) throws Exception {

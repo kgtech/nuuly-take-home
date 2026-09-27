@@ -26,6 +26,7 @@ import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
@@ -45,9 +46,7 @@ class InventoryApiIntegrationTest {
 
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        TestDatabase.truncateAll(jdbc);
     }
 
     private ResultActions create(String skuId, long quantity) throws Exception {

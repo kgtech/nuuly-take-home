@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /** The V2 idempotency_keys shape and constraints, executed against Postgres (S3, S8, S11, Y4). */
@@ -36,8 +37,7 @@ class IdempotencySchemaTest {
 
     @BeforeEach
     void cleanTables() {
-        // test-only delete; the application never purges keys (R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
+        TestDatabase.truncateAll(jdbc);
     }
 
     private static byte[] hash(int length) {

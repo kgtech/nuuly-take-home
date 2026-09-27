@@ -3,13 +3,12 @@ package com.kgtech.inventoryapi.inventory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -24,12 +23,13 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
  * AC1–AC4, G1, G5, G12, V2, S2, Z1 through the service against Postgres (S11), without an Idempotency-Key. Not
  * @Transactional: with no surrounding transaction the service's TransactionTemplate (SERIALIZABLE, REQUIRED) starts
- * its own, so seed rows are committed first (autocommit JdbcClient) and removed afterwards.
+ * its own, so seed rows are committed first (autocommit JdbcClient); tables are truncated before each test.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -44,20 +44,13 @@ class InventoryServiceTest {
     @Autowired
     PlatformTransactionManager transactionManager;
 
-    private final List<String> skus = new ArrayList<>();
-
-    @AfterEach
-    void cleanUp() {
-        for (String sku : skus) {
-            jdbc.sql("DELETE FROM inventory_ledger WHERE sku_id = ?").param(sku).update();
-            jdbc.sql("DELETE FROM sku WHERE sku_id = ?").param(sku).update();
-        }
+    @BeforeEach
+    void cleanTables() {
+        TestDatabase.truncateAll(jdbc);
     }
 
     private String newSku(String prefix) {
-        String sku = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
-        skus.add(sku);
-        return sku;
+        return prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
     private void seedSku(String sku) {
@@ -262,8 +255,6 @@ class InventoryServiceTest {
         String upper = "ABC" + suffix;
         String lower = "abc" + suffix;
         String mixed = "Abc" + suffix;
-        skus.addAll(List.of(upper, lower, mixed));
-
         assertThat(service.add(upper, 3, null)).isEqualTo(new StockOutcome.Ok(3));
         assertThat(service.add(lower, 5, null)).isEqualTo(new StockOutcome.Ok(5));
         assertThat(service.purchase(upper, 3, null)).isEqualTo(new StockOutcome.Ok(0));
@@ -301,8 +292,6 @@ class InventoryServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"-bad", "a!b", "a b", ".dot"})
     void malformedSkuIdReturnsOutcomeAndWritesNothing(String skuId) {
-        skus.add(skuId);
-
         assertThat(service.add(skuId, 5, null)).isEqualTo(new WriteResult.InvalidRequest());
         assertThat(service.purchase(skuId, 5, null)).isEqualTo(new StockOutcome.NotFound());
 

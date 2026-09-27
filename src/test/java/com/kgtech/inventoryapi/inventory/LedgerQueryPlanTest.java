@@ -18,7 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
- * AC5 / W2: the balance SUM and both write statements read inventory_ledger through inventory_ledger_sku.
+ * AC5 / W2, C4: every SUM statement the code ships reads inventory_ledger through inventory_ledger_sku. Each statement
+ * is read from production code (the repository's @Query values and InventoryWritesImpl's constants), never copied.
  * {@code @Transactional} is allowed here only because this class never calls the service: seed rows, ANALYZE and
  * EXPLAIN all run in the test's own transaction, which rolls back.
  */
@@ -30,6 +31,7 @@ class LedgerQueryPlanTest {
     private static final int SKUS = 500;
     private static final int ROWS_PER_SKU = 10;
     private static final Pattern ID_PARAM = Pattern.compile("(?<!:):id\\b");
+    private static final Pattern SKU_ID_PARAM = Pattern.compile("(?<!:):skuId\\b");
     private static final Pattern Q_PARAM = Pattern.compile("(?<!:):q\\b");
     /** A :name placeholder, but not the second colon of a :: cast. */
     private static final Pattern NAMED_PARAM = Pattern.compile("(?<!:):(?!:)\\w");
@@ -50,19 +52,28 @@ class LedgerQueryPlanTest {
                 SELECT ? || g, 1, 'add' FROM generate_series(1, ?) g, generate_series(1, ?) r
                 """, prefix, SKUS, ROWS_PER_SKU);
         jdbc.execute("ANALYZE inventory_ledger");
+        jdbc.execute("ANALYZE sku");
     }
 
     private String explain(String sql) {
         return String.join("\n", jdbc.queryForList("EXPLAIN " + sql, String.class));
     }
 
+    /** W2, D3 (C4): GET's balance query, read from the repository's @Query, uses both indexes. */
     @Test
-    void sumQueryUsesSkuIndex() {
-        String plan = explain(
-                "SELECT COALESCE(SUM(quantity_delta), 0) FROM inventory_ledger WHERE sku_id = '" + seeded + "'");
+    void findQuantityUsesIndexes() throws Exception {
+        String statement = SkuRepository.class.getMethod("findQuantity", String.class)
+                .getAnnotation(Query.class).value();
+        assertThat(SKU_ID_PARAM.matcher(statement).find()).as(statement).isTrue();
+        String sql = SKU_ID_PARAM.matcher(statement).replaceAll(Matcher.quoteReplacement("'" + seeded + "'"));
+        assertThat(NAMED_PARAM.matcher(sql).find()).as(sql).isFalse();
 
+        String plan = explain(sql);
+
+        assertThat(plan).as(plan).contains("sku_pkey");
         assertThat(plan).as(plan).contains("inventory_ledger_sku");
         assertThat(plan).as(plan).doesNotContain("Seq Scan on inventory_ledger");
+        assertThat(plan).as(plan).doesNotContain("Seq Scan on sku");
     }
 
     /** Inlines the production statement's :id and :q so it can be EXPLAINed; fails if any named parameter is left. */
@@ -92,7 +103,6 @@ class LedgerQueryPlanTest {
      */
     @Test
     void pageQueryUsesIndexes() throws Exception {
-        jdbc.execute("ANALYZE sku");
         String statement = SkuRepository.class.getMethod("findQuantitiesAfter", String.class, long.class)
                 .getAnnotation(Query.class).value();
         String sql = statement.replace(":after", "'" + prefix + "'").replace(":limit", "3");

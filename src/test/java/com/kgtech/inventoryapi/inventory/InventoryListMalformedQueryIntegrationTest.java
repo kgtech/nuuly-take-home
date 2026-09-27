@@ -25,6 +25,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import com.jayway.jsonpath.JsonPath;
 import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
@@ -48,9 +49,7 @@ class InventoryListMalformedQueryIntegrationTest {
 
     @BeforeEach
     void seed() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        TestDatabase.truncateAll(jdbc);
         for (String skuId : SEEDED) {
             jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(skuId).update();
             jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")

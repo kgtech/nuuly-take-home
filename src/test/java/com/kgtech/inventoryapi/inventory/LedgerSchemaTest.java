@@ -11,29 +11,37 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.NestedExceptionUtils;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
-/** AC2 and the V1 schema shape, executed against Postgres (S11). */
+/** AC2, the V1 schema shape and the V3 append-only triggers (C4), executed against Postgres (S11). */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
 class LedgerSchemaTest {
 
-    private static final String CHECK_VIOLATION = "23514";
-    private static final String NOT_NULL_VIOLATION = "23502";
-    private static final String FOREIGN_KEY_VIOLATION = "23503";
+    private static final String RESTRICT_VIOLATION = "23001";
     private static final String UNIQUE_VIOLATION = "23505";
     private static final String STRING_TOO_LONG = "22001";
     private static final String GENERATED_ALWAYS = "428C9";
 
     @Autowired
     JdbcClient jdbc;
+
+    @BeforeEach
+    void cleanTables() {
+        TestDatabase.truncateAll(jdbc);
+    }
 
     private static String suffix() {
         return UUID.randomUUID().toString().substring(0, 8);
@@ -61,58 +69,82 @@ class LedgerSchemaTest {
         });
     }
 
-    @Test
-    void rejectsZeroQuantityDelta() {
-        String sku = "zero-" + suffix();
-        assertThatCode(() -> insertSku(sku)).doesNotThrowAnyException();
+    /**
+     * AC2, D5: each row is one invalid ledger insert. sku column: seeded = insert a fresh sku first, unknown = a fresh
+     * id never inserted, NULL = a null sku_id.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(nullValues = "NULL", delimiter = '|', textBlock = """
+            zero delta      | seeded  | 0    | add    | 23514 | inventory_ledger_quantity_delta_check
+            unknown reason  | seeded  | 1    | refund | 23514 | inventory_ledger_reason_check
+            reason case     | seeded  | 1    | Add    | 23514 | inventory_ledger_reason_check
+            empty reason    | seeded  | 1    | ''     | 23514 | inventory_ledger_reason_check
+            null reason     | seeded  | 1    | NULL   | 23502 | NULL
+            null delta      | seeded  | NULL | add    | 23502 | NULL
+            null sku_id     | NULL    | 1    | add    | 23502 | NULL
+            unknown sku     | unknown | 1    | add    | 23503 | inventory_ledger_sku_id_fkey
+            """)
+    void rejectsInvalidLedgerRow(String name, String skuMode, Long delta, String reason, String sqlState,
+            String constraint) {
+        String sku = switch (skuMode) {
+            case null -> null;
+            case "seeded" -> {
+                String id = "row-" + suffix();
+                insertSku(id);
+                yield id;
+            }
+            case "unknown" -> "ghost-" + suffix();
+            default -> throw new IllegalArgumentException(skuMode);
+        };
 
-        assertSqlState(() -> insertLedger(sku, 0L, "add"), CHECK_VIOLATION, "inventory_ledger_quantity_delta_check");
+        assertSqlState(() -> insertLedger(sku, delta, reason), sqlState, constraint);
 
-        Long count = jdbc.sql("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?")
+        if (sku != null) {
+            assertThat(ledgerRows(sku)).isZero();
+        }
+    }
+
+    /**
+     * AC1, G5, V1 (C4): UPDATE and DELETE on inventory_ledger and sku fail with 23001, with and without a matching row
+     * (including a sku with no ledger rows, which the foreign key does not protect), and leave the balance unchanged.
+     * The WHERE false rows pin the statement-level trigger: a statement that matches no row fails too.
+     */
+    @ParameterizedTest(name = "{0} (ledger row: {1})")
+    @CsvSource(delimiter = '|', textBlock = """
+            UPDATE inventory_ledger SET quantity_delta = -999 WHERE sku_id = :sku      | true
+            DELETE FROM inventory_ledger WHERE sku_id = :sku                           | true
+            DELETE FROM sku WHERE sku_id = :sku                                        | true
+            DELETE FROM sku WHERE sku_id = :sku                                        | false
+            UPDATE sku SET created_at = now() WHERE sku_id = :sku                      | false
+            UPDATE inventory_ledger SET quantity_delta = 1 WHERE false AND :sku = :sku | false
+            DELETE FROM sku WHERE false AND :sku = :sku                                | false
+            """)
+    void appendOnlyTablesRejectUpdateAndDelete(String statement, boolean withLedgerRow) {
+        String sku = "append-" + suffix();
+        insertSku(sku);
+        if (withLedgerRow) {
+            insertLedger(sku, 5L, "add");
+        }
+        ThrowingCallable call = () -> jdbc.sql(statement).param("sku", sku).update();
+
+        assertThatThrownBy(call).isInstanceOf(DataIntegrityViolationException.class);
+        assertSqlState(call, RESTRICT_VIOLATION, "append-only");
+
+        Long skuRows = jdbc.sql("SELECT count(*) FROM sku WHERE sku_id = ?").param(sku).query(Long.class).single();
+        assertThat(skuRows).isEqualTo(1L);
+        assertThat(ledgerRows(sku)).isEqualTo(withLedgerRow ? 1L : 0L);
+        assertThat(balance(sku)).isEqualTo(withLedgerRow ? 5L : 0L);
+    }
+
+    private long ledgerRows(String sku) {
+        return jdbc.sql("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?").param(sku).query(Long.class).single();
+    }
+
+    private long balance(String sku) {
+        return jdbc.sql("SELECT COALESCE(SUM(quantity_delta), 0)::bigint FROM inventory_ledger WHERE sku_id = ?")
                 .param(sku)
                 .query(Long.class)
                 .single();
-        assertThat(count).isZero();
-    }
-
-    @Test
-    void rejectsUnknownReason() {
-        String sku = "refund-" + suffix();
-        assertThatCode(() -> insertSku(sku)).doesNotThrowAnyException();
-
-        assertSqlState(() -> insertLedger(sku, 1L, "refund"), CHECK_VIOLATION, "inventory_ledger_reason_check");
-    }
-
-    @Test
-    void rejectsReasonWithDifferentCase() {
-        String sku = "case-" + suffix();
-        assertThatCode(() -> insertSku(sku)).doesNotThrowAnyException();
-
-        assertSqlState(() -> insertLedger(sku, 1L, "Add"), CHECK_VIOLATION, "inventory_ledger_reason_check");
-    }
-
-    @Test
-    void rejectsEmptyReason() {
-        String sku = "empty-" + suffix();
-        assertThatCode(() -> insertSku(sku)).doesNotThrowAnyException();
-
-        assertSqlState(() -> insertLedger(sku, 1L, ""), CHECK_VIOLATION, "inventory_ledger_reason_check");
-    }
-
-    @Test
-    void rejectsNullReason() {
-        String sku = "nullreason-" + suffix();
-        assertThatCode(() -> insertSku(sku)).doesNotThrowAnyException();
-
-        assertSqlState(() -> insertLedger(sku, 1L, null), NOT_NULL_VIOLATION, null);
-    }
-
-    @Test
-    void rejectsNullQuantityDelta() {
-        String sku = "nulldelta-" + suffix();
-        assertThatCode(() -> insertSku(sku)).doesNotThrowAnyException();
-
-        assertSqlState(() -> insertLedger(sku, null, "add"), NOT_NULL_VIOLATION, null);
     }
 
     @Test
@@ -160,18 +192,6 @@ class LedgerSchemaTest {
             insertSku(minSku);
             insertLedger(minSku, Long.MIN_VALUE, "purchase");
         }).doesNotThrowAnyException();
-    }
-
-    @Test
-    void rejectsLedgerRowForUnknownSku() {
-        String sku = "ghost-" + suffix();
-
-        assertSqlState(() -> insertLedger(sku, 1L, "add"), FOREIGN_KEY_VIOLATION, "inventory_ledger_sku_id_fkey");
-    }
-
-    @Test
-    void rejectsNullLedgerSkuId() {
-        assertSqlState(() -> insertLedger(null, 1L, "add"), NOT_NULL_VIOLATION, null);
     }
 
     @Test
