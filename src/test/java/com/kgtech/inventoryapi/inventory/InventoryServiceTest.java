@@ -10,17 +10,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.Tables;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 
 /** Stock writes and reads through the service against Postgres (S11, DESIGN-V2 §2), without an Idempotency-Key. */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class InventoryServiceTest {
 
     @Autowired

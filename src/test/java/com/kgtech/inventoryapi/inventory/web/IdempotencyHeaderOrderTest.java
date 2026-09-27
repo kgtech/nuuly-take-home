@@ -20,6 +20,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -38,6 +39,7 @@ import com.kgtech.inventoryapi.inventory.WriteResult;
  * IdempotencyApiIntegrationTest). The service is a mock, so no advice and no database are involved.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 class IdempotencyHeaderOrderTest {
 
     private static final String KEY = "3f2b8c1e-9a4d-4e7f-b6a0-1c2d3e4f5a6b";

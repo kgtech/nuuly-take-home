@@ -9,14 +9,12 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.Tables;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.inventory.InventoryItem;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 
@@ -24,8 +22,7 @@ import com.kgtech.inventoryapi.inventory.InventoryService;
  * DESIGN-V2 §3: reads populate, writes refresh only existing entries, an older version never overwrites a newer one,
  * and a stale entry lives at most the stock TTL. The TTL is shortened here so the bound can be observed.
  */
-@SpringBootTest(properties = "inventory.cache.stock-ttl=700ms")
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(properties = "inventory.cache.stock-ttl=700ms")
 class StockCacheTest {
 
     @Autowired

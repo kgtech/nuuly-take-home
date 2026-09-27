@@ -8,20 +8,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.Tables;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 
 /**
  * Writers on distinct SKUs never interfere (C-03, issue #57): 8 threads each hammer their own SKU with adds and
  * purchases; every call succeeds, and afterwards each balance equals its ledger sum and none is negative.
  * Not @Transactional: each service call commits its own transaction.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class CrossSkuConcurrencyTest {
 
     private static final int THREADS = 8;

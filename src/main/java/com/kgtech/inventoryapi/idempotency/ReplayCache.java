@@ -18,9 +18,10 @@ import com.kgtech.inventoryapi.cache.RedisGuard;
 
 /**
  * A copy of completed idempotency rows in Redis (DESIGN-V2 §2 step 2): {@code idem:{key}} → hash {op, sku, hash,
- * status, ct, body, created}. The copy never outlives the row's T1 validity: it carries the row's claim time, its TTL
- * is the time left until created + 24h, and a lookup ignores an entry whose age exceeds the replay TTL, so an expired
- * key always falls through to Postgres, which rejects it. A miss or a Redis failure falls through as well.
+ * status, ct, body, created}. The copy never outlives the row's T1 validity ({@link IdempotencyStore#KEY_VALIDITY},
+ * the one constant both stores use): it carries the row's claim time, its TTL is the time left until created +
+ * validity, and a lookup ignores an entry at least that old, so an expired key always falls through to Postgres,
+ * which rejects it. A miss or a Redis failure falls through as well.
  */
 @Component
 class ReplayCache {
@@ -57,7 +58,7 @@ class ReplayCache {
                 return null;
             }
             Instant created = Instant.ofEpochMilli(Long.parseLong(m.get("created")));
-            if (Duration.between(created, clock.instant()).compareTo(properties.replayTtl()) >= 0) {
+            if (Duration.between(created, clock.instant()).compareTo(IdempotencyStore.KEY_VALIDITY) >= 0) {
                 return null; // T1: as old as the row's validity, so Postgres decides (and rejects)
             }
             return matches(m, request)
@@ -69,7 +70,7 @@ class ReplayCache {
 
     /** Called after the Postgres row is committed (or read back complete). Best effort; skipped once expired. */
     void put(IdempotentRequest request, StoredResponse response, Instant createdAt) {
-        Duration remaining = properties.replayTtl().minus(Duration.between(createdAt, clock.instant()));
+        Duration remaining = IdempotencyStore.KEY_VALIDITY.minus(Duration.between(createdAt, clock.instant()));
         if (remaining.isNegative() || remaining.isZero()) {
             return;
         }

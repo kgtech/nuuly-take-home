@@ -82,9 +82,11 @@ import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 class InventoryController {
 
     private final InventoryService service;
+    private final OutcomeResponses outcomes;
 
-    InventoryController(InventoryService service) {
+    InventoryController(InventoryService service, OutcomeResponses outcomes) {
         this.service = service;
+        this.outcomes = outcomes;
     }
 
     @GetMapping(SKU_PATH)
@@ -187,14 +189,16 @@ class InventoryController {
         return "<" + url + ">; rel=\"next\"";
     }
 
-    /** Maps every write result; keyed responses (first and replayed) are sent as stored (Y4). */
-    private static ResponseEntity<?> toResponse(String skuId, WriteResult result) {
+    /**
+     * One mapping for every write result (C-17, issue #28): a stock outcome is rendered through the same
+     * OutcomeResponses.toStored that a keyed request stores, so unkeyed and replayed responses are byte-identical (Y4).
+     */
+    private ResponseEntity<?> toResponse(String skuId, WriteResult result) {
         return switch (result) {
-            case Ok ok -> ResponseEntity.ok(new InventoryItem(skuId, ok.quantity()));
-            case NotFound _ -> TextErrors.skuNotFound();
-            case Insufficient _ -> TextErrors.insufficientInventory();
-            case Overflow _, InvalidRequest _ -> TextErrors.invalidRequest();
             case Stored stored -> StoredResponses.toResponseEntity(stored.response());
+            case InvalidRequest _ -> TextErrors.invalidRequest();
+            case Ok _, NotFound _, Insufficient _, Overflow _ ->
+                    StoredResponses.toResponseEntity(outcomes.toStored(skuId, result));
         };
     }
 }

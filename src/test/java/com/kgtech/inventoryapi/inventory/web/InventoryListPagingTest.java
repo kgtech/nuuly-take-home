@@ -22,6 +22,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
@@ -41,6 +42,7 @@ import com.kgtech.inventoryapi.inventory.InventoryService;
  * host, port and context path plus the routed path /inventory.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 class InventoryListPagingTest {
 
     private static final Pattern LINK_VALUE = Pattern.compile("^<([^>]+)>; rel=\"next\"$");

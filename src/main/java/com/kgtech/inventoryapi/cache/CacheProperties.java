@@ -4,15 +4,17 @@ import java.time.Duration;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** DESIGN-V2 §2–3: the staleness bound for a cached count and the lifetime of a cached replay. */
+/**
+ * DESIGN-V2 §3: the staleness bound for a cached count. The replay copy's lifetime is not configurable: it is
+ * {@code IdempotencyStore.KEY_VALIDITY}, so Redis can never outlive the Postgres row's validity.
+ */
 @ConfigurationProperties("inventory.cache")
-public record CacheProperties(Duration stockTtl, Duration replayTtl) {
+public record CacheProperties(Duration stockTtl) {
 
     public CacheProperties {
         stockTtl = stockTtl == null ? Duration.ofSeconds(5) : stockTtl;
-        replayTtl = replayTtl == null ? Duration.ofHours(24) : replayTtl;
-        if (stockTtl.isNegative() || stockTtl.isZero() || replayTtl.isNegative() || replayTtl.isZero()) {
-            throw new IllegalArgumentException("inventory.cache TTLs must be positive");
+        if (stockTtl.isNegative() || stockTtl.isZero()) {
+            throw new IllegalArgumentException("inventory.cache.stock-ttl must be positive");
         }
     }
 }

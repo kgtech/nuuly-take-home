@@ -30,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -46,6 +47,7 @@ import com.kgtech.inventoryapi.inventory.InventoryService;
  * reason phrase, whatever the Accept header. Every request sends Accept: application/json unless noted.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 @ExtendWith(OutputCaptureExtension.class)
 class InventoryErrorAdviceTest {
 
