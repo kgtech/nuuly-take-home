@@ -26,12 +26,12 @@ import com.kgtech.inventoryapi.idempotency.Operation;
 public class InventoryService {
 
     /** R8: the largest page. */
-    private static final int MAX_LIMIT = 250;
+    public static final int MAX_LIMIT = 250;
     private static final BigInteger MAX_LIMIT_BIG = BigInteger.valueOf(MAX_LIMIT);
     /** R4: ASCII digits with an optional sign; anything else is ignored. */
     private static final Pattern LIMIT = Pattern.compile("[+-]?[0-9]+");
     /** G9, C2: an absent or ignored limit means the largest page. */
-    private static final int DEFAULT_LIMIT = MAX_LIMIT;
+    public static final int DEFAULT_LIMIT = MAX_LIMIT;
     /** Every sku_id is non-empty, so the empty cursor starts before all of them. */
     private static final String FIRST = "";
 

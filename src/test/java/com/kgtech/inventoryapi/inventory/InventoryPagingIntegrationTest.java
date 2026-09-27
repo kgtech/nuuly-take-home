@@ -390,12 +390,17 @@ class InventoryPagingIntegrationTest {
                 .andExpect(header().doesNotExist(LINK));
     }
 
-    /** C2, AC2: over 250 SKUs without limit → the first 250 and a Link with limit=250; the Link reaches the rest. */
-    @Test
-    void noParamsOver250ReturnsDefaultPageAndLink() throws Exception {
+    /**
+     * C2, AC2, R4: over 250 SKUs without limit, or with a limit R4 ignores, → the first 250 and a Link with limit=250;
+     * the Link reaches the rest. InventoryServiceReadTest#listTreatsUnusableLimitAsDefault covers the other ignored
+     * forms.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/inventory", "/inventory?limit=abc"})
+    void noParamsOver250ReturnsDefaultPageAndLink(String uri) throws Exception {
         seedNumbered(251);
 
-        Page first = page(URI.create("/inventory"));
+        Page first = page(URI.create(uri));
 
         assertThat(ids(first)).containsExactlyElementsOf(numbered(1, 250));
         assertThat(first.next()).isEqualTo(URI.create("http://localhost/inventory?limit=250&after=p250"));
@@ -432,20 +437,6 @@ class InventoryPagingIntegrationTest {
         Page last = page(first.next());
         assertThat(ids(last)).containsExactlyElementsOf(numbered(261, 300));
         assertThat(last.next()).isNull();
-    }
-
-    /**
-     * R4, C2: an ignored limit means the default page of 250, with a Link carrying limit=250. One value here;
-     * InventoryServiceReadTest#listTreatsUnusableLimitAsDefault covers the other ignored forms.
-     */
-    @Test
-    void ignoredLimitUsesDefaultPage() throws Exception {
-        seedNumbered(251);
-
-        Page first = page(uri("abc", null));
-
-        assertThat(ids(first)).containsExactlyElementsOf(numbered(1, 250));
-        assertThat(first.next()).isEqualTo(URI.create("http://localhost/inventory?limit=250&after=p250"));
     }
 
     /** C2: exactly 250 SKUs without limit fill one page, which is the last: no Link. */

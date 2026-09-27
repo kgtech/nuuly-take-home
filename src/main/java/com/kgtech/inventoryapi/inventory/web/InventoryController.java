@@ -1,5 +1,7 @@
 package com.kgtech.inventoryapi.inventory.web;
 
+import static com.kgtech.inventoryapi.inventory.InventoryService.DEFAULT_LIMIT;
+import static com.kgtech.inventoryapi.inventory.InventoryService.MAX_LIMIT;
 import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
 import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
@@ -22,9 +24,11 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_OK_DESCRIP
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_SUMMARY;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_INVALID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_SUMMARY;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_ID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_NOT_FOUND_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.TAG;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.springframework.http.HttpHeaders.LINK;
@@ -83,7 +87,7 @@ class InventoryController {
         this.service = service;
     }
 
-    @GetMapping("/{skuId}")
+    @GetMapping(SKU_PATH)
     @Operation(operationId = "getInventory", summary = GET_SUMMARY)
     @ApiResponse(responseCode = "200", description = GET_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
@@ -98,7 +102,7 @@ class InventoryController {
                 .orElseGet(TextErrors::skuNotFound);
     }
 
-    @PostMapping(path = "/{skuId}", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+    @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
     @Operation(operationId = "createInventory", summary = CREATE_SUMMARY)
     @ApiResponse(responseCode = "200", description = CREATE_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
@@ -116,7 +120,7 @@ class InventoryController {
         return toResponse(skuId, service.add(skuId, body.quantity(), idempotencyKey));
     }
 
-    @PostMapping(path = "/{skuId}/purchase", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+    @PostMapping(path = PURCHASE_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
     @Operation(operationId = "purchaseItem", summary = PURCHASE_SUMMARY)
     @ApiResponse(responseCode = "200", description = PURCHASE_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
@@ -146,7 +150,8 @@ class InventoryController {
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
     ResponseEntity<?> list(
             @Parameter(description = LIMIT_DESCRIPTION,
-                    schema = @Schema(type = "integer", minimum = "1", maximum = "250", defaultValue = "250"))
+                    schema = @Schema(type = "integer", minimum = "1", maximum = "" + MAX_LIMIT,
+                            defaultValue = "" + DEFAULT_LIMIT))
             @RequestParam(name = LIMIT, required = false) String limit,
             @Parameter(description = AFTER_DESCRIPTION,
                     schema = @Schema(type = "string"))
