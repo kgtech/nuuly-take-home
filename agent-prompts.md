@@ -980,3 +980,73 @@ Tool: Claude Code (desktop), one orchestrator and 10 subagent runs.
 - On R1-2: "The error could be logged to the logging service, so any engineer would be able to see the error in the logs. I'm not as concerned about getting the log to Tomcat."
 - Then: "That isn't what I asked for. I want the error to be logged in the logs. I want the 400 text response."
 - Then: "Use warning instead of error and stack. So we only want the warning. And I want to apply this across all paths. So we get the warning logs."
+
+## 28. Issue #22 with sequential subagents: critique fix C-02, C-08, C-09 (2026-09-26 to 2026-09-27)
+
+**Prompt**
+> Implement https://github.com/kgtech/nuuly-take-home/issues/22 using sequential subagents. You are the orchestrator and the only agent that talks to me. Subagents can't pause for approval; you do. (Full text: [ai/Prompt Template.md](ai/Prompt%20Template.md). Run as step 6 of the codebase critique; the template was updated by PR #32 during this run.)
+
+Tool: Claude Code (desktop), one orchestrator and 11 subagent runs (including resumes). Decision queue: [ai/decision-queues/issue-22.md](ai/decision-queues/issue-22.md).
+
+**Output summary**
+- **Plan:**
+  - Branch `feat/issue-22-default-page-limit`.
+  - Every `GET /inventory` runs the keyset query with a page size (limit, or 250 when absent or ignored, `after` alone included).
+  - The next-page Link is built from the routed path `/inventory` rather than the raw request URI.
+  - The OpenAPI documents the skuId pattern, `minLength` 1 and `maxLength` 64, `minimum: 0` on quantity, and the default page.
+  - No new dependencies. 6 open questions, resolved with the planner's recommendations.
+- **Process switch:** PR #32 changed the templates mid-run. From the test author on: owner questions went through a decision queue, prompts were posted on issue #22 before each run, test-request changes stayed uncommitted until the fix that made them pass, and this entry is committed without a separate approval.
+- **Decision change (board, S9):**
+  - The unchanged board reproduced the exports byte for byte.
+  - Added C2 (round 12), refining G9, R4, R8 and S11.
+  - C2 was later amended twice: InventoryApi (refining Z2), then "the API paths".
+  - Three `[Decision change]` comments on #22.
+- **Test author:** 53 new or changed tests failed at baseline on assertions; two repository tests for the removed unbounded query were deleted. A throwaway probe confirmed springdoc renders the new schema keywords, and that MockMvc and Tomcat route `/%69nventory`.
+- **Implementer:**
+  - Green at 793; the 600-SKU smoke passed. Opened PR [#33](https://github.com/kgtech/nuuly-take-home/pull/33).
+  - Four departures from the plan went to the queue: `BASE_PATH` visibility, a shared description constant, a moved null check, and the mutation-percentage change.
+- **Review round 1:** 1 MINOR (context-path double encoding), 1 MINOR and 4 NIT test overlaps, and 1 DECISION CHALLENGE (the absolute Link is built from `Host` and ignores X-Forwarded).
+- **Fixes, round 1:**
+  - Web-layer API strings moved into `InventoryApi`.
+  - The 200 description now states the page size.
+  - The null-check move was reverted.
+  - README notes on the proxy/Host and context-path limitations.
+  - The overlapping tests were removed or merged. Green at 788.
+- **Review round 2:** 2 MINOR (README cause wording; `250` duplicated against `MAX_LIMIT`), 1 DECISION CHALLENGE (path templates vs the Z2/C2 wording), 1 NIT (a test merge). R1-2 to R1-6 resolved.
+- **Fixes, round 2:**
+  - Page sizes are public `InventoryService` constants used by the OpenAPI.
+  - The path templates moved into `InventoryApi`.
+  - The README wording was corrected and the tests merged.
+  - `openapi.yaml` stayed byte-identical. Green at 788.
+- **Verifier:** nothing unresolved; HEAD equals the PR head; no CI checks configured. The orchestrator resolved R2-1 to R2-4.
+
+**Accepted**
+- The plan and C2, including the default page of 250 (your G9 revision from the critique triage).
+- A shared description constant, then every web-layer API string in `InventoryApi`, path templates included.
+- A 200 description that states the page size.
+- Removing the overlapping tests found in review.
+- Page sizes taken from `InventoryService` constants.
+
+**Rejected**
+- Reverted: the implementer's move of the null check into `list`.
+- Superseded by `InventoryApi`: `BASE_PATH` made package-private with a static self-import. So was the interim choice of a literal `@RequestMapping`.
+- Not adopted: a relative Link, and a forwarded-headers strategy (R1-7; kept absolute, documented, deferred).
+- Deferred: fixing the context-path encoding now (R1-1), documented in the README.
+- Scoped out: moving every schema literal (`operationId`, `responseCode`) into `InventoryApi`.
+
+**My response**
+- "Approved" (switching to the updated templates).
+- "Yes" (the plan).
+- "Why use a literal in the request mapping?" Then: "B".
+- "If the constants work we need to have a centralized location for all constants. Otherwise this should be a string literal. Constants need to be together for readability for human readers."
+- "The behavior is unchanged so why commit this change?" Also, about the queue page: "Options shows up twice once as a radio button and second as a drop down list. Board makes it look like A is always the recommended option because of the highlighting."
+- "The issue isn't the weaker tests its the overlapping tests."
+- "The sepcs text is intentional but we've experienced during testing the issue when we have a large dataset and try to return all data. This is a tradeoff that needs to be made in order to prevent 500s when getting a large list of inventory."
+- Queue answers without a reason:
+  - keep the absolute Link and document it (R1-7)
+  - revert the null-check move
+  - InventoryApi for constants
+  - fix the overlapping tests in this PR
+  - defer R1-1
+  - move every OpenAPI text
+  - move the path templates

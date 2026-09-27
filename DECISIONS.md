@@ -1,6 +1,6 @@
 # DECISIONS
 
-Nuuly inventory API take-home. Generated from the decision board on 2026-09-26.
+Nuuly inventory API take-home. Generated from the decision board on 2026-09-27.
 Each entry records my choice and my reasoning; rejected options list my reason, or the option's main drawback from research when I left it blank.
 
 | ID | Type | Question | Choice | Matched recommendation |
@@ -71,6 +71,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | Z2 | Design | How is the inventory feature split between web and domain code? | B: Domain package + web sub-package | Yes |
 | Z3 | Spec gap | What does GET /inventory return for a query string it can't read unambiguously? | B: 400 "Invalid request" | No |
 | C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths | Yes |
+| C2 | Spec gap | What does GET /inventory return when no limit is given? | A: Default page of 250 (the R8 maximum), Link for the rest | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -227,9 +228,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Opt-in offset paging (page, size). Drawback noted in research: OFFSET cost grows; rows shift between pages when stock is added.
   - D: Paged by default (e.g. 50). Drawback noted in research: A client that sends no params no longer gets all SKUs, which breaks the contract.
 - **Matched recommendation:** Yes
-- **Refined by:** R8
+- **Refined by:** R8, C2
 - **Current rules (after refinement):**
-  - Optional `limit` (1–250) and `after` (last skuId) query params. Without them return every row. (refined by R8)
+  - Optional `limit` (1–250) and `after` (last skuId) query params. Without limit (or with one R4 ignores) the page size is 250, the R8 maximum, with the same Link when more rows exist; after alone is capped the same way (C2). (refined by R8, C2)
   - Keyset query: WHERE sku_id > :after ORDER BY sku_id LIMIT :limit + 1. If the extra row exists, add Link: <…>; rel="next".
 
 ## G10: Auth, and which HTTP status codes may the API return?
@@ -444,9 +445,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Coerce large values, 400 for nonsense. Drawback noted in research: Adds a 400 to an operation that lists only 200.
   - C: Strict 400 for any bad value. Drawback noted in research: Adds a 400 the spec doesn't list.
 - **Matched recommendation:** Yes
-- **Refined by:** Z3
+- **Refined by:** Z3, C2
 - **Current rules (after refinement):**
-  - GET /inventory returns 400 "Invalid request" only when its query string can't be decoded or repeats after (Z3). Non-positive or non-numeric limit → ignored. limit above the max → the max. after is compared as a plain string and never validated; after alone returns every row after it. (refined by Z3)
+  - GET /inventory returns 400 "Invalid request" only when its query string can't be decoded or repeats after (Z3). Non-positive or non-numeric limit → ignored, so the default page of 250 applies (C2). limit above the max → the max. after is compared as a plain string and never validated; after alone returns the next 250 rows after it, with a Link when more exist (C2). (refined by Z3, C2)
 
 ## R5: G4's reasoning argues the opposite of its choice. Which one stands?
 
@@ -486,6 +487,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: 1–1000. Drawback noted in research: Larger than the commerce APIs above.
   - C: 1–100 (GitHub, Stripe). Drawback noted in research: More requests for large inventories.
 - **Matched recommendation:** Yes
+- **Refined by:** C2
+- **Current rules (after refinement):**
+  - limit range is 1–250; 250 is also the page size when limit is absent or ignored (C2). (refined by C2)
 
 ## R9: Confirm how and when Idempotency-Keys expire
 
@@ -634,9 +638,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Named test matrix in docs/test-plan.md, referenced from CLAUDE.md. Drawback noted in research: About 0.5h more than A for the table and keeping names in sync (priority 2)..
   - C: Only concurrency tests plus happy paths. Drawback noted in research: Breaks priority 1: the G12 guard, CHECK, COLLATE "C" order, Link header and idempotency replay/expiry ship without ever being executed by a test..
 - **Matched recommendation:** Yes
-- **Refined by:** T1, V2, W1, W2
+- **Refined by:** T1, V2, W1, W2, C2
 - **Current rules (after refinement):**
-  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change. (refined by T1, V2, W1)
+  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change. (refined by T1, V2, W1, C2)
   - Include a concurrent add test: N ≤ 8 threads add 1 to one new SKU through the service; assert all return Ok and the final quantity is N. (refined by W2)
   - Concurrency tests are not @Transactional; clean tables in @BeforeEach.
 
@@ -845,6 +849,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - A: One flat inventory package. Drawback noted in research: Web and domain code mix; nothing stops the domain importing HTTP types.
 - **Matched recommendation:** Yes
+- **Refined by:** C2
+- **Current rules (after refinement):**
+  - The inventory feature has a domain package (com.kgtech.inventoryapi.inventory: InventoryService, SkuRepository, InventoryWrites/InventoryWritesImpl, Sku, SkuQuantity, StockOutcome, WriteResult, SkuId, InventoryItem, InventoryPage, SerializationFailure, StockWriteFailureLogger) and a web package (com.kgtech.inventoryapi.inventory.web: InventoryController, InventoryErrorAdvice, JsonAcceptForGetFilter, TextErrors, InventoryQuantity, OutcomeResponses, InventoryApi (API paths, parameter names and OpenAPI texts, C2)). The web layer declares no business types or enums; it imports them from the domain package. The domain package never imports Spring MVC or HTTP transport types. (refined by C2)
+  - Header names are never string literals in code: they come from com.kgtech.inventoryapi.web.HttpConstants (e.g. IDEMPOTENCY_KEY) or Spring's HttpHeaders/MediaType constants, including in springdoc annotations.
+  - Controllers static-import constants and import nested types, so method bodies and annotations use no qualified names (e.g. case Ok ok ->, APPLICATION_JSON_VALUE).
 
 ## Z3: What does GET /inventory return for a query string it can't read unambiguously?
 
@@ -871,4 +880,15 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Leave Tomcat's HTML pages; document them. Drawback noted in research: Breaks D6/S5 (every error is text/plain) and G11's 404 for GET /inventory/A%2FB.
   - C: Hard-code the Allow lists in the valve for TRACE. Drawback noted in research: A second copy of the routing that drifts from the controller.
   - D: Keep %2F rejected; map it in the valve. Drawback noted in research: Hand-written path parsing in a Tomcat valve.
+- **Matched recommendation:** Yes
+
+## C2: What does GET /inventory return when no limit is given?
+
+- **Type:** Spec gap
+- **Choice:** A: Default page of 250 (the R8 maximum), Link for the rest
+- **My reasoning:** Revise G9 — apply a default page limit (e.g., 250) when limit is absent. Constants (Q22-03): If the constants work we need to have a centralized location for all constants. Otherwise this should be a string literal. Constants need to be together for readability for human readers.
+- **Rejected:**
+  - B: Keep every row; document the risk. Drawback noted in research: Any unauthenticated client can exhaust the heap (C-02).
+  - C: Stream every row. Drawback noted in research: Response time and database load still grow with the table.
+  - D: Default page of 50. Drawback noted in research: More round trips; a second number to document next to R8's 250.
 - **Matched recommendation:** Yes

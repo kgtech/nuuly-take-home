@@ -1,5 +1,35 @@
 package com.kgtech.inventoryapi.inventory.web;
 
+import static com.kgtech.inventoryapi.inventory.InventoryService.DEFAULT_LIMIT;
+import static com.kgtech.inventoryapi.inventory.InventoryService.MAX_LIMIT;
+import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
+import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_TITLE;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_VERSION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_SUMMARY;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.GET_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.GET_SUMMARY;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LINK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_SUMMARY;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PURCHASE_SUMMARY;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_ID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_NOT_FOUND_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.TAG;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
@@ -45,14 +75,11 @@ import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
 /** The four spec operations (hand-written, D7), with the spec's info, operationIds and summaries. */
-@OpenAPIDefinition(info = @Info(title = "Inventory API", version = "1.0.0"))
-@Tag(name = "inventory")
+@OpenAPIDefinition(info = @Info(title = API_TITLE, version = API_VERSION))
+@Tag(name = TAG)
 @RestController
-@RequestMapping("/inventory")
+@RequestMapping(BASE_PATH)
 class InventoryController {
-
-    private static final String LIMIT = "limit";
-    private static final String AFTER = "after";
 
     private final InventoryService service;
 
@@ -60,62 +87,73 @@ class InventoryController {
         this.service = service;
     }
 
-    @GetMapping("/{skuId}")
-    @Operation(operationId = "getInventory", summary = "Get inventory for a SKU")
-    @ApiResponse(responseCode = "200", description = "Current inventory state for the sku",
+    @GetMapping(SKU_PATH)
+    @Operation(operationId = "getInventory", summary = GET_SUMMARY)
+    @ApiResponse(responseCode = "200", description = GET_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
-    @ApiResponse(responseCode = "404", description = "SKU not found",
+    @ApiResponse(responseCode = "404", description = SKU_NOT_FOUND_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
-    ResponseEntity<?> get(@PathVariable String skuId) {
+    ResponseEntity<?> get(
+            @Parameter(description = SKU_ID_DESCRIPTION,
+                    schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
+            @PathVariable String skuId) {
         return service.find(skuId)
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
                 .orElseGet(TextErrors::skuNotFound);
     }
 
-    @PostMapping(path = "/{skuId}", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
-    @Operation(operationId = "createInventory", summary = "Create or update inventory for a SKU")
-    @ApiResponse(responseCode = "200", description = "Current state of the item after update",
+    @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+    @Operation(operationId = "createInventory", summary = CREATE_SUMMARY)
+    @ApiResponse(responseCode = "200", description = CREATE_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
-    @ApiResponse(responseCode = "400", description = "Invalid request",
+    @ApiResponse(responseCode = "400", description = CREATE_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
-    ResponseEntity<?> create(@PathVariable String skuId, @Valid @RequestBody InventoryQuantity body,
+    ResponseEntity<?> create(
+            @Parameter(description = SKU_ID_DESCRIPTION,
+                    schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
+            @PathVariable String skuId,
+            @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = "Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400.",
+                    description = IDEMPOTENCY_KEY_DESCRIPTION,
                     schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
         return toResponse(skuId, service.add(skuId, body.quantity(), idempotencyKey));
     }
 
-    @PostMapping(path = "/{skuId}/purchase", consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
-    @Operation(operationId = "purchaseItem", summary = "Purchase a quantity of a SKU")
-    @ApiResponse(responseCode = "200", description = "Purchase successful; remaining inventory for the item",
+    @PostMapping(path = PURCHASE_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+    @Operation(operationId = "purchaseItem", summary = PURCHASE_SUMMARY)
+    @ApiResponse(responseCode = "200", description = PURCHASE_OK_DESCRIPTION,
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = InventoryItem.class)))
-    @ApiResponse(responseCode = "400", description = "Insufficient inventory or invalid request",
+    @ApiResponse(responseCode = "400", description = PURCHASE_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
-    @ApiResponse(responseCode = "404", description = "SKU not found",
+    @ApiResponse(responseCode = "404", description = SKU_NOT_FOUND_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
-    ResponseEntity<?> purchase(@PathVariable String skuId, @Valid @RequestBody InventoryQuantity body,
+    ResponseEntity<?> purchase(
+            @Parameter(description = SKU_ID_DESCRIPTION,
+                    schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
+            @PathVariable String skuId,
+            @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = "Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400.",
+                    description = IDEMPOTENCY_KEY_DESCRIPTION,
                     schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
         return toResponse(skuId, service.purchase(skuId, body.quantity(), idempotencyKey));
     }
 
     @GetMapping
-    @Operation(operationId = "listInventory", summary = "List all inventory")
-    @ApiResponse(responseCode = "200", description = "List of all inventory items",
-            headers = @Header(name = LINK, description = "Next page, when there is one: <URL>; rel=\"next\"",
-                    schema = @Schema(type = "string")),
+    @Operation(operationId = "listInventory", summary = LIST_SUMMARY, description = LIST_DESCRIPTION)
+    @ApiResponse(responseCode = "200", description = LIST_OK_DESCRIPTION,
+            headers = @Header(name = LINK, description = LINK_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE,
                     array = @ArraySchema(schema = @Schema(implementation = InventoryItem.class))))
-    @ApiResponse(responseCode = "400", description = "Invalid request: the query string can't be decoded or repeats after",
+    @ApiResponse(responseCode = "400", description = LIST_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
     ResponseEntity<?> list(
-            @Parameter(description = "Optional page size, 1 to 250. Larger values mean 250; other values are ignored.",
-                    schema = @Schema(type = "integer", minimum = "1", maximum = "250"))
+            @Parameter(description = LIMIT_DESCRIPTION,
+                    schema = @Schema(type = "integer", minimum = "1", maximum = "" + MAX_LIMIT,
+                            defaultValue = "" + DEFAULT_LIMIT))
             @RequestParam(name = LIMIT, required = false) String limit,
-            @Parameter(description = "Optional cursor: return only SKUs whose skuId sorts after this value. It must not be repeated.",
+            @Parameter(description = AFTER_DESCRIPTION,
                     schema = @Schema(type = "string"))
             @RequestParam(name = AFTER, required = false) String after,
             HttpServletRequest request) {
@@ -134,10 +172,13 @@ class InventoryController {
         return values != null && values.length > 1;
     }
 
-    /** G9: absolute next-page URL from the current request; other query params dropped, after strictly encoded. */
+    /**
+     * G9, C2: absolute next-page URL from the request's scheme, host, port and context path plus the routed path, never
+     * the raw request URI; only limit and after, with after strictly encoded.
+     */
     private static String nextLink(Next next) {
-        String url = ServletUriComponentsBuilder.fromCurrentRequestUri()
-                .replaceQuery(null)
+        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path(BASE_PATH)
                 .queryParam(LIMIT, next.limit())
                 .queryParam(AFTER, "{after}")
                 .encode()

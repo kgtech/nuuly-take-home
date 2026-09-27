@@ -36,8 +36,9 @@ import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 
 /**
- * G9, R4: GET /inventory passes limit and after to the service as raw strings, answers a bare JSON array and,
- * when the service returns a next cursor, one absolute {@code Link: <…>; rel="next"} built from the request.
+ * G9, R4, C2: GET /inventory passes limit and after to the service as raw strings, answers a bare JSON array and,
+ * when the service returns a next cursor, one absolute {@code Link: <…>; rel="next"} built from the request's scheme,
+ * host, port and context path plus the routed path /inventory.
  */
 @WebMvcTest(InventoryController.class)
 class InventoryListPagingTest {
@@ -140,6 +141,26 @@ class InventoryListPagingTest {
         mvc.perform(get(URI.create("/inventory?limit=%2B9999")))
                 .andExpect(status().isOk())
                 .andExpect(header().string(LINK, "<http://localhost/inventory?limit=250&after=B>; rel=\"next\""));
+    }
+
+    /** C2: path parameters on the request path are not echoed into the Link. */
+    @Test
+    void linkDropsPathParameters() throws Exception {
+        stub("2", null, Optional.of(new Next(2, "B")));
+
+        mvc.perform(get(URI.create("/inventory;x=1?limit=2")))
+                .andExpect(status().isOk())
+                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=2&after=B>; rel=\"next\""));
+    }
+
+    /** C2: the Link keeps the request's context path. */
+    @Test
+    void linkKeepsContextPath() throws Exception {
+        stub("2", null, Optional.of(new Next(2, "B")));
+
+        mvc.perform(get("/app/inventory?limit=2").contextPath("/app"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(LINK, "<http://localhost/app/inventory?limit=2&after=B>; rel=\"next\""));
     }
 
     @Test

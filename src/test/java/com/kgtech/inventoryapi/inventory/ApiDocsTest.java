@@ -39,9 +39,9 @@ import com.jayway.jsonpath.JsonPath;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
- * OQ2, S6, S12, Z3: springdoc documents exactly the spec's operations, codes (plus GET /inventory's 400) and media
- * types, and its own paths keep library behaviour. Same annotations as InventoryApiIntegrationTest so the context
- * and container are reused.
+ * OQ2, S6, S12, Z3, C2: springdoc documents exactly the spec's operations, codes (plus GET /inventory's 400) and
+ * media types, the skuId pattern, the quantity minimum and the default page, and its own paths keep library
+ * behaviour. Same annotations as InventoryApiIntegrationTest so the context and container are reused.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -184,7 +184,10 @@ class ApiDocsTest {
         return byName;
     }
 
-    /** G9, R4, R8: GET /inventory documents optional limit (integer 1–250) and after (string) query parameters. */
+    /**
+     * G9, R4, R8, C2: GET /inventory documents optional limit (integer 1–250, default 250) and after (string) query
+     * parameters.
+     */
     @Test
     void listDocumentsOptionalLimitAndAfterQueryParameters() throws Exception {
         Map<String, Map<String, Object>> parameters = listQueryParameters();
@@ -199,9 +202,28 @@ class ApiDocsTest {
             assertThat(schema.get("type")).isEqualTo("integer");
             assertThat(((Number) schema.get("minimum")).intValue()).isEqualTo(1);
             assertThat(((Number) schema.get("maximum")).intValue()).isEqualTo(250);
+            assertThat(schema.get("default")).as("limit default").isInstanceOfSatisfying(Number.class,
+                    value -> assertThat(value.intValue()).isEqualTo(250));
         });
+        assertThat((String) parameters.get("limit").get("description")).contains("default 250");
         assertThat(parameters.get("after").get("schema")).isInstanceOfSatisfying(Map.class,
                 schema -> assertThat(schema.get("type")).isEqualTo("string"));
+    }
+
+    /**
+     * C2: GET /inventory's description states the default page and the Link, and its 200 response describes one page
+     * of at most 250 items (Q22-07); the summary stays the spec's.
+     */
+    @Test
+    void listDocumentsDefaultPage() throws Exception {
+        Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['/inventory'].get");
+
+        assertThat(operation.get("description")).isInstanceOfSatisfying(String.class, description -> assertThat(
+                description).contains("at most 250", "Link"));
+        assertThat(operation.get("summary")).isEqualTo("List all inventory");
+        assertThat(JsonPath.<Object>read(apiDocs(), "$.paths['/inventory'].get.responses['200'].description"))
+                .as("200 response description").isInstanceOfSatisfying(String.class,
+                        description -> assertThat(description).contains("250"));
     }
 
     /** Z3, S12: GET /inventory documents its 400 as text/plain, and after says it must not be repeated. */
@@ -383,6 +405,46 @@ class ApiDocsTest {
 
             assertThat(quantity.get("type")).as(schema.toString()).isEqualTo("integer");
             assertThat(quantity.get("format")).as(schema.toString()).isEqualTo("int64");
+        }
+    }
+
+    /** C2, G11: each skuId path parameter documents the G11 pattern, minLength 1 and maxLength 64 (S2: no @Pattern). */
+    @ParameterizedTest(name = "{1} {0}")
+    @CsvSource(delimiter = '|', value = {
+        "/inventory/{skuId}          | get",
+        "/inventory/{skuId}          | post",
+        "/inventory/{skuId}/purchase | post"
+    })
+    @SuppressWarnings("unchecked")
+    void skuIdPathParametersDocumentPattern(String path, String method) throws Exception {
+        Object parameters = map(exported(), "paths", path, method).get("parameters");
+        assertThat(parameters).as("parameters").isInstanceOf(List.class);
+
+        assertThat(((List<Map<String, Object>>) parameters).stream().filter(p -> "skuId".equals(p.get("name"))))
+                .singleElement().satisfies(parameter -> {
+                    assertThat(parameter.get("in")).isEqualTo("path");
+                    assertThat(parameter.get("required")).isEqualTo(true);
+                    Map<String, Object> schema = map(parameter, "schema");
+                    assertThat(schema.get("type")).isEqualTo("string");
+                    assertThat(schema.get("pattern")).isEqualTo("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+                    assertThat(schema.get("minLength")).isEqualTo(1);
+                    assertThat(schema.get("maxLength")).isEqualTo(64);
+                });
+    }
+
+    /** C2: the response quantity has the spec's minimum 0, on the InventoryItem component and every item response. */
+    @Test
+    void inventoryItemQuantityHasMinimum0() throws Exception {
+        Map<String, Object> doc = exported();
+        List<Map<String, Object>> quantities = List.of(
+                map(doc, "components", "schemas", "InventoryItem", "properties", "quantity"),
+                map(resolve(doc, map(doc, "paths", "/inventory/{skuId}", "get", "responses", "200", "content",
+                        MediaType.APPLICATION_JSON_VALUE, "schema")), "properties", "quantity"),
+                map(resolve(doc, map(resolve(doc, map(doc, "paths", "/inventory", "get", "responses", "200",
+                        "content", MediaType.APPLICATION_JSON_VALUE, "schema")), "items")), "properties", "quantity"));
+        for (Map<String, Object> quantity : quantities) {
+            assertThat(quantity.get("minimum")).as(quantity.toString()).isInstanceOfSatisfying(Number.class,
+                    minimum -> assertThat(minimum.intValue()).isEqualTo(0));
         }
     }
 

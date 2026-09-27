@@ -28,10 +28,11 @@ import com.kgtech.inventoryapi.RawHttp.Response;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
- * Z3, R4, G10, S5 through real Tomcat: a GET /inventory query string that can't be decoded (a malformed
- * percent-escape or invalid UTF-8) answers 400 text/plain "Invalid request", never 500. MockMvc doesn't decode the
- * query and java.net.URI rejects these escapes, so the request is written to a raw socket. Not @Transactional: the
- * server commits its own transactions, so the tables are emptied before each test.
+ * Z3, R4, G10, S5, C2 through real Tomcat, with the raw query and path: a GET /inventory query string that can't be
+ * decoded (a malformed percent-escape or invalid UTF-8) answers 400 text/plain "Invalid request", never 500, and an
+ * encoded request path still yields a Link to the routed path /inventory. MockMvc doesn't decode the query and
+ * java.net.URI rejects these escapes, so the request is written to a raw socket. Not @Transactional: the server
+ * commits its own transactions, so the tables are emptied before each test.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(TestcontainersConfiguration.class)
@@ -59,7 +60,12 @@ class InventoryListMalformedQueryIntegrationTest {
 
     /** Sends {@code GET /inventory?<query>} byte for byte, so the server sees the escapes exactly as written. */
     private Response get(String query) throws IOException {
-        String head = "GET /inventory?" + query + " HTTP/1.1\r\n"
+        return getRaw("/inventory?" + query);
+    }
+
+    /** Sends {@code GET <pathAndQuery>} byte for byte, so the server sees the path and query exactly as written. */
+    private Response getRaw(String pathAndQuery) throws IOException {
+        String head = "GET " + pathAndQuery + " HTTP/1.1\r\n"
                 + RawHttp.header(HOST, "localhost:" + port)
                 + RawHttp.header(ACCEPT, APPLICATION_JSON_VALUE)
                 + RawHttp.header(CONNECTION, "close");
@@ -107,5 +113,25 @@ class InventoryListMalformedQueryIntegrationTest {
         assertThat(response.status()).as(response.toString()).isEqualTo(400);
         assertThat(response.contentType().isCompatibleWith(TEXT_PLAIN)).as(response.toString()).isTrue();
         assertThat(response.body()).isEqualTo("Invalid request");
+    }
+
+    /** C2: an encoded request path is routed to /inventory, and its Link targets /inventory, which answers 200. */
+    @Test
+    void encodedPathLinkTargetsRoutedPath() throws IOException {
+        Response first = getRaw("/%69nventory?limit=1");
+
+        assertThat(first.status()).as(first.toString()).isEqualTo(200);
+        List<String> firstIds = JsonPath.read(first.body(), "$[*].skuId");
+        assertThat(firstIds).containsExactly("A-1");
+        String prefix = "http://localhost:" + port;
+        assertThat(first.headers().getFirst(LINK))
+                .isEqualTo("<" + prefix + "/inventory?limit=1&after=A-1>; rel=\"next\"");
+
+        String link = first.headers().getFirst(LINK);
+        Response second = getRaw(link.substring(1 + prefix.length(), link.indexOf('>')));
+
+        assertThat(second.status()).as(second.toString()).isEqualTo(200);
+        List<String> secondIds = JsonPath.read(second.body(), "$[*].skuId");
+        assertThat(secondIds).containsExactly("B-2");
     }
 }

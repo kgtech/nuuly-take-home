@@ -96,7 +96,7 @@ done
 
 The controller passes the raw header and SKU ID to the service. An `@Idempotent` interceptor on the service's stock-write methods checks the key, then the SKU ID, and then claims the key, changes stock and stores the response in one SERIALIZABLE transaction, which is retried as a whole on a serialization failure. Without a key, the service runs the same stock write on its own. (Z1)
 
-**Paging.** `GET /inventory` without parameters returns every SKU, sorted by SKU ID. Add `limit` (1–250) to get one page; when more SKUs follow, the response has a `Link` header with the next page's URL, and the last page has none. With ABC-1 and K-1 from above, add two more SKUs and page through all four:
+**Paging.** `GET /inventory` returns SKUs sorted by SKU ID, at most 250 per response. When more SKUs follow, the response has a `Link` header with the next page's URL, and the last page has none; follow `Link` to list every SKU. `limit` (1–250) sets a smaller page. With ABC-1 and K-1 from above, add two more SKUs and page through all four:
 
 ```bash
 for s in B-2 C-3; do
@@ -109,7 +109,7 @@ curl -i 'localhost:8080/inventory?limit=2&after=B-2'
 # 200 [{"skuId":"C-3","quantity":1},{"skuId":"K-1","quantity":5}]   last page, no Link header
 ```
 
-Every page is a plain JSON array of items. `after` is the last SKU ID of the previous page. SKUs created behind the cursor during a walk are not seen by that walk. A query string that can't be decoded (e.g. `after=%zz`) or that repeats `after` returns 400 `Invalid request`. (G9, R4, Z3)
+Every page is a plain JSON array of items. `after` is the last SKU ID of the previous page. `after` alone returns up to 250 SKUs after it. SKUs created behind the cursor during a walk are not seen by that walk. A query string that can't be decoded (e.g. `after=%zz`) or that repeats `after` returns 400 `Invalid request`. (G9, R4, Z3, C2)
 
 ## API docs
 
@@ -118,7 +118,7 @@ Every page is a plain JSON array of items. `after` is the last SKU ID of the pre
 - [`openapi.yaml`](openapi.yaml) at the repo root is the committed export. `ApiDocsTest` regenerates it on every test run and fails with "openapi.yaml regenerated; commit it" when the file changed, so the committed copy always matches the code. Keys are sorted so the export is byte-stable. (D7, S12)
 - The committed file's `servers` URL is http://localhost:8080, the port the app listens on. The running app's `/v3/api-docs` reports the host and port it was requested on.
 
-The docs are generated from the hand-written controllers (code-first, springdoc-openapi). They keep the original spec's title, version, operationIds and summaries, and list exactly the status codes the spec lists for each operation, with error responses as `text/plain`. The one addition is a 400 `Invalid request` on `GET /inventory` for an undecodable query or a repeated `after` (Z3). The export is OpenAPI 3.1, where the original spec is 3.0.3.
+The docs are generated from the hand-written controllers (code-first, springdoc-openapi). They keep the original spec's title, version, operationIds and summaries, and list exactly the status codes the spec lists for each operation, with error responses as `text/plain`. Beyond the spec, `GET /inventory` documents its `limit` and `after` parameters and the default page of 250 (G9, C2) and a 400 `Invalid request` for an undecodable query or a repeated `after` (Z3); the SKU ID path parameters document the SKU ID pattern and 64-character limit (G11); `InventoryItem.quantity` keeps the spec's `minimum: 0`. The summary stays "List all inventory". The export is OpenAPI 3.1, where the original spec is 3.0.3.
 
 ## Assumptions
 
@@ -136,13 +136,14 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - Concurrent purchases never oversell, however many app instances run. (G7)
 - Both POST endpoints accept an optional `Idempotency-Key` header. Repeating a request with the same key returns the first response and doesn't change stock again. (G8)
 - Reusing an `Idempotency-Key` with a different body, SKU or endpoint returns 400. Keys expire after 24 hours and can't be reused after that. (G14)
-- The list is sorted by SKU ID. Optional `limit` and `after` query parameters page through it; without them every SKU is returned. `after` is exclusive: the page starts with the first SKU ID after it. The next page's absolute URL, built from the request, is in the `Link` header. (G9)
+- The list is sorted by SKU ID. Optional `limit` and `after` query parameters page through it; without `limit`, a response holds at most 250 SKUs. This differs from the spec's "List all inventory": a client that doesn't follow `Link` sees only the first 250 SKUs. `after` is exclusive: the page starts with the first SKU ID after it. The next page's absolute URL, built from the request, is in the `Link` header. (G9, C2)
+- The `Link` URL takes its scheme, host and port from the request's `Host` header; `X-Forwarded-*` headers are not applied. Behind a TLS-terminating proxy or ingress, configure forwarded-header handling (e.g. `server.forward-headers-strategy`) so the `Link` points at the public URL. If a servlet context path is configured and a request percent-encodes it (e.g. `/%61pp` for `/app`), the `Link` repeats the encoding (`/%2561pp`) and does not resolve. No context path is configured today. (C2)
 - There is no authentication. Each operation in the spec returns only the status codes the spec lists for it, plus a 400 on `GET /inventory` for an undecodable query or a repeated `after` (500 only for unexpected server errors); requests outside those operations get standard HTTP codes. (G10, Z3)
 - A retried request with the same key returns the first response, including 404 and 400 "Insufficient inventory". Requests rejected by validation are not remembered and can be retried. (R1)
 - Two simultaneous requests with the same key produce one change; the second gets the first one's response. (R2)
 - Requests outside the spec's operations get standard HTTP codes: unknown paths 404, wrong methods 405. GET ignores the Accept header; a POST whose Accept excludes JSON returns 400 (U2). (R3)
-- Invalid paging values don't cause an error: a bad or repeated `limit` is ignored, a `limit` above the maximum is reduced to it, and `after` alone returns every SKU after it. `GET /inventory` returns 400 `Invalid request` only when its query string can't be decoded or repeats `after`. (R4, Z3)
-- `limit` accepts up to 250. (R8)
+- Invalid paging values don't cause an error: a bad or repeated `limit` is ignored (the default page of 250 applies), a `limit` above the maximum is reduced to it, and `after` alone returns up to 250 SKUs after it. `GET /inventory` returns 400 `Invalid request` only when its query string can't be decoded or repeats `after`. (R4, Z3, C2)
+- `limit` accepts up to 250, which is also the default page size. (R8, C2)
 - `Idempotency-Key` must be a UUID. An empty or non-UUID key returns 400. (S3)
 - Unexpected server errors return 500 with the text/plain body `Internal server error`. The contract rules apply to `/inventory` URLs and unknown paths; `/actuator/**` and the springdoc paths keep Spring Boot's own responses (JSON error bodies, `/actuator/health` 503 when the database is down, the `/swagger-ui.html` redirect). (S6)
 - A query string that can't be decoded (e.g. `?x=%zz`) returns 400 text/plain `Invalid request` on any path whose handler reads the query, `/actuator/**` and the springdoc paths included, and logs one WARN line with the method and path (no stack trace). (C1, Z3)

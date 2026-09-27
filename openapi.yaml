@@ -8,19 +8,24 @@ servers:
 paths:
   /inventory:
     get:
+      description: "Returns SKUs sorted by skuId, at most 250 per response. When more\
+        \ SKUs follow, the Link header holds the next page's URL; follow it until\
+        \ a response has no Link to list all inventory. If no SKUs exist, returns\
+        \ an empty array."
       operationId: listInventory
       parameters:
-      - description: "Optional page size, 1 to 250. Larger values mean 250; other\
-          \ values are ignored."
+      - description: "Optional page size, 1 to 250 (default 250). Larger values mean\
+          \ 250; other values are ignored and the default applies."
         in: query
         name: limit
         required: false
         schema:
           type: integer
+          default: 250
           maximum: 250
           minimum: 1
       - description: "Optional cursor: return only SKUs whose skuId sorts after this\
-          \ value. It must not be repeated."
+          \ value, up to the page size. It must not be repeated."
         in: query
         name: after
         required: false
@@ -34,10 +39,10 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/InventoryItem"
-          description: List of all inventory items
+          description: "One page of inventory items, at most 250, sorted by skuId"
           headers:
             Link:
-              description: "Next page, when there is one: <URL>; rel=\"next\""
+              description: "Next page, when more SKUs follow: <URL>; rel=\"next\""
               schema:
                 type: string
               style: simple
@@ -55,11 +60,16 @@ paths:
     get:
       operationId: getInventory
       parameters:
-      - in: path
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
         name: skuId
         required: true
         schema:
           type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
       responses:
         "200":
           content:
@@ -79,11 +89,16 @@ paths:
     post:
       operationId: createInventory
       parameters:
-      - in: path
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
         name: skuId
         required: true
         schema:
           type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
       - description: "Optional UUID. The same key with the same request replays the\
           \ first response. A different request, or a key older than 24h, returns\
           \ 400."
@@ -119,11 +134,16 @@ paths:
     post:
       operationId: purchaseItem
       parameters:
-      - in: path
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
         name: skuId
         required: true
         schema:
           type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
       - description: "Optional UUID. The same key with the same request replays the\
           \ first response. A different request, or a key older than 24h, returns\
           \ 400."
@@ -169,6 +189,7 @@ components:
         quantity:
           type: integer
           format: int64
+          minimum: 0
         skuId:
           type: string
     InventoryQuantity:
