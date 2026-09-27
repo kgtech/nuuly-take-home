@@ -17,9 +17,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,7 +26,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 
 /**
  * Issue #6 end to end against Postgres: Idempotency-Key claim, replay, mismatch, expiry and what is never stored
@@ -36,9 +34,8 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
  * transaction, so the tables are emptied before each test. Same annotations as InventoryApiIntegrationTest so the
  * context and container are reused.
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
 class IdempotencyApiIntegrationTest {
 
     private static final String INVALID_REQUEST = "Invalid request";
@@ -285,7 +282,7 @@ class IdempotencyApiIntegrationTest {
     void keyOlderThan24hReturns400() throws Exception {
         String key = newKey();
         assertItem(create("widget", 5, key), "widget", 5);
-        backdate(key, "25 hours");
+        backdate(key, "24 hours 1 second");
 
         assertText(create("widget", 5, key), 400, INVALID_REQUEST);
 

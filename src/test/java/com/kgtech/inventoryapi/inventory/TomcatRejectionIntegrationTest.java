@@ -32,13 +32,12 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.tomcat.TomcatWebServer;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 
 /**
  * C1, G11, S5, T3 through real Tomcat: a request Tomcat rejects before routing gets text/plain (400 "Invalid
@@ -46,8 +45,7 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
  * reaches the controller, where SkuId.isValid rejects it (GET and purchase 404, create 400). MockMvc bypasses Tomcat,
  * so every request is written to a raw socket. Not @Transactional; the tables are emptied before each test.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class TomcatRejectionIntegrationTest {
 
     private static final String SEEDED = "ABC-1";

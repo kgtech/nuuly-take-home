@@ -14,11 +14,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -27,6 +25,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.testcontainers.containers.GenericContainer;
 
 import com.kgtech.inventoryapi.Tables;
+import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 import com.kgtech.inventoryapi.web.HttpConstants;
 
@@ -35,10 +34,9 @@ import com.kgtech.inventoryapi.web.HttpConstants;
  * four operations answer exactly as with Redis up; after a flush or a restart a repeated key still replays and never
  * changes stock twice. The shared container is paused/unpaused, so this class must not run in parallel with others.
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
 @ExtendWith(OutputCaptureExtension.class)
-@Import(TestcontainersConfiguration.class)
 class RedisFaultTest {
 
     @Autowired
