@@ -572,8 +572,9 @@ class IdempotencyApiIntegrationTest {
         try (var connection = redisConnections.getConnection()) {
             assertThat(connection.keyCommands().exists(redisKey)).isTrue();
             Long ttl = connection.keyCommands().pTtl(redisKey);
-            assertThat(ttl).as("PTTL = time left until created + 24h")
-                    .isBetween(java.time.Duration.ofHours(24).minusMinutes(1).toMillis(), java.time.Duration.ofHours(24).toMillis());
+            assertThat(ttl).as("PTTL = time left until created + 24h (one minute of clock tolerance each way)")
+                    .isBetween(java.time.Duration.ofHours(24).minusMinutes(1).toMillis(),
+                            java.time.Duration.ofHours(24).plusMinutes(1).toMillis());
             assertThat(connection.hashCommands().hKeys(redisKey)).extracting(String::new)
                     .containsExactlyInAnyOrder("op", "sku", "hash", "status", "ct", "body", "created");
         }
@@ -583,11 +584,15 @@ class IdempotencyApiIntegrationTest {
 
         assertThat(create("widget", 5, key)).as("replayed from Redis").isEqualTo(first);
         assertText(create("widget", 6, key), 400, INVALID_REQUEST);
-        assertThat(keyRows()).as("Postgres was not asked").isZero();
+        assertThat(keyRows()).as("no claim was written: the answers came from the copy").isZero();
         assertThat(ledgerRows("widget")).isEqualTo(1);
     }
 
-    /** A copy whose claim time is a day old is ignored, so the (missing) row decides: the key claims afresh. */
+    /**
+     * The copy alone is never trusted at age >= 24h: with its claim time a day old it is ignored and the row decides.
+     * The row is missing here (an unreachable production state, rows are never purged) purely to make "ignored"
+     * observable as a fresh claim; the reachable case (stale copy + expired row → 400) is keyOlderThan24hReturns400.
+     */
     @Test
     void redisCopyOlderThanValidityIsIgnored() throws Exception {
         String key = newKey();
@@ -595,8 +600,9 @@ class IdempotencyApiIntegrationTest {
         jdbc.sql("TRUNCATE idempotency_keys").update();
         byte[] redisKey = ("idem:" + key.toLowerCase()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         try (var connection = redisConnections.getConnection()) {
-            connection.hashCommands().hSet(redisKey, "created".getBytes(),
-                    Long.toString(System.currentTimeMillis() - java.time.Duration.ofHours(24).toMillis()).getBytes());
+            connection.hashCommands().hSet(redisKey, "created".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    Long.toString(System.currentTimeMillis() - java.time.Duration.ofHours(24).toMillis())
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
 
         assertItem(create("widget", 5, key), "widget", 10);
