@@ -188,8 +188,9 @@ class InventoryRequestValidationTest {
 
     // --- G11 and S2 ---
 
+    /** Too long and a bad character; the full skuId matrix is SkuIdTest's. */
     static Stream<String> invalidSkuIds() {
-        return Stream.of("-bad", "a".repeat(65), "a!b");
+        return Stream.of("a".repeat(65), "a!b");
     }
 
     @ParameterizedTest

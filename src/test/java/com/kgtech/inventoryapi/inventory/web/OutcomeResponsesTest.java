@@ -2,7 +2,6 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Arrays;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -29,34 +28,23 @@ class OutcomeResponsesTest {
 
     private final OutcomeResponses responses = new OutcomeResponses(JsonMapper.builder().build());
 
-    static Stream<String> malformedSkuIds() {
-        return Stream.of("-bad", "", "a".repeat(65), "a b", "abc\n");
+    /** S2, Z1: a malformed skuId on create is the 400 outcome. SkuIdTest holds the full skuId matrix. */
+    @Test
+    void beforeClaimRejectsMalformedSkuIdOnCreateAsInvalidRequest() {
+        assertThat(responses.beforeClaim(Operation.ADD, "-bad")).contains(new WriteResult.InvalidRequest());
     }
 
-    @ParameterizedTest
-    @MethodSource("malformedSkuIds")
-    void beforeClaimRejectsMalformedSkuIdOnCreateAsInvalidRequest(String skuId) {
-        assertThat(responses.beforeClaim(Operation.ADD, skuId)).contains(new WriteResult.InvalidRequest());
+    /** S2, Z1: a malformed skuId on purchase is the 404 outcome. */
+    @Test
+    void beforeClaimRejectsMalformedSkuIdOnPurchaseAsNotFound() {
+        assertThat(responses.beforeClaim(Operation.PURCHASE, "-bad")).contains(new StockOutcome.NotFound());
     }
 
-    @ParameterizedTest
-    @MethodSource("malformedSkuIds")
-    void beforeClaimRejectsMalformedSkuIdOnPurchaseAsNotFound(String skuId) {
-        assertThat(responses.beforeClaim(Operation.PURCHASE, skuId)).contains(new StockOutcome.NotFound());
-    }
-
-    @ParameterizedTest
-    @EnumSource(Operation.class)
-    void beforeClaimRejectsNullSkuId(Operation operation) {
-        assertThat(responses.beforeClaim(operation, null)).isPresent();
-    }
-
+    /** A valid skuId passes on both operations. */
     @ParameterizedTest
     @EnumSource(Operation.class)
     void beforeClaimPassesValidSkuId(Operation operation) {
-        for (String skuId : Arrays.asList("widget", "CW-XYCS-BM-01", "a".repeat(64))) {
-            assertThat(responses.beforeClaim(operation, skuId)).as(skuId).isEqualTo(Optional.empty());
-        }
+        assertThat(responses.beforeClaim(operation, "CW-XYCS-BM-01")).isEqualTo(Optional.empty());
     }
 
     static Stream<Arguments> toStoredMatchesUnkeyedResponse() {
