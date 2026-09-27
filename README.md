@@ -132,6 +132,7 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - `quantity` must be a JSON integer: `"10"`, `10.5` and `null` return 400. Unknown fields are ignored. (G13)
 - A purchase with an invalid body returns 400 even when the SKU doesn't exist. (G4)
 - A SKU sold down to 0 still exists: GET returns quantity 0 and it stays in the list. (G5)
+- The ledger and SKU rows can't be changed or deleted in the database either: an `UPDATE` or `DELETE` on `inventory_ledger` or `sku` fails with SQLSTATE 23001. Corrections are new ledger rows. (G5, C4)
 - Error bodies are fixed strings: `SKU not found`, `Insufficient inventory`, `Invalid request`, and `Internal server error` for unexpected 500s. They never show stock counts. (G6)
 - Concurrent purchases never oversell, however many app instances run. (G7)
 - Both POST endpoints accept an optional `Idempotency-Key` header. Repeating a request with the same key returns the first response and doesn't change stock again. (G8)

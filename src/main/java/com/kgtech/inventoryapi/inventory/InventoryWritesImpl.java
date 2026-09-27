@@ -4,7 +4,7 @@ import java.util.Optional;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-/** JdbcClient implementation of the ledger writes (V1). Append-only: no UPDATE or DELETE (G5). */
+/** JdbcClient implementation of the ledger writes (V1). Append-only: no UPDATE or DELETE (G5; V3 triggers enforce it, C4). */
 class InventoryWritesImpl implements InventoryWrites {
 
     private static final String INSERT_SKU = "INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING";
