@@ -71,4 +71,21 @@ class RequestGuardTomcatIntegrationTest {
         assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
         assertThat(jdbc.sql("SELECT count(*) FROM inventory_ledger").query(Long.class).single()).isEqualTo(1);
     }
+
+    /** HEAD is served through the GET handler, so the guard treats it like GET (critique M-14): 404, no body. */
+    @org.junit.jupiter.api.Test
+    void headWithMatrixSegmentIsGuardedLikeGet() throws Exception {
+        java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+        java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create("http://localhost:" + port + "/inventory/ABC-1;x"))
+                .method("HEAD", java.net.http.HttpRequest.BodyPublishers.noBody()).build();
+
+        java.net.http.HttpResponse<String> response =
+                client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(404);
+        assertThat(response.headers().firstValue(CONTENT_TYPE).orElse("")).startsWith("text/plain");
+        assertThat(response.body()).isEmpty();
+        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
+    }
 }
