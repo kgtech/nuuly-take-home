@@ -1,6 +1,6 @@
 # The current implementation on `main` (317ab0c)
 
-Read before designing V2. File references are to `main`.
+Read before designing V2. File references are to `main` **at 317ab0c**, the SHA the package was built from. `main` has since merged PR #34 (8c3c2b4), which fixes C-05 (the id check now runs before the read-only transaction) and parts of #23; the statements below describe 317ab0c.
 
 ## Stock changes
 - Stock is never stored as a number. `inventory_ledger` (`src/main/resources/db/migration/V1__inventory.sql`) holds one row per change (`quantity_delta <> 0`, `reason IN ('add','purchase')`), and a balance is `SUM(quantity_delta)` per `sku_id` (V1, D3). `sku` holds only the id (COLLATE "C", varchar(64)).
