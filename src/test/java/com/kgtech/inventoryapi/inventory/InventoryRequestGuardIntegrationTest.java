@@ -60,7 +60,9 @@ class InventoryRequestGuardIntegrationTest {
         return Stream.of(
                 Arguments.of("create", jsonPost("/inventory/ABC-1;lot=7"), 400, "Invalid request"),
                 Arguments.of("purchase", jsonPost("/inventory/ABC-1;x/purchase"), 404, "SKU not found"),
-                Arguments.of("get", get("/inventory/ABC-1;x=y").accept(APPLICATION_JSON), 404, "SKU not found"));
+                Arguments.of("get", get("/inventory/ABC-1;x=y").accept(APPLICATION_JSON), 404, "SKU not found"),
+                Arguments.of("purchase, matrix on the base segment", jsonPost("/inventory;v=1/ABC-1;x/purchase"), 404,
+                        "SKU not found"));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -79,7 +81,10 @@ class InventoryRequestGuardIntegrationTest {
         return Stream.of(
                 Arguments.of("q=0", "application/json;q=0"),
                 Arguments.of("q=0 with another type", "application/json;q=0, application/xml"),
-                Arguments.of("xml only", "application/xml"));
+                Arguments.of("xml only", "application/xml"),
+                Arguments.of("json refused, wildcard accepted (RFC 9110: the specific range wins)",
+                        "application/json;q=0, */*;q=0.1"),
+                Arguments.of("same, other order", "*/*;q=0.1, application/json;q=0"));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -97,11 +102,20 @@ class InventoryRequestGuardIntegrationTest {
 
     @Test
     void wildcardOrPositiveJsonQualityIsAccepted() throws Exception {
-        assertThat(send(jsonPost("/inventory/ABC-1", "application/json;q=0, */*;q=0.1"))
-                .getStatus()).isEqualTo(200);
-        assertThat(send(jsonPost("/inventory/ABC-1", "application/json;q=0.5"))
-                .getStatus()).isEqualTo(200);
-        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(7);
+        assertThat(send(jsonPost("/inventory/ABC-1", "*/*")).getStatus()).isEqualTo(200);
+        assertThat(send(jsonPost("/inventory/ABC-1", "application/*;q=0.5")).getStatus()).isEqualTo(200);
+        assertThat(send(jsonPost("/inventory/ABC-1", "application/json;q=0.5")).getStatus()).isEqualTo(200);
+        assertThat(send(jsonPost("/inventory/ABC-1", "text/plain, application/json")).getStatus()).isEqualTo(200);
+        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(9);
+    }
+
+    /** All Accept lines count: a refusal on a second line still refuses. */
+    @Test
+    void secondAcceptLineIsHonoured() throws Exception {
+        MockHttpServletResponse response = send(jsonPost("/inventory/ABC-1", "*/*").header(HttpHeaders.ACCEPT,
+                "application/json;q=0"));
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertNothingWritten();
     }
 
     private void assertNothingWritten() {

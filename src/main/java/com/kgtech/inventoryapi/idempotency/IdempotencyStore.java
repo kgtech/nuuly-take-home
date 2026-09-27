@@ -1,6 +1,7 @@
 package com.kgtech.inventoryapi.idempotency;
 
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Optional;
@@ -28,10 +29,13 @@ class IdempotencyStore {
             RETURNING idempotency_key
             """;
 
-    /** T1: expiry uses the database clock (transaction start time). */
+    /** T1: how long a key stays valid; the Redis replay copy (ReplayCache) uses the same constant. */
+    public static final Duration KEY_VALIDITY = Duration.ofHours(24);
+
+    /** T1: expiry uses the database clock (transaction start time) and KEY_VALIDITY. */
     static final String STORED = """
             SELECT operation, sku_id, request_hash, status, content_type, body, created_at,
-                   created_at < now() - interval '24 hours' AS expired
+                   created_at < now() - make_interval(secs => :validitySeconds) AS expired
             FROM idempotency_keys WHERE idempotency_key = :key
             """;
 
@@ -94,6 +98,7 @@ class IdempotencyStore {
     private Optional<StoredRow> stored(IdempotentRequest request) {
         return jdbc.sql(STORED)
                 .param("key", request.key())
+                .param("validitySeconds", KEY_VALIDITY.toSeconds())
                 .query((rs, n) -> new StoredRow(
                         rs.getString("operation"),
                         rs.getString("sku_id"),

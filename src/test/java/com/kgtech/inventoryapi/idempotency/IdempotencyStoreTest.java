@@ -21,8 +21,8 @@ import com.kgtech.inventoryapi.IntegrationTest;
 
 /**
  * R2, G14, S8, T1, Y4: claim, replay, mismatch and expiry against Postgres, with {@code execute} run inside a
- * SERIALIZABLE TransactionTemplate as the @Idempotent interceptor runs it (X1, Z1). Not @Transactional: each call
- * commits.
+ * READ COMMITTED TransactionTemplate as the @Idempotent interceptor runs it (DESIGN-V2 §2). Not @Transactional: each
+ * call commits.
  */
 @IntegrationTest
 class IdempotencyStoreTest {
@@ -39,20 +39,20 @@ class IdempotencyStoreTest {
     @Autowired
     PlatformTransactionManager transactionManager;
 
-    private TransactionTemplate serializable;
+    private TransactionTemplate transaction;
     private final AtomicInteger actionRuns = new AtomicInteger();
 
     @BeforeEach
     void setUp() {
         // test-only delete; the application never purges keys (R9)
         Tables.reset(jdbc);
-        serializable = new TransactionTemplate(transactionManager);
-        serializable.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
+        transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         actionRuns.set(0);
     }
 
     private KeyedResult execute(IdempotentRequest request, Supplier<StoredResponse> action) {
-        return serializable.execute(status -> store.execute(request, action));
+        return transaction.execute(status -> store.execute(request, action));
     }
 
     private KeyedResult execute(IdempotentRequest request, StoredResponse response) {
@@ -180,6 +180,24 @@ class IdempotencyStoreTest {
         backdate(key, "24 hours 1 second");
 
         assertRejectedAndUnchanged(key, add(key, "widget", 5));
+    }
+
+    /**
+     * T1's boundary: a key exactly 24h old (by the transaction's now()) still replays, so the lookup's comparison is
+     * strict (mutating {@code <} to {@code <=} fails here; a longer interval fails olderThan24hRejected).
+     */
+    @Test
+    void exactly24hStillReplays() {
+        UUID key = UUID.randomUUID();
+        execute(add(key, "widget", 5), OK);
+
+        KeyedResult result = transaction.execute(status -> {
+            jdbc.sql("UPDATE idempotency_keys SET created_at = now() - interval '24 hours' WHERE idempotency_key = ?")
+                    .param(key).update();
+            return store.execute(add(key, "widget", 5), () -> OK);
+        });
+
+        assertThat(result).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(OK));
     }
 
     @Test

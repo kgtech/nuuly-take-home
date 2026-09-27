@@ -10,6 +10,9 @@ spring:
   mvc:
     problemdetails:
       enabled: false                      # explicit "ProblemDetail stays off"
+    formcontent:
+      filter:
+        enabled: false                    # no form endpoints; a bad form escape must not reach Boot's /error (C1)
   data:
     redis:
       timeout: 250ms                      # DESIGN-V2 §4: a slow Redis costs at most this, then Postgres answers
@@ -17,7 +20,6 @@ spring:
 inventory:
   cache:
     stock-ttl: 5s                         # DESIGN-V2 §3: the staleness bound for a cached count
-    replay-ttl: 24h                       # DESIGN-V2 §2: matches T1's key validity
 springdoc:
   override-with-generic-response: false
   writer-with-order-by-keys: true         # byte-stable openapi.yaml export
