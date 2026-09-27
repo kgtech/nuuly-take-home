@@ -25,3 +25,4 @@ One line of reasoning each. IDs are FE1…; service decisions (G6, G9, G11, S3) 
 - [FE21] SkuView answers an id that fails G11 locally with "SKU not found" and sends no GET, which also keeps `.` and `..` off the wire where URL normalisation would target another endpoint; same rule as FE10.
 - [FE22] Playwright runs `@axe-core/playwright` on the list, SKU and add views in both projects (zero violations), asserts `document.documentElement.scrollWidth` ≤ the viewport and saves a screenshot per view under `e2e/screenshots/` (gitignored); dark-mode buttons use `--on-accent` for ≥ 4.5:1 contrast.
 - [FE23] `npm run check:api` regenerates the schema and fails on a git diff, so CI can prove the committed `schema.d.ts` matches `openapi.yaml`.
+- [FE24] Dev server on 15173 and API target 18080 by default (env `VITE_PORT`, `API_URL`): the default ports 5173 and 8080 are often taken by other projects on a developer machine, so the test run must not depend on them.

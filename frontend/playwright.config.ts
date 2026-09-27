@@ -1,14 +1,19 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// End-to-end tests run against the real service on :8080 through the Vite dev
-// proxy. Start the service first (docker compose up --build in the repo root).
+// End-to-end tests run against the real service (API_URL, default :18080) through
+// the Vite dev proxy on VITE_PORT (default 15173): non-default ports so the run
+// never collides with another project (FE24). Start the service first
+// (docker compose up --build in the repo root).
+const devPort = Number(process.env.VITE_PORT ?? 15173);
+const baseURL = `http://localhost:${devPort}`;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL,
     trace: 'retain-on-failure',
   },
   projects: [
@@ -17,7 +22,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:5173',
+    url: baseURL,
     reuseExistingServer: true,
     timeout: 60_000,
   },

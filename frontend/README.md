@@ -5,7 +5,7 @@ Single-page app (React 19, TypeScript strict, Vite) for listing, viewing, adding
 ## Run
 
     npm install
-    npm run dev          # http://localhost:5173, proxies /inventory to http://localhost:8080
+    npm run dev          # http://localhost:15173, proxies /inventory to http://localhost:18080 (override: VITE_PORT, API_URL)
 
 Start the service first (`docker compose up --build` in the repo root).
 
