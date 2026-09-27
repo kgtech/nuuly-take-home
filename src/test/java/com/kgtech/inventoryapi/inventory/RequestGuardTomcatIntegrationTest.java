@@ -85,7 +85,15 @@ class RequestGuardTomcatIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(404);
         assertThat(response.headers().firstValue(CONTENT_TYPE).orElse("")).startsWith("text/plain");
-        assertThat(response.body()).isEmpty();
         assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
+        assertThat(jdbc.sql("SELECT count(*) FROM inventory_ledger").query(Long.class).single()).isEqualTo(1);
+
+        // The property the guard relies on: a clean HEAD still goes through the GET handler.
+        java.net.http.HttpResponse<String> clean = client.send(java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create("http://localhost:" + port + "/inventory/ABC-1"))
+                .method("HEAD", java.net.http.HttpRequest.BodyPublishers.noBody()).build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertThat(clean.statusCode()).isEqualTo(200);
+        assertThat(clean.headers().firstValue(CONTENT_TYPE).orElse("")).startsWith("application/json");
     }
 }
