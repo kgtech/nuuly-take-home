@@ -29,7 +29,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * SKU ABC-1) is answered as the malformed SKU ID it is (G11: create 400, GET and purchase 404); and a POST whose most
  * specific Accept range matching JSON has q=0 is 400 (U2, Y1, RFC 9110 §12.5.1), which the produces condition alone
  * accepts. The path is the routed one (decoded segments, as Spring matches), so an encoded prefix cannot bypass it.
- * Nothing is written.
+ * HEAD is guarded like GET (Spring serves HEAD through the GET handler). Nothing is written.
  */
 @Component
 final class InventoryRequestGuardFilter extends OncePerRequestFilter {
@@ -48,7 +48,7 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         List<PathSegment> segments = segments(request);
-        boolean get = HttpMethod.GET.matches(request.getMethod());
+        boolean get = HttpMethod.GET.matches(request.getMethod()) || HttpMethod.HEAD.matches(request.getMethod());
         boolean post = HttpMethod.POST.matches(request.getMethod());
         boolean single = segments.size() == 2;
         boolean purchase = segments.size() == 3 && PURCHASE_SEGMENT.equals(segments.get(2).valueToMatch());
