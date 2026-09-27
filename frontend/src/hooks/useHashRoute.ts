@@ -11,8 +11,17 @@ export function parseRoute(hash: string): Route {
   if (path === '/') return { name: 'list' };
   if (path === '/add') return { name: 'add' };
   const sku = /^\/sku\/(.+)$/.exec(path);
-  if (sku?.[1]) return { name: 'sku', skuId: decodeURIComponent(sku[1]) };
+  if (sku?.[1]) return { name: 'sku', skuId: safeDecode(sku[1]) };
   return { name: 'notFound', path };
+}
+
+/** A malformed escape (e.g. 50%off) keeps the raw segment; the server answers for it. */
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
 }
 
 export function skuHref(skuId: string): string {

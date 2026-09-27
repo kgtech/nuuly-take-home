@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server, store, TEXT } from '../test/server';
@@ -32,14 +32,57 @@ describe('StockForm add', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.invalid);
   });
 
-  it('warns about a bad quantity client-side without blocking the request', async () => {
+  it('has an accessible form name', () => {
+    render(<StockForm operation="add" skuId="x" onSuccess={() => {}} />);
+    expect(screen.getByRole('form', { name: 'Add stock' })).toBeInTheDocument();
+  });
+
+  it('answers a quantity the server is certain to reject with the server text and no request', async () => {
     const user = userEvent.setup();
     render(<StockForm operation="add" skuId="x" onSuccess={() => {}} />);
-    await user.type(screen.getByLabelText(/quantity/i), '0');
+    const input = screen.getByLabelText(/quantity/i);
+    await user.type(input, '0');
     expect(screen.getByText(/whole number of at least 1/i)).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
     await user.click(screen.getByRole('button', { name: /add stock/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.invalid);
-    expect(store.requests).toHaveLength(1);
+    expect(store.requests).toHaveLength(0);
+    await user.clear(input);
+    await user.type(input, '2147483648');
+    await user.click(screen.getByRole('button', { name: /add stock/i }));
+    expect(store.requests).toHaveLength(0);
+  });
+
+  it('answers a malformed skuId with the server text and no request', async () => {
+    const user = userEvent.setup();
+    render(<StockForm operation="add" skuId="bad id" onSuccess={() => {}} />);
+    await user.type(screen.getByLabelText(/quantity/i), '1');
+    await user.click(screen.getByRole('button', { name: /add stock/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.invalid);
+    cleanup();
+    render(<StockForm operation="purchase" skuId="" onSuccess={() => {}} />);
+    await user.type(screen.getByLabelText(/quantity/i), '1');
+    await user.click(screen.getByRole('button', { name: /^purchase$/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.notFound);
+    expect(store.requests).toHaveLength(0);
+  });
+
+  it('drops the Idempotency-Key when the quantity changes after a network failure', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('*/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    render(<StockForm operation="add" skuId="x" onSuccess={() => {}} />);
+    const input = screen.getByLabelText(/quantity/i);
+    await user.type(input, '2');
+    await user.click(screen.getByRole('button', { name: /add stock/i }));
+    await screen.findByRole('alert');
+    await user.clear(input);
+    await user.type(input, '3');
+    await user.click(screen.getByRole('button', { name: /add stock/i }));
+    await screen.findByRole('status');
+    expect(store.requests).toHaveLength(2);
+    expect(store.requests[1]?.headers.get('Idempotency-Key')).not.toBe(
+      store.requests[0]?.headers.get('Idempotency-Key'),
+    );
   });
 
   it('reuses the Idempotency-Key after a network failure and regenerates it after a response', async () => {
@@ -58,6 +101,7 @@ describe('StockForm add', () => {
     expect(k1).toMatch(UUID);
     expect(k2).toBe(k1);
 
+    await user.type(screen.getByLabelText(/quantity/i), '2');
     await user.click(button);
     await waitFor(() => expect(store.requests).toHaveLength(3));
     expect(store.requests[2]?.headers.get('Idempotency-Key')).not.toBe(k1);

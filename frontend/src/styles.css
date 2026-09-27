@@ -70,6 +70,7 @@ label {
 }
 input {
   font: inherit;
+  min-height: 44px;
   padding: 0.5rem;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -85,7 +86,7 @@ button {
   background: var(--accent);
   color: #fff;
   cursor: pointer;
-  min-height: 2.75rem;
+  min-height: 44px;
 }
 button:disabled {
   opacity: 0.6;
@@ -146,6 +147,7 @@ td {
 }
 .hint {
   font-size: 0.9rem;
+  min-height: 1.2em;
 }
 .error {
   color: var(--error-fg);

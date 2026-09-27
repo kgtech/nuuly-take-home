@@ -38,13 +38,26 @@ function itemUrl(template: ItemPath | PurchasePath, skuId: string): string {
   return template.replace('{skuId}', encodeURIComponent(skuId));
 }
 
-async function call<T>(url: URL, init: RequestInit): Promise<ApiResult<T>> {
+export interface ClientOptions {
+  /** Abort a request after this long and report it as a network failure (status 0). */
+  timeoutMs?: number;
+}
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+async function call<T>(url: URL, init: RequestInit, timeoutMs: number): Promise<ApiResult<T>> {
   let res: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    res = await fetch(url, init);
+    res = await fetch(url, { ...init, signal: controller.signal });
   } catch (e) {
+    if (controller.signal.aborted) {
+      return { ok: false, status: 0, errorText: `Network error: the request timed out after ${timeoutMs / 1000} s` };
+    }
     const detail = e instanceof Error ? e.message : String(e);
     return { ok: false, status: 0, errorText: `Network error: ${detail}` };
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) {
     return { ok: false, status: res.status, errorText: await res.text() };
@@ -68,27 +81,28 @@ function post(body: InventoryQuantity, key: string | null): RequestInit {
 
 const GET: RequestInit = { method: 'GET', headers: { Accept: 'application/json, text/plain' } };
 
-export function createClient(base: string = window.location.origin): InventoryClient {
+export function createClient(base: string = window.location.origin, options: ClientOptions = {}): InventoryClient {
+  const t = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return {
     listInventory(params = {}) {
       const url = new URL(LIST, base);
       if (params.limit !== undefined) url.searchParams.set('limit', String(params.limit));
       if (params.after !== undefined) url.searchParams.set('after', params.after);
-      return call<ListOk>(url, GET);
+      return call<ListOk>(url, GET, t);
     },
     listInventoryAt(link) {
       const given = new URL(link, base);
       const url = new URL(given.pathname + given.search, base);
-      return call<ListOk>(url, GET);
+      return call<ListOk>(url, GET, t);
     },
     getInventory(skuId) {
-      return call<GetOk>(new URL(itemUrl(ITEM, skuId), base), GET);
+      return call<GetOk>(new URL(itemUrl(ITEM, skuId), base), GET, t);
     },
     addStock(skuId, body, key) {
-      return call<CreateOk>(new URL(itemUrl(ITEM, skuId), base), post(body, key));
+      return call<CreateOk>(new URL(itemUrl(ITEM, skuId), base), post(body, key), t);
     },
     purchase(skuId, body, key) {
-      return call<PurchaseOk>(new URL(itemUrl(PURCHASE, skuId), base), post(body, key));
+      return call<PurchaseOk>(new URL(itemUrl(PURCHASE, skuId), base), post(body, key), t);
     },
   };
 }

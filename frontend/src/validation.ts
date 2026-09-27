@@ -16,3 +16,17 @@ export function quantityHint(value: string): string | null {
   if (n > MAX_INT32) return `At most ${MAX_INT32}.`;
   return null;
 }
+
+export const INVALID_REQUEST = 'Invalid request';
+export const SKU_NOT_FOUND = 'SKU not found';
+
+/** What the server is certain to answer for this input, or null when it might accept it. */
+export function certainRejection(
+  operation: 'add' | 'purchase',
+  skuId: string,
+  quantity: string,
+): string | null {
+  if (quantityHint(quantity) !== null || quantity === '') return INVALID_REQUEST;
+  if (!SKU_ID_PATTERN.test(skuId)) return operation === 'add' ? INVALID_REQUEST : SKU_NOT_FOUND;
+  return null;
+}

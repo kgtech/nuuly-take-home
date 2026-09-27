@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api, type InventoryItem } from '../api/client';
 import { useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
-import { quantityHint } from '../validation';
+import { certainRejection, quantityHint } from '../validation';
 import { ErrorText } from './Messages';
 
 export type Operation = 'add' | 'purchase';
@@ -18,6 +18,7 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
   const id = useId();
   const [quantity, setQuantity] = useState('');
   const [sent, setSent] = useState(0);
+  const [rejected, setRejected] = useState<string | null>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
   const alertRef = useRef<HTMLParagraphElement>(null);
 
@@ -35,11 +36,18 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
     if (state.phase === 'done') statusRef.current?.focus();
     else if (state.phase === 'failed') alertRef.current?.focus();
   }, [state]);
+  useEffect(() => {
+    if (rejected !== null) alertRef.current?.focus();
+  }, [rejected]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    // Only what the server is certain to reject is answered locally, with its text (PROMPT.md).
+    const certain = certainRejection(operation, skuId, quantity);
+    setRejected(certain);
+    if (certain !== null) return;
     setSent(Number(quantity));
-    const result = await submit();
+    const result = await submit(`${operation}\n${skuId}\n${Number(quantity)}`);
     if (result?.phase === 'done') {
       onSuccess(result.data);
       setQuantity('');
@@ -48,9 +56,16 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
 
   const hint = quantityHint(quantity);
   const done = state.phase === 'done' ? state.data : null;
+  const errorText = rejected ?? (state.phase === 'failed' ? state.errorText : null);
 
   return (
-    <form onSubmit={(e) => void onSubmit(e)} className="stock-form" aria-busy={inFlight} noValidate>
+    <form
+      onSubmit={(e) => void onSubmit(e)}
+      className="stock-form"
+      aria-label={LABEL[operation]}
+      aria-busy={inFlight}
+      noValidate
+    >
       <div className="field">
         <label htmlFor={`${id}-qty`}>Quantity</label>
         <input
@@ -60,29 +75,30 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
           inputMode="numeric"
           min={1}
           step={1}
-          required
           value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
+          onChange={(e) => {
+            setQuantity(e.target.value);
+            setRejected(null);
+          }}
+          aria-invalid={hint !== null || undefined}
           aria-describedby={hint ? `${id}-hint` : undefined}
           disabled={inFlight}
         />
-        {hint && (
-          <p id={`${id}-hint`} className="hint">
-            {hint}
-          </p>
-        )}
+        <p id={`${id}-hint`} className="hint" aria-live="polite">
+          {hint}
+        </p>
       </div>
       <button type="submit" disabled={inFlight}>
         {inFlight ? 'Sending…' : LABEL[operation]}
       </button>
-      {done && (
+      {done && rejected === null && (
         <p role="status" className="success" tabIndex={-1} ref={statusRef}>
           {operation === 'add'
             ? `Added ${sent} to ${done.skuId}: now ${done.quantity}.`
             : `Purchased ${sent} of ${done.skuId}: ${done.quantity} left.`}
         </p>
       )}
-      {state.phase === 'failed' && <ErrorText text={state.errorText} ref={alertRef} />}
+      {errorText !== null && <ErrorText text={errorText} ref={alertRef} />}
     </form>
   );
 }

@@ -44,6 +44,21 @@ describe('client', () => {
     expect(again.data).toEqual({ skuId: 'A', quantity: 3 });
   });
 
+  it('times out and reports it like a network failure', async () => {
+    server.use(
+      http.post('*/inventory/:skuId/purchase', async () => {
+        await new Promise((r) => setTimeout(r, 300));
+        return HttpResponse.json({ skuId: 'A', quantity: 1 });
+      }),
+    );
+    const slow = createClient('http://localhost:3000', { timeoutMs: 50 });
+    const r = await slow.purchase('A', { quantity: 1 }, null);
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error();
+    expect(r.status).toBe(0);
+    expect(r.errorText).toMatch(/timed out/i);
+  });
+
   it('reports a network failure with status 0', async () => {
     server.use(http.post('*/inventory/:skuId/purchase', () => HttpResponse.error()));
     const r = await api.purchase('A', { quantity: 1 }, null);

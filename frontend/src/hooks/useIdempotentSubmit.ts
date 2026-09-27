@@ -11,19 +11,23 @@ export type SubmitState<T> =
  * Idempotency-Key lifecycle: one UUID v4 per user action. The key is created on
  * the first submit, kept while the request is in flight or after a network
  * failure (so a retry replays the same action), and dropped only after the
- * server answered definitively. Submits while in flight are ignored (null).
+ * server answered definitively, or when the action's inputs (the fingerprint)
+ * change, since a different request must not reuse the key (S8). Submits while
+ * in flight are ignored (null).
  */
 export function useIdempotentSubmit<T>(send: (key: string) => Promise<ApiResult<T>>) {
-  const keyRef = useRef<string | null>(null);
+  const keyRef = useRef<{ key: string; fingerprint: string } | null>(null);
   const busyRef = useRef(false);
   const [state, setState] = useState<SubmitState<T>>({ phase: 'idle' });
 
-  const submit = useCallback(async (): Promise<SubmitState<T> | null> => {
+  const submit = useCallback(async (fingerprint: string): Promise<SubmitState<T> | null> => {
     if (busyRef.current) return null;
     busyRef.current = true;
-    keyRef.current ??= crypto.randomUUID();
+    if (keyRef.current === null || keyRef.current.fingerprint !== fingerprint) {
+      keyRef.current = { key: crypto.randomUUID(), fingerprint };
+    }
     setState({ phase: 'inFlight' });
-    const result = await send(keyRef.current);
+    const result = await send(keyRef.current.key);
     let next: SubmitState<T>;
     if (result.ok) {
       keyRef.current = null;

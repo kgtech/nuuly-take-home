@@ -30,15 +30,14 @@ export function AddStockPage() {
             setResult(null);
           }}
           autoComplete="off"
+          aria-invalid={hint !== null || undefined}
           aria-describedby={hint ? `${id}-hint` : undefined}
         />
-        {hint && (
-          <p id={`${id}-hint`} className="hint">
-            {hint}
-          </p>
-        )}
+        <p id={`${id}-hint`} className="hint" aria-live="polite">
+          {hint}
+        </p>
       </div>
-      <StockForm operation="add" skuId={skuId} onSuccess={onSuccess} />
+      <StockForm key={skuId} operation="add" skuId={skuId} onSuccess={onSuccess} />
       {result && (
         <p>
           <a href={skuHref(result.skuId ?? skuId)}>View {result.skuId}</a>

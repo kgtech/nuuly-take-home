@@ -24,6 +24,18 @@ describe('App routing', () => {
     expect(screen.getByText(/letters, digits/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /open/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.notFound);
+    expect(window.location.hash).toBe('');
+    await user.clear(input);
+    await user.type(input, 'ok-1');
+    await user.click(screen.getByRole('button', { name: /open/i }));
+    expect(window.location.hash).toBe('#/sku/ok-1');
+  });
+
+  it('shows the SKU page for a malformed hash escape instead of a blank page', async () => {
+    window.location.hash = '#/sku/50%off';
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: '50%off' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.notFound);
   });
 
   it('renders an unknown route as not found with a way home', async () => {
@@ -37,9 +49,16 @@ describe('App routing', () => {
 describe('phone width', () => {
   it('uses no fixed pixel widths wider than a phone in the stylesheet', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8');
-    for (const m of css.matchAll(/(?:min-)?width\s*:\s*(\d+)px/g)) {
+    for (const m of css.matchAll(/(?:min-|max-)?width\s*:\s*(\d+)px/g)) {
       expect(Number(m[1])).toBeLessThanOrEqual(375);
     }
+    for (const m of css.matchAll(/grid-template-columns\s*:[^;]*?(\d+)px/g)) {
+      expect(Number(m[1])).toBeLessThanOrEqual(160);
+    }
+    for (const m of css.matchAll(/padding[^:]*:\s*([^;]+);/g)) {
+      for (const px of (m[1] ?? '').matchAll(/(\d+)px/g)) expect(Number(px[1])).toBeLessThanOrEqual(24);
+    }
     expect(css).toMatch(/max-width/);
+    expect(css).toMatch(/min-height:\s*44px/);
   });
 });

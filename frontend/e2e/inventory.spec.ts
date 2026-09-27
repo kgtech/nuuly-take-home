@@ -30,8 +30,11 @@ test('add stock then purchase', async ({ page }) => {
   await expect(buy.getByRole('alert')).toHaveText('Insufficient inventory');
 
   await page.goto('/');
-  await expect(page.getByRole('table')).toBeVisible();
-  await expect(page.getByRole('columnheader', { name: 'Quantity' })).toBeVisible();
+  await page.getByLabel('After SKU ID').fill(skuId.slice(0, -1));
+  await page.getByRole('button', { name: 'Apply' }).click();
+  const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: skuId }) });
+  await expect(row).toBeVisible();
+  await expect(row.getByRole('cell').nth(1)).toHaveText('3');
 });
 
 test('a double-submitted purchase changes stock once', async ({ page }) => {
@@ -44,7 +47,7 @@ test('a double-submitted purchase changes stock once', async ({ page }) => {
 
   const purchases: string[] = [];
   page.on('request', (r) => {
-    if (r.method() === 'POST' && r.url().endsWith(`/inventory/${skuId}/purchase`)) purchases.push(r.url());
+    if (r.method() === 'POST' && r.url().endsWith(`/inventory/${encodeURIComponent(skuId)}/purchase`)) purchases.push(r.url());
   });
 
   const buy = page.getByRole('form').filter({ has: page.getByRole('button', { name: 'Purchase' }) });
