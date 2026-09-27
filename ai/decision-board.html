@@ -1818,7 +1818,7 @@ Object.assign(REFINES,{"Z3:A":[],"Z3:A2":[],"Z3:C":[],"Z3:B":[
  {"id":"G10","rule":1,"from":"(500 only for server faults","to":"(GET /inventory also answers 400 \"Invalid request\" for a query string that can't be decoded or repeats after, Z3; 500 only for server faults"},
  {"id":"S12","rule":1,"from":"declares @ApiResponse for exactly the spec's codes;","to":"declares @ApiResponse for exactly the spec's codes, plus GET /inventory's 400 (Z3);"}
 ]});
-/* Round 12: codebase critique (PR #20, issues #21, #22) */
+/* Round 12: codebase critique (PR #20, issues #21, #22, #23) */
 DECISIONS.push(
 {id:"C1",kind:"gap",review12:true,finding:"Errors outside Spring MVC",q:"How are errors that Spring MVC never sees, and errors on library paths, rendered?",
  quote:{text:"[S6] G10 covers /inventory/** only. /actuator/** and springdoc paths keep library behaviour.",from:"CLAUDE.md (S6)"},
@@ -1880,6 +1880,37 @@ Object.assign(REFINES,{"C2:A":[{"id":"Z2","rule":0,"from":"InventoryController, 
 {"id":"R8","rule":0,"from":"limit range is 1–250.","to":"limit range is 1–250; 250 is also the page size when limit is absent or ignored (C2)."},
 {"id":"R8","assumption":true,"from":"`limit` accepts up to 250.","to":"`limit` accepts up to 250, which is also the default page size (C2)."},
 {"id":"S11","rule":0,"from":"keyset query and Link header (last page has no Link);","to":"keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2);"}],"C2:B":[],"C2:C":[],"C2:D":[]});
+DECISIONS.push(
+{id:"C3",kind:"gap",review12:true,finding:"Raw path and Accept q",q:"What does the API do with \";\" in the skuId segment and with an Accept that gives JSON q=0?",
+ quote:{text:"[G11] … controllers pass the raw path value. …\n[Y1] … so an Accept that excludes JSON fails at handler lookup …",from:"CLAUDE.md (G11, Y1)"},
+ why:"Codebase critique (PR #20, C-04, C-34, C-05): Spring strips \";\" content from @PathVariable, so POST /inventory/ABC-1;lot=7 added 5 to ABC-1 and …;x/purchase decremented it (the %3B form was already rejected). Spring's produces condition ignores q, so Accept: application/json;q=0 (RFC 9110: not acceptable) changed stock. find's @Transactional(readOnly) borrowed a connection before the skuId check: with Postgres down GET /inventory/-bad took 30 s and returned 500.",
+ detail:["PathSegment.valueToMatch() drops everything from the first \";\"; PathSegment.value() keeps it.","RFC 9110 §12.4.2: q=0 means not acceptable; §12.5.1: the most specific matching range has precedence.","ProducesRequestCondition matches with isCompatibleWith and never reads q."],
+ examples:[],
+ by:["G11","S2","U2","Y1","U3","C1"],
+ options:[
+  {k:"A",label:"Raw decoded segment; q=0 refuses JSON on POST",summary:"Controllers pass the decoded skuId segment with its \";\" content; a POST HandlerInterceptor applies RFC 9110 q=0; find checks before its transaction.",
+   pros:["\";\" and %3B behave the same","No new status codes","POST refusals still go through the existing 400 mapping"],cons:["About 15 lines of media-range precedence by hand"],h:1.5,risk:"Low",src:[],
+   rules:[
+    "Controllers pass the skuId path segment as sent: the raw segment of the request path, percent-decoded, with any \";\" content kept (Spring strips it from @PathVariable, which only routes and documents the parameter). /inventory/ABC-1;lot=7 and /inventory/ABC-1%3Blot=7 are both checked as \"ABC-1;lot=7\": create → 400 \"Invalid request\"; GET and purchase → 404 \"SKU not found\"; nothing is written or stored, with or without an Idempotency-Key. \";\" content on the literal segments (/inventory;v=1/…, …/purchase;x) is ignored, as Spring does.",
+    "InventoryService.find checks SkuId.isValid before it starts its read-only transaction (a read-only TransactionTemplate; find has no @Transactional), so an invalid GET skuId borrows no connection.",
+    "On POST, the most specific Accept range that matches application/json decides (RFC 9110); q=0 means JSON is refused. Spring's produces condition ignores q, so JsonAcceptForPostInterceptor (a HandlerInterceptor on /inventory/**) checks it after handler lookup and before argument resolution and throws HttpMediaTypeNotAcceptableException (→ 400 \"Invalid request\" on POST, U2). application/json;q=0, \"application/json;q=0, */*\" and */*;q=0 → 400; */*;q=0.1 and \"application/*;q=0, application/json\" → accepted. GET still ignores Accept (U2).",
+    "Test \";\" and %3B in the skuId segment and \";\" on the literal segments through a real server (RANDOM_PORT, raw HTTP) and MockMvc; test the q=0 forms on both POSTs with no ledger or idempotency row written; assert find with an invalid skuId never touches the transaction manager; JsonAcceptForGetFilterTest covers /inventory;v=1/x and /%69nventory/x."],
+   assumption:"A `;` in the SKU ID segment is part of the ID: `/inventory/ABC-1;lot=7` is an invalid ID, never `ABC-1`. A POST whose `Accept` gives JSON `q=0` returns 400."},
+  {k:"B",label:"Reject any \";\" under /inventory/**",summary:"A filter answers every \";\" in the path: 400 on POST, 404 on GET.",
+   pros:["No path parameter reaches Spring"],cons:["Changes routes that work today (/inventory;v=1)","Must reproduce the per-operation 400/404 split outside the service"],h:1,risk:"Med",src:[],
+   rules:["Any \";\" in a /inventory/** request path → 400 \"Invalid request\" on POST, 404 on GET."],assumption:null},
+  {k:"C",label:"Document as known edges",summary:"Keep the current behaviour and list it in the README.",
+   pros:["No code"],cons:["A request for one ID changes another SKU's stock","A client that refuses JSON still changes stock"],h:0,risk:"High",src:[],
+   rules:["\";\" content in the skuId segment is ignored and q=0 is treated as acceptable (known edges)."],assumption:null}
+ ],
+ rec:{k:"A",why:"It makes G11's \"raw path value\" literal, keeps Y1's single 400 path, and changes no working route.",change:"You want no path parameters anywhere. Then B."}}
+);
+Object.assign(REFINES,{"C3:A":[{"id":"G11","rule":0,"from":"controllers pass the raw path value.","to":"controllers pass the raw path value: the decoded skuId segment with any \";\" content kept (C3)."},
+{"id":"S2","rule":1,"from":"Controllers pass the raw path skuId to the service.","to":"Controllers pass the raw path skuId to the service: the decoded path segment with any \";\" content, which Spring strips from @PathVariable (C3)."},
+{"id":"U2","rule":0,"from":"POST requests whose Accept excludes JSON get 400 \"Invalid request\"","to":"POST requests whose Accept excludes JSON, or gives it q=0 (C3), get 400 \"Invalid request\""},
+{"id":"U2","assumption":true,"from":"a POST whose `Accept` header excludes JSON returns 400.","to":"a POST whose `Accept` header excludes JSON, or gives it `q=0`, returns 400."},
+{"id":"Y1","rule":0,"from":"before the controller, the idempotency claim or the ledger write runs.","to":"before the controller, the idempotency claim or the ledger write runs. The produces condition ignores q, so an Accept that gives JSON q=0 passes lookup and JsonAcceptForPostInterceptor rejects it with the same exception before argument resolution (C3)."},
+{"id":"G11","assumption":true,"from":"Creating any other ID returns 400; reading or purchasing one returns 404.","to":"Creating any other ID returns 400; reading or purchasing one returns 404. A `;` in the ID segment is part of the ID (C3)."}],"C3:B":[],"C3:C":[]});
 (function(){
 const BUDGET = 16;
 const byId = Object.fromEntries(DECISIONS.map(d=>[d.id,d]));

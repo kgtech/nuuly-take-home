@@ -72,6 +72,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | Z3 | Spec gap | What does GET /inventory return for a query string it can't read unambiguously? | B: 400 "Invalid request" | No |
 | C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths | Yes |
 | C2 | Spec gap | What does GET /inventory return when no limit is given? | A: Default page of 250 (the R8 maximum), Link for the rest | Yes |
+| C3 | Spec gap | What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0? | A: Raw decoded segment; q=0 refuses JSON on POST | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -91,9 +92,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Any printable string up to 255, no slash, COLLATE "C". Drawback noted in research: URL-encoding cases (spaces, %2F, Unicode) need tests.
   - C: Any non-blank string, database default collation. Drawback noted in research: Sort order depends on the database's locale (en_US puts a before B; C puts B first).
 - **Matched recommendation:** Yes
-- **Refined by:** R7, S2, W1, Z1
+- **Refined by:** R7, S2, W1, Z1, C3
 - **Current rules (after refinement):**
-  - Validate skuId against ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Check it in the service with a precompiled Pattern (SkuId.isValid), never with @Pattern on the @PathVariable; controllers pass the raw path value. POST create → 400 "Invalid request"; GET and purchase → 404 "SKU not found" without touching the database or the idempotency table (GET has no 400 in the spec). @Valid body validation runs first, so a bad body wins with 400 (G4). (refined by R7, S2, Z1)
+  - Validate skuId against ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Check it in the service with a precompiled Pattern (SkuId.isValid), never with @Pattern on the @PathVariable; controllers pass the raw path value: the decoded skuId segment with any ";" content kept (C3). POST create → 400 "Invalid request"; GET and purchase → 404 "SKU not found" without touching the database or the idempotency table (GET has no 400 in the spec). @Valid body validation runs first, so a bad body wins with 400 (G4). (refined by R7, S2, Z1, C3)
   - Column: sku.sku_id varchar(64) COLLATE "C" PRIMARY KEY; inventory_ledger.sku_id references it with the same type and collation (W1). (refined by W1)
 
 ## G2: How wide is quantity: 32-bit or 64-bit?
@@ -529,10 +530,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: No format check on GET and purchase; lookup returns 404. Drawback noted in research: A bad ID costs a database round trip..
   - B: @Pattern everywhere, map HandlerMethodValidationException per endpoint. Drawback noted in research: Body errors on these methods move from MethodArgumentNotValidException to HandlerMethodValidationException. The handler must inspect getParameterValidationResults() and the method (getMethod()) to keep G4-C. Easy to get wrong..
 - **Matched recommendation:** Yes
-- **Refined by:** Z1
+- **Refined by:** Z1, C3
 - **Current rules (after refinement):**
   - Never put constraint annotations on @PathVariable parameters (they switch on method validation, which answers 400).
-  - Controllers pass the raw path skuId to the service. The service checks it with SkuId.isValid() before any database or idempotency work and returns an outcome value: create → InvalidRequest (400 "Invalid request"); purchase → NotFound and GET → empty (404 "SKU not found"). With an Idempotency-Key, the @Idempotent interceptor runs the same check (IdempotentResults.beforeClaim) before it opens a transaction, and the result is not stored. (refined by Z1)
+  - Controllers pass the raw path skuId to the service: the decoded path segment with any ";" content, which Spring strips from @PathVariable (C3). The service checks it with SkuId.isValid() before any database or idempotency work and returns an outcome value: create → InvalidRequest (400 "Invalid request"); purchase → NotFound and GET → empty (404 "SKU not found"). With an Idempotency-Key, the @Idempotent interceptor runs the same check (IdempotentResults.beforeClaim) before it opens a transaction, and the result is not stored. (refined by Z1, C3)
 
 ## S3: What does a valid Idempotency-Key look like, and what happens to an empty or oversized one?
 
@@ -719,6 +720,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Ignore Accept; always answer JSON. Drawback noted in research: Applies to all MVC endpoints; actuator and springdoc need a check (unverified).
   - B: Allow 406 as a documented deviation. Drawback noted in research: A code the spec doesn't list on its own operations.
 - **Matched recommendation:** No
+- **Refined by:** C3
+- **Current rules (after refinement):**
+  - GET /inventory/** ignores the Accept header (a filter sets it to application/json). POST requests whose Accept excludes JSON, or gives it q=0 (C3), get 400 "Invalid request" (HttpMediaTypeNotAcceptableException → 400 on POST). (refined by C3)
+  - Test both: GET with Accept: application/xml → 200 JSON; POST with Accept: application/xml → 400.
 
 ## U3: On purchase, which check runs first: the Idempotency-Key format (400) or the skuId pattern (404)?
 
@@ -801,6 +806,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: Check Accept in a filter before the controller. Drawback noted in research: Re-implements media-type matching (q-values, wildcards) by hand.
 - **Matched recommendation:** Yes
+- **Refined by:** C3
+- **Current rules (after refinement):**
+  - Both POST mappings declare produces = MediaType.APPLICATION_JSON_VALUE (and consumes = APPLICATION_JSON_VALUE), so an Accept that excludes JSON fails at handler lookup (HttpMediaTypeNotAcceptableException → 400 "Invalid request") before the controller, the idempotency claim or the ledger write runs. The produces condition ignores q, so an Accept that gives JSON q=0 passes lookup and JsonAcceptForPostInterceptor rejects it with the same exception before argument resolution (C3). (refined by C3)
+  - Test: POST with Accept: application/xml → 400 "Invalid request" and no ledger or idempotency row is written.
 
 ## Y2: How does the retry tell a serialization failure (40001/40P01) from other lock failures?
 
@@ -891,4 +900,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Keep every row; document the risk. Drawback noted in research: Any unauthenticated client can exhaust the heap (C-02).
   - C: Stream every row. Drawback noted in research: Response time and database load still grow with the table.
   - D: Default page of 50. Drawback noted in research: More round trips; a second number to document next to R8's 250.
+- **Matched recommendation:** Yes
+
+## C3: What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0?
+
+- **Type:** Spec gap
+- **Choice:** A: Raw decoded segment; q=0 refuses JSON on POST
+- **My reasoning:** Approved.
+- **Rejected:**
+  - B: Reject any ";" under /inventory/**. Drawback noted in research: Changes routes that work today (/inventory;v=1).
+  - C: Document as known edges. Drawback noted in research: A request for one ID changes another SKU's stock.
 - **Matched recommendation:** Yes
