@@ -1818,7 +1818,7 @@ Object.assign(REFINES,{"Z3:A":[],"Z3:A2":[],"Z3:C":[],"Z3:B":[
  {"id":"G10","rule":1,"from":"(500 only for server faults","to":"(GET /inventory also answers 400 \"Invalid request\" for a query string that can't be decoded or repeats after, Z3; 500 only for server faults"},
  {"id":"S12","rule":1,"from":"declares @ApiResponse for exactly the spec's codes;","to":"declares @ApiResponse for exactly the spec's codes, plus GET /inventory's 400 (Z3);"}
 ]});
-/* Round 12: codebase critique (PR #20, issues #21, #22, #23) */
+/* Round 12: codebase critique (PR #20, issues #21, #22, #23, #24) */
 DECISIONS.push(
 {id:"C1",kind:"gap",review12:true,finding:"Errors outside Spring MVC",q:"How are errors that Spring MVC never sees, and errors on library paths, rendered?",
  quote:{text:"[S6] G10 covers /inventory/** only. /actuator/** and springdoc paths keep library behaviour.",from:"CLAUDE.md (S6)"},
@@ -1911,6 +1911,28 @@ Object.assign(REFINES,{"C3:A":[{"id":"G11","rule":0,"from":"controllers pass the
 {"id":"U2","assumption":true,"from":"a POST whose `Accept` header excludes JSON returns 400.","to":"a POST whose `Accept` header excludes JSON, or gives it `q=0`, returns 400."},
 {"id":"Y1","rule":0,"from":"before the controller, the idempotency claim or the ledger write runs.","to":"before the controller, the idempotency claim or the ledger write runs. The produces condition ignores q, so an Accept that gives JSON q=0 passes lookup and JsonAcceptForPostInterceptor rejects it with the same exception before argument resolution (C3)."},
 {"id":"G11","assumption":true,"from":"Creating any other ID returns 400; reading or purchasing one returns 404.","to":"Creating any other ID returns 400; reading or purchasing one returns 404. A `;` in the ID segment is part of the ID (C3)."}],"C3:B":[],"C3:C":[]});
+DECISIONS.push(
+{id:"C4",kind:"design",review12:true,finding:"Append-only in the database",q:"How is the append-only ledger (G5, V1) enforced, and how do tests clean the tables?",
+ quote:{text:"[G5] Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1).\n[V1] ... The ledger is append-only: never UPDATE or DELETE inventory_ledger rows (W1).",from:"CLAUDE.md (G5, V1)"},
+ why:"Codebase critique (PR #20, C-10, C-19, C-15): as the inventory user, update inventory_ledger set quantity_delta = -999 succeeded and GET returned -2997, because nothing in the schema enforced G5/V1; 16 test classes hand-wrote their own DELETE cleanup with different strategies; LedgerQueryPlanTest EXPLAINed a hand-written copy of findQuantity instead of the shipped query.",
+ detail:["TRUNCATE fires no UPDATE or DELETE trigger, so test cleanup can use it.","The compose and Testcontainers users are superusers; REVOKE does not apply to them, and a superuser can still disable triggers."],
+ examples:[],
+ by:["G5","V1","D5","S11","W2","C2"],
+ options:[
+  {k:"A",label:"Statement-level triggers, SQLSTATE 23001; TRUNCATE-based test cleanup",summary:"A V3 migration adds BEFORE UPDATE OR DELETE statement-level triggers on sku and inventory_ledger; tests clean with one TRUNCATE helper.",
+   pros:["Enforced for every connection that doesn't disable triggers","Zero-row UPDATE/DELETE statements fail too","No compose or credential change"],cons:["A superuser can still disable triggers or set session_replication_role = replica"],h:1,risk:"Low",src:[],
+   rules:["V3__append_only.sql adds reject_update_or_delete() and BEFORE UPDATE OR DELETE ... FOR EACH STATEMENT triggers on sku and inventory_ledger. Any UPDATE or DELETE, even one that matches no row, fails with SQLSTATE 23001 (restrict_violation) and the message \"<op> on <table> is not allowed: the table is append-only\". Spring translates it to DataIntegrityViolationException, which is never retried. The app's writes are INSERTs only; sku's ON CONFLICT DO NOTHING fires no UPDATE trigger. idempotency_keys has no trigger. TRUNCATE is not blocked. The triggers stop ad-hoc DML, not a superuser who disables them.","Testcontainers classes that commit rows clean in @BeforeEach with TestDatabase.truncateAll (TRUNCATE sku, inventory_ledger, idempotency_keys RESTART IDENTITY CASCADE). No test writes DELETE FROM on these tables.","LedgerQueryPlanTest EXPLAINs every SUM statement the code ships, never a hand-written copy: findQuantity and findQuantitiesAfter from their @Query, and InventoryWritesImpl.ADD and PURCHASE.","Test: UPDATE and DELETE on inventory_ledger and sku, with and without a matching row (including a sku with no ledger rows), fail with 23001 and leave the balance unchanged."],
+   assumption:"The ledger and SKU rows can't be changed or deleted in the database either: an `UPDATE` or `DELETE` on `inventory_ledger` or `sku` fails."},
+  {k:"B",label:"Row-level triggers",summary:"Same as A, FOR EACH ROW.",pros:["Per-row context"],cons:["An UPDATE or DELETE that matches no row succeeds silently"],h:1,risk:"Low",src:[],
+   rules:["V3 adds BEFORE UPDATE OR DELETE ... FOR EACH ROW triggers on sku and inventory_ledger."],assumption:null},
+  {k:"C",label:"Non-owner app role with REVOKE UPDATE, DELETE, TRUNCATE",summary:"The app connects as a role without those privileges.",pros:["Privilege separation"],cons:["The compose user is the superuser owner: needs a second role, init SQL and split Flyway/app credentials (D8, S4, C-12)","Tests run as a superuser, so REVOKE can't be tested there"],h:3,risk:"Med",src:[],
+   rules:["The application connects as a role without UPDATE, DELETE or TRUNCATE on sku and inventory_ledger; Flyway runs as the owner."],assumption:null},
+  {k:"D",label:"Convention only",summary:"Document append-only in the README.",pros:["No work"],cons:["C-10 stays open: any client with credentials can rewrite history"],h:0,risk:"High",src:[],
+   rules:["Append-only is enforced by code review only (known edge)."],assumption:null}
+ ],
+ rec:{k:"A",why:"It closes C-10 for every connection that doesn't deliberately disable triggers, and needs no role or compose change.",change:"You want privilege separation too. Then C, with C-12."}}
+);
+Object.assign(REFINES,{"C4:B": [], "C4:C": [], "C4:D": [], "C4:A": [{"id": "G5", "rule": 0, "from": "a SKU at 0 keeps its sku row (W1).", "to": "a SKU at 0 keeps its sku row (W1). Postgres enforces it: V3 triggers reject UPDATE and DELETE on sku and inventory_ledger with SQLSTATE 23001 (C4)."}, {"id": "V1", "rule": 0, "from": "never UPDATE or DELETE inventory_ledger rows (W1).", "to": "never UPDATE or DELETE inventory_ledger rows (W1); a V3 trigger rejects both (C4)."}, {"id": "D5", "rule": 1, "from": "and the sku_id collation from G11 (W1).", "to": "and the sku_id collation from G11 (W1). V3 adds the append-only triggers on sku and inventory_ledger (C4)."}, {"id": "S11", "rule": 0, "from": "two concurrent requests with the same fresh key produce one stock change.", "to": "two concurrent requests with the same fresh key produce one stock change; UPDATE and DELETE on inventory_ledger and sku fail with SQLSTATE 23001 (C4)."}, {"id": "S11", "rule": 2, "from": "Concurrency tests are not @Transactional; clean tables in @BeforeEach.", "to": "Concurrency tests are not @Transactional; clean tables in @BeforeEach with TestDatabase.truncateAll, never DELETE (C4)."}, {"id": "W2", "rule": 2, "from": "a test asserts the SUM query uses it.", "to": "a test EXPLAINs each shipped SUM statement, read from the code, and asserts it uses the index (C4)."}]});
 (function(){
 const BUDGET = 16;
 const byId = Object.fromEntries(DECISIONS.map(d=>[d.id,d]));

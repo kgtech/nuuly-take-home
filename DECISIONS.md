@@ -73,6 +73,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths | Yes |
 | C2 | Spec gap | What does GET /inventory return when no limit is given? | A: Default page of 250 (the R8 maximum), Link for the rest | Yes |
 | C3 | Spec gap | What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0? | A: Raw decoded segment; q=0 refuses JSON on POST | Yes |
+| C4 | Design | How is the append-only ledger (G5, V1) enforced, and how do tests clean the tables? | A: Statement-level triggers, SQLSTATE 23001; TRUNCATE-based test cleanup | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -164,9 +165,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Keep the row; hide from the list. Drawback noted in research: GET and list disagree.
   - C: Delete the row at 0. Drawback noted in research: A purchase can turn a SKU into a 404.
 - **Matched recommendation:** Yes
-- **Refined by:** W1
+- **Refined by:** W1, C4
 - **Current rules (after refinement):**
-  - Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1). (refined by W1)
+  - Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1). Postgres enforces it: V3 triggers reject UPDATE and DELETE on sku and inventory_ledger with SQLSTATE 23001 (C4). (refined by W1, C4)
 
 ## G6: What exact text goes in error bodies?
 
@@ -325,10 +326,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: schema.sql via spring.sql.init. Drawback noted in research: No versioning.
   - D: Liquibase. Drawback noted in research: More ceremony than needed.
 - **Matched recommendation:** Yes
-- **Refined by:** W1
+- **Refined by:** W1, C4
 - **Current rules (after refinement):**
   - Schema changes only through Flyway migrations in src/main/resources/db/migration; spring.jpa.hibernate.ddl-auto=validate.
-  - Migrations declare the sku table, the inventory_ledger table (id bigint identity, sku_id, quantity_delta bigint NOT NULL CHECK (quantity_delta <> 0), reason text NOT NULL CHECK (reason IN ('add','purchase')), created_at; index on sku_id) and the sku_id collation from G11 (W1). (refined by W1)
+  - Migrations declare the sku table, the inventory_ledger table (id bigint identity, sku_id, quantity_delta bigint NOT NULL CHECK (quantity_delta <> 0), reason text NOT NULL CHECK (reason IN ('add','purchase')), created_at; index on sku_id) and the sku_id collation from G11 (W1). V3 adds the append-only triggers on sku and inventory_ledger (C4). (refined by W1, C4)
 
 ## D6: How are errors turned into text/plain responses?
 
@@ -639,11 +640,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Named test matrix in docs/test-plan.md, referenced from CLAUDE.md. Drawback noted in research: About 0.5h more than A for the table and keeping names in sync (priority 2)..
   - C: Only concurrency tests plus happy paths. Drawback noted in research: Breaks priority 1: the G12 guard, CHECK, COLLATE "C" order, Link header and idempotency replay/expiry ship without ever being executed by a test..
 - **Matched recommendation:** Yes
-- **Refined by:** T1, V2, W1, W2, C2
+- **Refined by:** T1, V2, W1, W2, C2, C4
 - **Current rules (after refinement):**
-  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change. (refined by T1, V2, W1, C2)
+  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change; UPDATE and DELETE on inventory_ledger and sku fail with SQLSTATE 23001 (C4). (refined by T1, V2, W1, C2, C4)
   - Include a concurrent add test: N ≤ 8 threads add 1 to one new SKU through the service; assert all return Ok and the final quantity is N. (refined by W2)
-  - Concurrency tests are not @Transactional; clean tables in @BeforeEach.
+  - Concurrency tests are not @Transactional; clean tables in @BeforeEach with TestDatabase.truncateAll, never DELETE (C4). (refined by C4)
 
 ## S12: What checks that the built API and the exported openapi.yaml still match the original spec's contract?
 
@@ -746,9 +747,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: No ledger; list it under Future improvements. Drawback noted in research: No stock history in the build.
   - B: Hybrid: balance row + ledger row in the same statement. Drawback noted in research: About 2h with tests.
 - **Matched recommendation:** No
-- **Refined by:** W1
+- **Refined by:** W1, C4
 - **Current rules (after refinement):**
-  - Stock is the SUM of inventory_ledger.quantity_delta per SKU. Every write checks the SUM and inserts the delta in one SERIALIZABLE transaction: Add: INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING; then INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, :q, 'add' WHERE (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) <= 9223372036854775807 - :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) + :q)::bigint; no row → Overflow. Purchase: INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, -:q, 'purchase' WHERE EXISTS (SELECT 1 FROM sku WHERE sku_id = :id) AND (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) >= :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) - :q)::bigint; no row → SELECT the sku row in the same transaction: missing → NotFound, otherwise Insufficient. The RETURNING subquery doesn't see the row being inserted, so the balance is the old SUM ± :q. The ledger is append-only: never UPDATE or DELETE inventory_ledger rows (W1). (refined by W1)
+  - Stock is the SUM of inventory_ledger.quantity_delta per SKU. Every write checks the SUM and inserts the delta in one SERIALIZABLE transaction: Add: INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING; then INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, :q, 'add' WHERE (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) <= 9223372036854775807 - :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) + :q)::bigint; no row → Overflow. Purchase: INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, -:q, 'purchase' WHERE EXISTS (SELECT 1 FROM sku WHERE sku_id = :id) AND (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) >= :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) - :q)::bigint; no row → SELECT the sku row in the same transaction: missing → NotFound, otherwise Insufficient. The RETURNING subquery doesn't see the row being inserted, so the balance is the old SUM ± :q. The ledger is append-only: never UPDATE or DELETE inventory_ledger rows (W1); a V3 trigger rejects both (C4). (refined by W1, C4)
 - **Unresolved conflicts at export:** About 4h more, plus a new concurrency design.
 
 ## V2: With quantities stored as bigint/long, how wide is the request quantity, and what happens to the overflow guard?
@@ -784,6 +785,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Default 3 retries; tests accept some 500s. Drawback noted in research: Weakens the S11 concurrent-add test ("all return Ok").
   - C: Switch W1 to A (row lock, no retries). Drawback noted in research: Hot SKUs still serialize (queue instead of retry).
 - **Matched recommendation:** Yes
+- **Refined by:** C4
+- **Current rules (after refinement):**
+  - Retry SERIALIZABLE stock writes on PessimisticLockingFailureException whose root SQLState is 40001 or 40P01: up to 10 retries, 5–200 ms jittered backoff. The retry wraps the transaction (one new transaction per attempt).
+  - When retries are exhausted, return 500 "Internal server error" and log the SKU.
+  - inventory_ledger has an index on sku_id; a test EXPLAINs each shipped SUM statement, read from the code, and asserts it uses the index (C4). Concurrency tests use at most 8 threads per SKU. (refined by C4)
 
 ## X1: Where do the retry and the SERIALIZABLE transaction boundary sit in the code?
 
@@ -910,4 +916,15 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: Reject any ";" under /inventory/**. Drawback noted in research: Changes routes that work today (/inventory;v=1).
   - C: Document as known edges. Drawback noted in research: A request for one ID changes another SKU's stock.
+- **Matched recommendation:** Yes
+
+## C4: How is the append-only ledger (G5, V1) enforced, and how do tests clean the tables?
+
+- **Type:** Design choice
+- **Choice:** A: Statement-level triggers, SQLSTATE 23001; TRUNCATE-based test cleanup
+- **My reasoning:** Approved.
+- **Rejected:**
+  - B: Row-level triggers. Drawback noted in research: An UPDATE or DELETE that matches no row succeeds silently.
+  - C: Non-owner app role with REVOKE UPDATE, DELETE, TRUNCATE. Drawback noted in research: The compose user is the superuser owner: needs a second role, init SQL and split Flyway/app credentials (D8, S4, C-12).
+  - D: Convention only. Drawback noted in research: C-10 stays open: any client with credentials can rewrite history.
 - **Matched recommendation:** Yes
