@@ -6,7 +6,7 @@ The storage design is V2's own and is documented in [`DESIGN-V2.md`](DESIGN-V2.m
 
 ## Prerequisites
 
-**To run it (reviewers):** Docker with Compose v2 and BuildKit; port 8080 free; `curl` and `uuidgen` for the walk-through.
+**To run it (reviewers):** Docker with Compose v2 and BuildKit; port 18080 free (or set `APP_PORT`); `curl` and `uuidgen` for the walk-through.
 
 **To build and test it (developers):** JDK 25 (the Gradle wrapper, Gradle 9.1+, downloads Gradle and finds the toolchain), Docker (Testcontainers starts Postgres and Redis), Node 20+ and npm for the front end.
 
@@ -18,19 +18,19 @@ Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), springdoc-openapi 3.1.x
 
 ```bash
 docker compose up --build
-# API:        http://localhost:8080/inventory
-# Swagger UI: http://localhost:8080/swagger-ui.html
-# Health:     http://localhost:8080/actuator/health  (/liveness, /readiness)
+# API:        http://localhost:18080/inventory
+# Swagger UI: http://localhost:18080/swagger-ui.html
+# Health:     http://localhost:18080/actuator/health  (/liveness, /readiness)
 docker compose down -v   # stop and remove the database
 ```
 
-This builds the app image, starts Postgres 18 and Redis 8, waits for both health checks and starts the app on 8080. Postgres and Redis are published on loopback only, on random host ports (`docker compose port postgres 5432`, `docker compose port redis 6379`). Redis runs with no persistence and a 64 MB least-frequently-used cache limit, as a cache should. The app container has a readiness health check and an explicit heap policy (`-XX:MaxRAMPercentage=75.0`).
+This builds the app image, starts Postgres 18 and Redis 8, waits for both health checks and starts the app on host port 18080 (`APP_PORT` overrides it; the container listens on 8080). The non-default port keeps `docker compose up` clear of anything else on 8080. Postgres and Redis are published on loopback only, on random host ports (`docker compose port postgres 5432`, `docker compose port redis 6379`). Redis runs with no persistence and a 64 MB least-frequently-used cache limit, as a cache should. The app container has a readiness health check and an explicit heap policy (`-XX:MaxRAMPercentage=75.0`).
 
 To wait until the app is ready:
 
 ```bash
 docker compose up --build -d
-until curl -sf localhost:8080/actuator/health/readiness >/dev/null; do sleep 2; done
+until curl -sf localhost:18080/actuator/health/readiness >/dev/null; do sleep 2; done
 ```
 
 **Development (JDK 25 + Docker):**
@@ -49,16 +49,16 @@ export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 export SPRING_DATA_REDIS_PORT="$(docker compose port redis 6379 | cut -d: -f2)"
 ```
 
-`compose.yaml` defines Postgres and Redis; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: both want port 8080.
+`compose.yaml` defines Postgres and Redis; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: `bootRun` listens on 8080, the compose app on 18080, but both start the stores from compose.yaml.
 
 **Front end** (see [`frontend/README.md`](frontend/README.md) and [`frontend/DECISIONS.md`](frontend/DECISIONS.md)):
 
 ```bash
 cd frontend
 npm ci
-npm run dev          # http://localhost:5173, proxies /inventory to http://localhost:8080 (start the service first)
+npm run dev          # http://localhost:15173, proxies /inventory to http://localhost:18080 (start the service first; VITE_PORT and API_URL override)
 npm run lint && npm run typecheck && npm test && npm run build
-npm run test:e2e     # Playwright against the real service on :8080 (add then purchase; a double submit changes stock once)
+npm run test:e2e     # Playwright against the real service on :18080 (add then purchase; a double submit changes stock once)
 ```
 
 ## Try it
@@ -66,16 +66,16 @@ npm run test:e2e     # Playwright against the real service on :8080 (add then pu
 Start from an empty database (`docker compose down -v && docker compose up --build`). Error bodies are `text/plain`; successful bodies are JSON.
 
 ```bash
-curl -i localhost:8080/inventory                     # 200 []
-curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
+curl -i localhost:18080/inventory                     # 200 []
+curl -i -X POST localhost:18080/inventory/ABC-1 -H 'Content-Type: application/json' \
      -d '{"quantity":5}'                             # 200 {"skuId":"ABC-1","quantity":5}
-curl -i localhost:8080/inventory/ABC-1               # 200 {"skuId":"ABC-1","quantity":5}   (cached for later reads)
-curl -i -X POST localhost:8080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
+curl -i localhost:18080/inventory/ABC-1               # 200 {"skuId":"ABC-1","quantity":5}   (cached for later reads)
+curl -i -X POST localhost:18080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
      -d '{"quantity":2}'                             # 200 {"skuId":"ABC-1","quantity":3}
-curl -i -X POST localhost:8080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
+curl -i -X POST localhost:18080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
      -d '{"quantity":10}'                            # 400 Insufficient inventory
-curl -i localhost:8080/inventory/NOPE                # 404 SKU not found
-curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
+curl -i localhost:18080/inventory/NOPE                # 404 SKU not found
+curl -i -X POST localhost:18080/inventory/ABC-1 -H 'Content-Type: application/json' \
      -d '{"quantity":0}'                             # 400 Invalid request
 ```
 
@@ -84,7 +84,7 @@ curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/jso
 ```bash
 KEY=$(uuidgen)
 for q in 5 5 6; do
-  curl -i -X POST localhost:8080/inventory/K-1 -H 'Content-Type: application/json' \
+  curl -i -X POST localhost:18080/inventory/K-1 -H 'Content-Type: application/json' \
        -H "Idempotency-Key: $KEY" -d "{\"quantity\":$q}"
 done
 # 200 {"skuId":"K-1","quantity":5}
@@ -95,7 +95,7 @@ done
 **Paging.** `GET /inventory` returns SKUs sorted by SKU ID, at most 250 per response, with a `Link: <url>; rel="next"` header while more follow; `limit` (1–250) sets a smaller page and `after` is the last SKU ID of the previous page:
 
 ```bash
-curl -i 'localhost:8080/inventory?limit=2'
+curl -i 'localhost:18080/inventory?limit=2'
 # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1","quantity":5}]  (Link when more than 2 SKUs exist)
 ```
 
@@ -130,7 +130,7 @@ The spec leaves these open; V2 keeps the first build's answers ([`DECISIONS.md`]
 - The list is sorted by SKU ID with at most 250 per response and a `Link` to the next page built from the request's `Host` (no `X-Forwarded-*` handling); a bad `limit` is ignored, a repeated `after` or an undecodable query is 400 (G9, R4, R8, Z3, C2).
 - No authentication (G10). Requests outside the spec's operations get standard codes with the reason phrase as text; `/actuator/**` and the springdoc paths keep Spring Boot's own responses, except Tomcat-level rejections and undecodable queries, which are text/plain everywhere (S6, T3, C1).
 - A cached count may lag a committed write by up to `inventory.cache.stock-ttl` (5 s, measured from the read that cached it) if the post-commit refresh fails or raced a read miss; otherwise reads are fresh within milliseconds (DESIGN-V2 §3).
-- The app listens on 0.0.0.0:8080 with no authentication (G10) so reviewers can reach it; Postgres and Redis are on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
+- The app is published on 0.0.0.0:18080 with no authentication (G10) so reviewers can reach it; Postgres and Redis are on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
 
 ## AI use
 

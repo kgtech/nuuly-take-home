@@ -142,7 +142,7 @@ class ComposeFilesTest {
 
     @Test
     void appPublishes8080() throws IOException {
-        assertThat(strings(service(OVERRIDE, "app").get("ports"), "app ports")).containsExactly("8080:8080");
+        assertThat(strings(service(OVERRIDE, "app").get("ports"), "app ports")).containsExactly("${APP_PORT:-18080}:8080");
     }
 
     @Test
