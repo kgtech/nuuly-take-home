@@ -167,7 +167,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Matched recommendation:** Yes
 - **Refined by:** W1, C4
 - **Current rules (after refinement):**
-  - Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1). Postgres enforces it: V3 triggers reject UPDATE and DELETE on sku and inventory_ledger with SQLSTATE 23001 (C4). (refined by W1, C4)
+  - Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1). Postgres enforces it: V3 triggers reject UPDATE, DELETE and TRUNCATE on sku and inventory_ledger with SQLSTATE 23001 (C4). (refined by W1, C4)
 
 ## G6: What exact text goes in error bodies?
 
@@ -642,7 +642,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Matched recommendation:** Yes
 - **Refined by:** T1, V2, W1, W2, C2, C4
 - **Current rules (after refinement):**
-  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change; UPDATE and DELETE on inventory_ledger and sku fail with SQLSTATE 23001 (C4). (refined by T1, V2, W1, C2, C4)
+  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change; UPDATE, DELETE and TRUNCATE on inventory_ledger and sku fail with SQLSTATE 23001 (C4). (refined by T1, V2, W1, C2, C4)
   - Include a concurrent add test: N ≤ 8 threads add 1 to one new SKU through the service; assert all return Ok and the final quantity is N. (refined by W2)
   - Concurrency tests are not @Transactional; clean tables in @BeforeEach with TestDatabase.truncateAll, never DELETE (C4). (refined by C4)
 
@@ -922,7 +922,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Design choice
 - **Choice:** A: Statement-level triggers, SQLSTATE 23001; TRUNCATE-based test cleanup
-- **My reasoning:** Approved.
+- **My reasoning:** Approved. TRUNCATE (Q24-04): The rows can be deleted between tests. Not in “production”
 - **Rejected:**
   - B: Row-level triggers. Drawback noted in research: An UPDATE or DELETE that matches no row succeeds silently.
   - C: Non-owner app role with REVOKE UPDATE, DELETE, TRUNCATE. Drawback noted in research: The compose user is the superuser owner: needs a second role, init SQL and split Flyway/app credentials (D8, S4, C-12).
