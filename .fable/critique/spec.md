@@ -1,0 +1,14 @@
+# Critique — spec (Spec conformance) — v2 @ d01852a (reviewer report)
+
+## Findings
+- F-spec-01 MAJOR — The `;`/Accept guard is bypassed by a percent-encoded path: it keys on the raw getRequestURI() while Spring routes on the decoded, matrix-stripped path. `POST /%69nventory/ABC-1;lot=7` → 200 and a ledger row on ABC-1 (expected 400); `GET /%69nventory/ABC-1;x=y` → 200 (expected 404); `POST /%69nventory/ABC-1` with `Accept: application/json;q=0` → 200 (expected 400). Repro with `curl --path-as-is`. Fix: compute the path as JsonAcceptForGetFilter.routedPath does and read `;` from the raw PathSegment, or move the check into the controller per C3 (#54).
+- F-spec-02 MAJOR — POST Accept handling contradicts decision C3 (#54: "the most specific Accept range matching application/json decides (RFC 9110); q=0 refuses JSON"): the filter accepts if any compatible range has q>0, so `application/json;q=0, */*;q=0.1` writes stock; the test pins it. Also only the first Accept header line is read. No deviation recorded.
+- F-spec-03 MINOR — #57 AC3: the same-key HTTP concurrency tests do not assert or explain that the concurrent-claim path ran (8 sequential replays would pass identically).
+- F-spec-04 MINOR — #57 AC4: InventoryConcurrencyTest uses an unbounded future.get().
+- F-spec-05 MINOR — #56 AC2: the documented tombstone UPDATE is never exercised; it works only because expired is checked before response == null; a row cleared while still inside 24h → 500 (undocumented).
+- F-spec-06 MINOR — #56 AC4: reuse-rejection tests not parameterized (organisational).
+- F-spec-07 NIT — #59 AC3: Operation.java cites "plan OQ3".
+- F-spec-08 NIT — "Redis stopped" is tested as "Redis paused" (timeouts, not connection refused); the restart window asserts nothing during it.
+
+## Acceptance criteria and spec requirements checked and met
+Spec operations and codes (contract test one row per response, end-to-end flow); G6 texts and reason phrases, 405 Allow, unknown path 404; G3/G13 strict bodies incl. 2147483648, true, 1e1, form-urlencoded; G4/U3 order; G11/S2 with 64/65-char boundary and no I/O; G1, G5, G2; G12/U1 at Long.MAX_VALUE incl. stored overflow; U2/Y1 (literal paths); 500 path and rollback of the claim; all #48 idempotency ACs incl. 24h+1s/23h59m by DB clock, Y3, Y4, uppercase key, duplicate header lines; same fresh key concurrently and mixed bodies; #46 concurrency incl. cross-SKU and quantity = SUM; #49/#53 paging incl. default 250, after alone, exactly 250, repeated after, NUL, C collation, encoded path Link, undecodable query; #52 Tomcat rejections, encoded slash, TRACE, library paths; #50 OpenAPI byte-identical to main, every error text/plain, patterns/minimums/default documented; #43/#44/#55 schema and trigger, one cleanup helper; #47/#58 compose and health incl. readiness excluding Redis; #59 single mapping; #60 one meta-annotation and one container per store; #35 service-facing ACs; deviations recorded (D0/S9, CI parked, FE limit).
