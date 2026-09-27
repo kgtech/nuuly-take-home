@@ -41,3 +41,7 @@ Fixed on `v2-fix-critique`: M-04 tombstoned row → 400 not 500 (test added); M-
 ## Re-check
 
 See the "Re-check" section at the end of this file (filled after the fix branches were rebuilt).
+
+## Re-check (integration 3769414 = v2-ops e169745 + v2-fix-critique cb2028b + v2-frontend 4a572d4, 21:50Z)
+
+Service: `./gradlew build --warning-mode=fail` green, 666 tests in 36 classes, 24.8 s. Front end: lint, typecheck, Vitest 65/65, `check:api` clean, Playwright 12/12 (chromium + mobile-375, axe on three views). Against the rebuilt compose stack: `POST /%69nventory/RC-1;lot=7` → 400 (V-04); `Accept: application/json;q=0, */*;q=0.1` → 400 (V-05); `DELETE /inventory/x` with a bad form escape → 405 text/plain (V-06); a 5 KB POST body → 400 (M-07); `/actuator/health` names `db` and `redis` (M-06). V-01/V-02/V-12..V-15 are covered by the front-end suite's new tests and the e2e retry flow (12/12). Still open, as listed above: V-08, V-10, M-13, M-14, M-25..M-30, M-34, V-11's de-duplication.
