@@ -33,7 +33,7 @@ export const store = {
 const text = (status: number, body: string) =>
   new HttpResponse(body, { status, headers: { 'Content-Type': 'text/plain' } });
 
-function page(url: URL): HttpResponse {
+function page(url: URL): Response {
   const afterAll = url.searchParams.getAll('after');
   if (afterAll.length > 1) return text(400, TEXT.invalid);
   const after = afterAll[0] ?? null;
@@ -61,8 +61,7 @@ async function write(
   request: Request,
   skuId: string,
   op: 'add' | 'purchase',
-): Promise<HttpResponse> {
-  store.requests.push(request.clone());
+): Promise<Response> {
   let body: Body;
   try {
     body = (await request.json()) as Body;
@@ -132,3 +131,6 @@ export const handlers = [
 ];
 
 export const server = setupServer(...handlers);
+server.events.on('request:start', ({ request }) => {
+  if (request.method !== 'GET') store.requests.push(request.clone());
+});

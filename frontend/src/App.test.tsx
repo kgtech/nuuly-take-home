@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { store, TEXT } from './test/server';
 import { App } from './App';
 
@@ -18,7 +19,7 @@ describe('App routing', () => {
   it('finds a SKU by id from the list page with the skuId pattern as a hint only', async () => {
     const user = userEvent.setup();
     render(<App />);
-    const input = await screen.findByLabelText(/sku id/i);
+    const input = await screen.findByRole('textbox', { name: 'SKU ID' });
     await user.type(input, 'bad id');
     expect(screen.getByText(/letters, digits/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /open/i }));
@@ -29,13 +30,13 @@ describe('App routing', () => {
     window.location.hash = '#/nothing/here';
     render(<App />);
     expect(await screen.findByText(/page not found/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /inventory/i })).toHaveAttribute('href', '#/');
+    expect(screen.getByRole('link', { name: 'inventory' })).toHaveAttribute('href', '#/');
   });
 });
 
 describe('phone width', () => {
   it('uses no fixed pixel widths wider than a phone in the stylesheet', () => {
-    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
+    const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8');
     for (const m of css.matchAll(/(?:min-)?width\s*:\s*(\d+)px/g)) {
       expect(Number(m[1])).toBeLessThanOrEqual(375);
     }
