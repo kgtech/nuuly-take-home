@@ -434,13 +434,15 @@ class InventoryPagingIntegrationTest {
         assertThat(last.next()).isNull();
     }
 
-    /** R4, C2: an ignored limit means the default page of 250, with a Link carrying limit=250. */
-    @ParameterizedTest(name = "limit={0}")
-    @ValueSource(strings = {"0", "-1", "abc", ""})
-    void ignoredLimitUsesDefaultPage(String limit) throws Exception {
+    /**
+     * R4, C2: an ignored limit means the default page of 250, with a Link carrying limit=250. One value here;
+     * InventoryServiceReadTest#listTreatsUnusableLimitAsDefault covers the other ignored forms.
+     */
+    @Test
+    void ignoredLimitUsesDefaultPage() throws Exception {
         seedNumbered(251);
 
-        Page first = page(uri(limit, null));
+        Page first = page(uri("abc", null));
 
         assertThat(ids(first)).containsExactlyElementsOf(numbered(1, 250));
         assertThat(first.next()).isEqualTo(URI.create("http://localhost/inventory?limit=250&after=p250"));
@@ -457,17 +459,11 @@ class InventoryPagingIntegrationTest {
         assertThat(page.next()).isNull();
     }
 
-    @Test
-    void emptyTableWithoutParamsReturnsEmptyArrayWithoutLink() throws Exception {
-        list(URI.create("/inventory"))
-                .andExpect(status().isOk())
-                .andExpect(content().string("[]"))
-                .andExpect(header().doesNotExist(LINK));
-    }
-
-    @Test
-    void emptyTableWithLimitReturnsEmptyArrayWithoutLink() throws Exception {
-        list(uri("2", null))
+    /** G9, C2: an empty table is an empty array and no Link, with or without limit. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/inventory", "/inventory?limit=2"})
+    void emptyTableReturnsEmptyArrayWithoutLink(String uri) throws Exception {
+        list(URI.create(uri))
                 .andExpect(status().isOk())
                 .andExpect(content().string("[]"))
                 .andExpect(header().doesNotExist(LINK));

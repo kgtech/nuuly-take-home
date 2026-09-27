@@ -39,7 +39,7 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/InventoryItem"
-          description: List of all inventory items
+          description: "One page of inventory items, at most 250, sorted by skuId"
           headers:
             Link:
               description: "Next page, when more SKUs follow: <URL>; rel=\"next\""

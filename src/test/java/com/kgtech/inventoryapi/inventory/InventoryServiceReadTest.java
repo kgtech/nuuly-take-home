@@ -152,12 +152,19 @@ class InventoryServiceReadTest {
         verifyNoMoreInteractions(skus);
     }
 
-    /** G9, C2: without limit, a 251st row means a next page at the default size; the cursor is the 250th row. */
-    @Test
-    void listWithoutLimitSetsNextAtDefault() {
-        when(skus.findQuantitiesAfter("", 251)).thenReturn(rows(251));
+    /**
+     * G9, R4, C2: without limit, with or without after, a 251st row means a next page at the default size; the cursor
+     * is the 250th row. No after queries from "".
+     */
+    @ParameterizedTest(name = "after={0} → query after {1}")
+    @CsvSource(delimiter = '|', nullValues = "NULL", value = {
+        "NULL | ''",
+        "A    | A"
+    })
+    void listWithoutLimitSetsNextAtDefault(String after, String queried) {
+        when(skus.findQuantitiesAfter(queried, 251)).thenReturn(rows(251));
 
-        InventoryPage page = service.list(null, null);
+        InventoryPage page = service.list(null, after);
 
         assertThat(page.items()).isEqualTo(items(rows(250)));
         assertThat(page.next()).contains(new InventoryPage.Next(250, "S250"));
@@ -245,17 +252,6 @@ class InventoryServiceReadTest {
         assertThat(page.next()).isEmpty();
         verify(skus).findQuantitiesAfter(after, 251);
         verifyNoMoreInteractions(skus);
-    }
-
-    /** C2: after alone is capped at 250; a 251st row sets the next cursor at the default size. */
-    @Test
-    void listWithAfterOnlySetsNextAtDefault() {
-        when(skus.findQuantitiesAfter("A", 251)).thenReturn(rows(251));
-
-        InventoryPage page = service.list(null, "A");
-
-        assertThat(page.items()).isEqualTo(items(rows(250)));
-        assertThat(page.next()).contains(new InventoryPage.Next(250, "S250"));
     }
 
     /** R4, C2: an ignored limit with after behaves as after alone. */

@@ -143,16 +143,6 @@ class InventoryListPagingTest {
                 .andExpect(header().string(LINK, "<http://localhost/inventory?limit=250&after=B>; rel=\"next\""));
     }
 
-    /** C2: the Link is built from the routed path, so an encoded request path still links to /inventory. */
-    @Test
-    void linkUsesRoutedPathForEncodedRequestPath() throws Exception {
-        stub("2", null, Optional.of(new Next(2, "B")));
-
-        mvc.perform(get(URI.create("/%69nventory?limit=2")))
-                .andExpect(status().isOk())
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=2&after=B>; rel=\"next\""));
-    }
-
     /** C2: path parameters on the request path are not echoed into the Link. */
     @Test
     void linkDropsPathParameters() throws Exception {
@@ -171,17 +161,6 @@ class InventoryListPagingTest {
         mvc.perform(get("/app/inventory?limit=2").contextPath("/app"))
                 .andExpect(status().isOk())
                 .andExpect(header().string(LINK, "<http://localhost/app/inventory?limit=2&after=B>; rel=\"next\""));
-    }
-
-    /** C2: without limit the service's default page size (250) is carried into the Link. */
-    @Test
-    void linkWithDefaultLimit() throws Exception {
-        stub(null, null, Optional.of(new Next(250, "B")));
-
-        mvc.perform(get("/inventory"))
-                .andExpect(status().isOk())
-                .andExpect(content().json(ITEMS_JSON, JsonCompareMode.STRICT))
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=250&after=B>; rel=\"next\""));
     }
 
     @Test

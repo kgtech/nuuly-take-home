@@ -1,5 +1,6 @@
 package com.kgtech.inventoryapi.inventory.web;
 
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
 import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
@@ -26,8 +27,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 final class JsonAcceptForGetFilter extends OncePerRequestFilter {
 
-    private static final String BASE = "/inventory";
-
     /** Only GET /inventory and GET /inventory/**; springdoc, actuator and every POST are untouched (S6). */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -35,7 +34,7 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
             return true;
         }
         String path = routedPath(request);
-        return !(path.equals(BASE) || path.startsWith(BASE + "/"));
+        return !(path.equals(BASE_PATH) || path.startsWith(BASE_PATH + "/"));
     }
 
     /** requestURI minus contextPath, decoded and without ";" parameters: the path Spring matches handlers on. */

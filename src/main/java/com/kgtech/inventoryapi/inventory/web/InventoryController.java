@@ -2,7 +2,17 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
 import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
-import static com.kgtech.inventoryapi.inventory.web.InventoryController.BASE_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LINK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_OK_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_ID_DESCRIPTION;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
@@ -54,13 +64,6 @@ import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 @RequestMapping(BASE_PATH)
 class InventoryController {
 
-    /** The routed path; the next-page Link is built from it, never from the raw request URI (C2). */
-    static final String BASE_PATH = "/inventory";
-    private static final String SKU_ID_DESCRIPTION = "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', "
-            + "starting with a letter or digit. Case-sensitive.";
-    private static final String LIMIT = "limit";
-    private static final String AFTER = "after";
-
     private final InventoryService service;
 
     InventoryController(InventoryService service) {
@@ -94,7 +97,7 @@ class InventoryController {
             @PathVariable String skuId,
             @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = "Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400.",
+                    description = IDEMPOTENCY_KEY_DESCRIPTION,
                     schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
         return toResponse(skuId, service.add(skuId, body.quantity(), idempotencyKey));
@@ -114,31 +117,25 @@ class InventoryController {
             @PathVariable String skuId,
             @Valid @RequestBody InventoryQuantity body,
             @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = "Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400.",
+                    description = IDEMPOTENCY_KEY_DESCRIPTION,
                     schema = @Schema(type = "string", format = "uuid"))
             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
         return toResponse(skuId, service.purchase(skuId, body.quantity(), idempotencyKey));
     }
 
     @GetMapping
-    @Operation(operationId = "listInventory", summary = "List all inventory",
-            description = "Returns SKUs sorted by skuId, at most 250 per response. When more SKUs follow, the Link header "
-                    + "holds the next page's URL; follow it until a response has no Link to list all inventory. "
-                    + "If no SKUs exist, returns an empty array.")
-    @ApiResponse(responseCode = "200", description = "List of all inventory items",
-            headers = @Header(name = LINK, description = "Next page, when more SKUs follow: <URL>; rel=\"next\"",
-                    schema = @Schema(type = "string")),
+    @Operation(operationId = "listInventory", summary = "List all inventory", description = LIST_DESCRIPTION)
+    @ApiResponse(responseCode = "200", description = LIST_OK_DESCRIPTION,
+            headers = @Header(name = LINK, description = LINK_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE,
                     array = @ArraySchema(schema = @Schema(implementation = InventoryItem.class))))
-    @ApiResponse(responseCode = "400", description = "Invalid request: the query string can't be decoded or repeats after",
+    @ApiResponse(responseCode = "400", description = LIST_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
     ResponseEntity<?> list(
-            @Parameter(description = "Optional page size, 1 to 250 (default 250). Larger values mean 250; "
-                    + "other values are ignored and the default applies.",
+            @Parameter(description = LIMIT_DESCRIPTION,
                     schema = @Schema(type = "integer", minimum = "1", maximum = "250", defaultValue = "250"))
             @RequestParam(name = LIMIT, required = false) String limit,
-            @Parameter(description = "Optional cursor: return only SKUs whose skuId sorts after this value, "
-                    + "up to the page size. It must not be repeated.",
+            @Parameter(description = AFTER_DESCRIPTION,
                     schema = @Schema(type = "string"))
             @RequestParam(name = AFTER, required = false) String after,
             HttpServletRequest request) {

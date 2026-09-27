@@ -83,8 +83,8 @@ public class InventoryService {
     @Transactional(readOnly = true)
     public InventoryPage list(String limit, String after) {
         int n = parseLimit(limit);
-        String cursor = after == null ? FIRST : truncateAtNul(after);
-        List<InventoryItem> items = toItems(skus.findQuantitiesAfter(cursor, n + 1L));
+        String cursor = truncateAtNul(after);
+        List<InventoryItem> items = toItems(skus.findQuantitiesAfter(cursor == null ? FIRST : cursor, n + 1L));
         if (items.size() <= n) {
             return new InventoryPage(items, Optional.empty());
         }
@@ -109,6 +109,9 @@ public class InventoryService {
      * first NUL, so the cursor is cut there.
      */
     private static String truncateAtNul(String after) {
+        if (after == null) {
+            return null;
+        }
         int nul = after.indexOf('\0');
         return nul < 0 ? after : after.substring(0, nul);
     }

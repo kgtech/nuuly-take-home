@@ -210,7 +210,10 @@ class ApiDocsTest {
                 schema -> assertThat(schema.get("type")).isEqualTo("string"));
     }
 
-    /** C2: GET /inventory's description states the default page and the Link; the summary stays the spec's. */
+    /**
+     * C2: GET /inventory's description states the default page and the Link, and its 200 response describes one page
+     * of at most 250 items (Q22-07); the summary stays the spec's.
+     */
     @Test
     void listDocumentsDefaultPage() throws Exception {
         Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['/inventory'].get");
@@ -218,6 +221,9 @@ class ApiDocsTest {
         assertThat(operation.get("description")).isInstanceOfSatisfying(String.class, description -> assertThat(
                 description).contains("at most 250", "Link"));
         assertThat(operation.get("summary")).isEqualTo("List all inventory");
+        assertThat(JsonPath.<Object>read(apiDocs(), "$.paths['/inventory'].get.responses['200'].description"))
+                .as("200 response description").isInstanceOfSatisfying(String.class,
+                        description -> assertThat(description).contains("250"));
     }
 
     /** Z3, S12: GET /inventory documents its 400 as text/plain, and after says it must not be repeated. */
