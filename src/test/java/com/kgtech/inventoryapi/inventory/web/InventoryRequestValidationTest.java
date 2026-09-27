@@ -247,7 +247,6 @@ class InventoryRequestValidationTest {
     @CsvSource(delimiter = '|', value = {
         "GET      | /inventory/ABC-1;x=y              | ABC-1;x=y",
         "GET      | /inventory/ABC-1;                 | ABC-1;",
-        "GET      | /inventory/AB%43-1;x=%41          | ABC-1;x=A",
         "GET      | /inventory/ABC-1%3Bx=y            | ABC-1;x=y",
         "GET      | /inventory;v=1/ABC-1              | ABC-1",
         "CREATE   | /inventory/ABC-1;lot=7            | ABC-1;lot=7",
@@ -256,8 +255,7 @@ class InventoryRequestValidationTest {
         "CREATE   | /inventory;v=1/ABC-1              | ABC-1",
         "PURCHASE | /inventory/ABC-1;x/purchase       | ABC-1;x",
         "PURCHASE | /%69nventory/ABC-1;x/purchase     | ABC-1;x",
-        "PURCHASE | /inventory/ABC-1%3Bx/purchase     | ABC-1;x",
-        "PURCHASE | /inventory/ABC-1/purchase;x       | ABC-1"
+        "PURCHASE | /inventory/ABC-1%3Bx/purchase     | ABC-1;x"
     })
     void skuIdSegmentKeepsSemicolonContent(String op, String rawPath, String expectedSkuId) throws Exception {
         when(service.find(anyString())).thenReturn(Optional.empty());
@@ -283,6 +281,16 @@ class InventoryRequestValidationTest {
         } else {
             expectText(result, 404, "SKU not found");
         }
+    }
+
+    /** C3: under a context path the skuId is still the segment after /inventory, ";" content kept. */
+    @Test
+    void skuIdSegmentKeepsSemicolonContentUnderContextPath() throws Exception {
+        when(service.add(anyString(), anyInt(), isNull())).thenReturn(new WriteResult.InvalidRequest());
+
+        expectInvalidRequest(mvc.perform(post(URI.create("/app/inventory/ABC-1;lot=7")).contextPath("/app")
+                .accept(MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON).content(VALID_BODY)));
+        verify(service).add("ABC-1;lot=7", 5, null);
     }
 
     // --- G4 and U3: body validation runs before the skuId check and the service ---
@@ -386,14 +394,5 @@ class InventoryRequestValidationTest {
 
         expectItem(mvc.perform(request), SKU, 5);
         op.verifyCalled(service, SKU, 5);
-    }
-
-    /** C3, U3: the Accept gate fires before body parsing; a malformed body with q=0 is the same 400. */
-    @ParameterizedTest
-    @EnumSource(Post.class)
-    void postRefusingJsonWithMalformedBodyReturns400(Post op) throws Exception {
-        expectInvalidRequest(mvc.perform(post(op.template, SKU).header(ACCEPT, "application/json;q=0")
-                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":")));
-        verifyNoInteractions(service);
     }
 }

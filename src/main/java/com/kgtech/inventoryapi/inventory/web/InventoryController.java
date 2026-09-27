@@ -51,8 +51,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.server.PathContainer;
 import org.springframework.http.server.PathContainer.PathSegment;
-import org.springframework.http.server.RequestPath;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -63,6 +63,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import org.springframework.web.util.ServletRequestPathUtils;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
 import com.kgtech.inventoryapi.inventory.InventoryPage;
@@ -194,16 +195,22 @@ class InventoryController {
         return "<" + url + ">; rel=\"next\"";
     }
 
+    /** Path segments before the skuId: BASE_PATH's own. */
+    private static final long SEGMENTS_BEFORE_SKU_ID = PathContainer.parsePath(BASE_PATH).elements().stream()
+            .filter(PathSegment.class::isInstance)
+            .count();
+
     /**
      * G11, S2, C3: the skuId segment as sent, percent-decoded with any ";" content kept; Spring strips that content
-     * from @PathVariable, so /inventory/ABC-1;lot=7 would otherwise act on ABC-1. The segment after BASE_PATH's single
-     * segment is the skuId once a handler matched (an empty segment matches no handler).
+     * from @PathVariable, so /inventory/ABC-1;lot=7 would otherwise act on ABC-1. It reads the path the handler was
+     * matched on (context and servlet path already removed), and the segment after BASE_PATH's segments is the skuId
+     * once a handler matched (an empty segment matches no handler).
      */
     private static String rawSkuId(HttpServletRequest request) {
-        return RequestPath.parse(request.getRequestURI(), request.getContextPath()).pathWithinApplication().elements()
+        return ServletRequestPathUtils.getParsedRequestPath(request).pathWithinApplication().elements()
                 .stream()
                 .filter(PathSegment.class::isInstance)
-                .skip(1)
+                .skip(SEGMENTS_BEFORE_SKU_ID)
                 .findFirst()
                 .map(segment -> StringUtils.uriDecode(segment.value(), UTF_8))
                 .orElseThrow();

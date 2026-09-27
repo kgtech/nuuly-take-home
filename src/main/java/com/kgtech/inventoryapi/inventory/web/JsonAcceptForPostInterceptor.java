@@ -25,9 +25,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * <p>RFC 9110 §12.4.2: "A value of 0 means "not acceptable"." §12.5.1: "Media ranges can be overridden by more
  * specific media ranges or specific media types. If more than one media range applies to a given type, the most
- * specific reference has precedence." Among the ranges that include application/json, the most specific (concrete
- * type, then application/*, then *&#47;*; parameters other than q are not ranked) decides; when several share that
- * rank, the highest q among them counts. GET is never checked (the filter already ignores Accept).
+ * specific reference has precedence." Ranges are matched to application/json with isCompatibleWith, as handler
+ * lookup does, so a suffix range such as application/*+json counts. Among the matching ranges the most specific
+ * (concrete type, then a wildcard subtype, then *&#47;*; parameters other than q are not ranked) decides; when
+ * several share that rank, the highest q among them counts. GET is never checked (the filter already ignores Accept).
  */
 @Component
 final class JsonAcceptForPostInterceptor implements HandlerInterceptor, WebMvcConfigurer {
@@ -46,10 +47,10 @@ final class JsonAcceptForPostInterceptor implements HandlerInterceptor, WebMvcCo
         return true;
     }
 
-    /** No Accept header accepts everything; a header that matched the handler's produces includes JSON somewhere. */
+    /** No Accept header, or no range compatible with JSON, is left to handler lookup and accepted here. */
     private static boolean refusesJson(HttpServletRequest request) {
         List<MediaType> json = MediaType.parseMediaTypes(Collections.list(request.getHeaders(ACCEPT))).stream()
-                .filter(range -> range.includes(APPLICATION_JSON))
+                .filter(range -> range.isCompatibleWith(APPLICATION_JSON))
                 .toList();
         int mostSpecific = json.stream().mapToInt(JsonAcceptForPostInterceptor::specificity).max().orElse(0);
         return json.stream()

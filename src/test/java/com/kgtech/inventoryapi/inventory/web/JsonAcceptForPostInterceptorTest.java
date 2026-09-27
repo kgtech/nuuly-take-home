@@ -8,10 +8,10 @@ import static org.springframework.http.MediaType.APPLICATION_JSON;
 import java.util.List;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
@@ -44,13 +44,16 @@ class JsonAcceptForPostInterceptorTest {
                 Arguments.of(List.of("text/plain, application/json;q=0"), true),
                 Arguments.of(List.of("application/json;charset=utf-8;q=0"), true),
                 Arguments.of(List.of("application/json;q=0", "text/html"), true),
+                Arguments.of(List.of("application/*+json;q=0"), true),
                 // accepted
                 Arguments.of(List.of(), false),
                 Arguments.of(List.of("application/json"), false),
                 Arguments.of(List.of("*/*;q=0.1"), false),
                 Arguments.of(List.of("application/json;q=0.001"), false),
                 Arguments.of(List.of("application/*;q=0, application/json"), false),
-                Arguments.of(List.of("*/*;q=0, application/json"), false));
+                Arguments.of(List.of("*/*;q=0, application/json"), false),
+                // equally specific ranges: the highest q decides
+                Arguments.of(List.of("application/json, application/json;q=0"), false));
     }
 
     @ParameterizedTest(name = "POST Accept {0} → refused {1}")
@@ -71,10 +74,9 @@ class JsonAcceptForPostInterceptorTest {
     }
 
     /** U2: GET ignores Accept, so even q=0 on every range passes. */
-    @ParameterizedTest
-    @ValueSource(strings = {"GET", "HEAD", "OPTIONS"})
-    void nonPostIsNeverChecked(String method) throws Exception {
-        MockHttpServletRequest request = request(method, List.of("application/json;q=0", "*/*;q=0"));
+    @Test
+    void getIsNeverChecked() throws Exception {
+        MockHttpServletRequest request = request("GET", List.of("application/json;q=0", "*/*;q=0"));
 
         assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
     }

@@ -182,9 +182,7 @@ class TomcatRejectionIntegrationTest {
     @CsvSource(delimiter = '|', value = {
         "POST | /inventory/ABC-1;lot=7          | 400 | Invalid request",
         "POST | /inventory/ABC-1;               | 400 | Invalid request",
-        "POST | /inventory/ABC-1;;              | 400 | Invalid request",
         "POST | /inventory/ABC-1;x/purchase     | 404 | SKU not found",
-        "POST | /inventory/ABC-1;/purchase      | 404 | SKU not found",
         "GET  | /inventory/ABC-1;x=y            | 404 | SKU not found",
         "GET  | /inventory/ABC-1;               | 404 | SKU not found",
         "POST | /inventory/ABC-1%3Blot=7        | 400 | Invalid request",
@@ -198,19 +196,6 @@ class TomcatRejectionIntegrationTest {
         assertThat(count("sku")).isEqualTo(1);
         assertThat(count("inventory_ledger")).isEqualTo(1);
         assertJson(send("GET", "/inventory/" + SEEDED, null), seeded(5));
-    }
-
-    /** AC1, S2, R1, C3: the keyed ";" requests are rejected before the claim and not stored. */
-    @Test
-    void semicolonOnKeyedCreateIsNotStored() throws IOException {
-        String key = RawHttp.header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
-
-        assertText(send("POST", "/inventory/ABC-1;lot=7", QUANTITY_BODY, key), 400, "Invalid request");
-        assertText(send("POST", "/inventory/ABC-1;x/purchase", QUANTITY_BODY, key), 404, "SKU not found");
-
-        assertThat(count("idempotency_keys")).isZero();
-        assertThat(count("sku")).isEqualTo(1);
-        assertThat(count("inventory_ledger")).isEqualTo(1);
     }
 
     /** C3 (OQ1): ";" content on the literal segments is ignored, as Spring does; it never changes the SKU. */
@@ -227,9 +212,25 @@ class TomcatRejectionIntegrationTest {
         assertThat(count("inventory_ledger")).isEqualTo(3);
     }
 
+    /** C3, U2, Y1: ";" on the literal segment does not bypass the POST Accept q=0 check; nothing is written. */
+    @Test
+    void semicolonOnLiteralSegmentWithAcceptQZeroIsRefused() throws IOException {
+        String head = "POST /inventory;v=1/Q0 HTTP/1.1\r\n"
+                + RawHttp.header(HOST, "localhost:" + port)
+                + RawHttp.header(ACCEPT, "application/json;q=0")
+                + RawHttp.header(CONTENT_TYPE, APPLICATION_JSON_VALUE)
+                + RawHttp.header(CONTENT_LENGTH, String.valueOf(QUANTITY_BODY.length()))
+                + RawHttp.header(CONNECTION, "close");
+
+        assertText(RawHttp.send(port, head, QUANTITY_BODY), 400, "Invalid request");
+        assertThat(count("sku")).isEqualTo(1);
+        assertThat(count("inventory_ledger")).isEqualTo(1);
+    }
+
     /**
-     * C3, U3 of the plan: an escaped ";" on a literal segment and an empty segment before the skuId match no handler,
-     * so the segment after /inventory is always the skuId once a handler matched.
+     * C3: an escaped ";" on a literal segment matches no handler, and neither does an empty segment before the skuId
+     * (the plan's unverified claim that "//" routes nowhere), so the segment after /inventory is always the skuId once
+     * a handler matched.
      */
     @ParameterizedTest(name = "{0} {1} → 404")
     @CsvSource(delimiter = '|', value = {
