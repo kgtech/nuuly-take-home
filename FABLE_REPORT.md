@@ -55,7 +55,7 @@ Rebuilt differently: everything under storage (`StockRepository`, `Balance`, mig
 - **Merges.** The operator's permission classifier first refused `gh pr merge` on my own PRs; the owner then said "You can merge", and all four were squash-merged in order (#64 → 2 issues per body closed, #62, #65, #66). #65 and #66 needed `origin/v2` merged into them after the squashes (no history rewrite). Final `v2` tip: 38154ce, rebuilt clean: 666 service tests, 65 front-end tests, 12 Playwright runs, stack healthy on port 18080. Every `[v2]` issue is closed except #61.
 - **CI.** The workflow is written (`.fable/ci-workflow.yml`) but could not be pushed under `.github/workflows/`: the token lacks the `workflow` scope and no SSH key exists (DEVIATIONS.md). Every "green" in this run is a local `./gradlew build --warning-mode=fail` or `npm` run, recorded in `.fable/log.md`.
 - **Issue #61** (test de-duplication of the copied validation matrices): not attempted; the `@Hidden` test was added. Recorded as a deviation.
-- **Critique items left open** (`.fable/critique.md`): V-08 fresh-context durability test, V-10 Redis fast-path test, M-13/M-14 (guard before @Valid; HEAD), M-27/M-28 (cache TTL test precision), M-25/M-26/M-29/M-30/M-34 (test organisation), M-20 (service OpenAPI `required` on InventoryItem), N-02..N-06.
+- **Critique items left open** (`.fable/critique.md`): M-13/M-14 (guard before @Valid; HEAD), M-25/M-26/M-29/M-30/M-34 (test organisation), M-20 (service OpenAPI `required` on InventoryItem), N-02..N-06. V-08, V-10, M-27 and M-28 were closed by PR #67 after the owner extended the budget by one hour.
 - **Process departures.** Tests were not strictly written before the code for the new storage classes (same pass; first run red then green, logged). One red commit was pushed to `v2-fix-critique` (e8bb70c, a dangling Javadoc under -Werror) and fixed in the next commit; logged. The plan's "second commit is the plan" could not hold because the design must be committed first; the plan is the third commit.
 
 ## Self-critique
@@ -65,7 +65,7 @@ Nine fresh reviewers (spec, concurrency, storage, API, tests, front end, securit
 | Severity | Found | Fixed | Recorded | Won't fix / open |
 |---|---|---|---|---|
 | BLOCKER | 3 | 3 (front-end key dropped on 5xx; no axe/375 px checks; 24h boundary test) | 0 | 0 |
-| MAJOR | 13 | 8 (guard bypass, Accept precedence, form-filter 500, unbounded test waits, UUID fallback, form remount, e2e header check, dark-mode contrast) | 2 (Redis copy rationale; hot-set semantics) | 3 open (fresh-context durability test, replay fast-path test, #61 de-dup) |
+| MAJOR | 13 | 10 (guard bypass, Accept precedence, form-filter 500, unbounded test waits, UUID fallback, form remount, e2e header check, dark-mode contrast, fresh-instance durability test, replay fast-path test) | 2 (Redis copy rationale; hot-set semantics) | 1 open (#61 de-dup) |
 | MINOR | 45 | 14 | 15 | 16 |
 | NIT | 12 | 1 | 2 | 8 won't fix, 1 rejected |
 
