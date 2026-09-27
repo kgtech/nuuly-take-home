@@ -60,7 +60,8 @@ async function call<T>(url: URL, init: RequestInit, timeoutMs: number): Promise<
     clearTimeout(timer);
   }
   if (!res.ok) {
-    return { ok: false, status: res.status, errorText: await res.text() };
+    const body = await res.text();
+    return { ok: false, status: res.status, errorText: body === '' ? `HTTP ${res.status}` : body };
   }
   try {
     const data = (await res.json()) as T;

@@ -132,5 +132,5 @@ export const handlers = [
 
 export const server = setupServer(...handlers);
 server.events.on('request:start', ({ request }) => {
-  if (request.method !== 'GET') store.requests.push(request.clone());
+  store.requests.push(request.clone());
 });

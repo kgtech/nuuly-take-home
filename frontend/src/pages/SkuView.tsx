@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { api, type InventoryItem } from '../api/client';
 import { StockForm } from '../components/StockForm';
 import { ErrorText, Loading } from '../components/Messages';
+import { SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
 
 type State =
   | { phase: 'loading' }
@@ -11,11 +12,16 @@ type State =
 /** Rendered with key={skuId} by the router, so a new SKU remounts it and starts loading. */
 export function SkuView({ skuId }: { skuId: string }) {
   const id = useId();
-  const [state, setState] = useState<State>({ phase: 'loading' });
+  const [loaded, setState] = useState<State>({ phase: 'loading' });
+  // An id the server is certain to reject (G11) is answered locally with its text; this also
+  // keeps "." and ".." off the wire, where URL normalisation would hit another endpoint.
+  const invalid = !SKU_ID_PATTERN.test(skuId);
+  const state: State = invalid ? { phase: 'error', status: 404, errorText: SKU_NOT_FOUND } : loaded;
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
+    if (invalid) return;
     void api.getInventory(skuId).then((r) => {
       if (!live) return;
       setState(
@@ -27,7 +33,7 @@ export function SkuView({ skuId }: { skuId: string }) {
     return () => {
       live = false;
     };
-  }, [skuId, attempt]);
+  }, [skuId, attempt, invalid]);
 
   const retry = () => {
     setState({ phase: 'loading' });

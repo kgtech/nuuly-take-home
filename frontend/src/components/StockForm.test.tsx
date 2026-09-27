@@ -139,6 +139,20 @@ describe('StockForm add', () => {
   });
 });
 
+describe('StockForm 5xx', () => {
+  it('shows HTTP 502 for an empty body and reuses the key on the retry', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('*/inventory/:skuId', () => new HttpResponse(null, { status: 502 }), { once: true }));
+    render(<StockForm operation="add" skuId="x" onSuccess={() => {}} />);
+    await user.type(screen.getByLabelText(/quantity/i), '2{Enter}');
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 502');
+    await user.click(screen.getByRole('button', { name: /add stock/i }));
+    await screen.findByRole('status');
+    expect(store.requests).toHaveLength(2);
+    expect(store.requests[1]?.headers.get('Idempotency-Key')).toBe(store.requests[0]?.headers.get('Idempotency-Key'));
+  });
+});
+
 describe('StockForm purchase', () => {
   it('purchases and reports the remaining quantity', async () => {
     const user = userEvent.setup();

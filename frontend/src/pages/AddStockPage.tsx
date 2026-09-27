@@ -25,10 +25,7 @@ export function AddStockPage() {
           id={`${id}-sku`}
           type="text"
           value={skuId}
-          onChange={(e) => {
-            setSkuId(e.target.value);
-            setResult(null);
-          }}
+          onChange={(e) => setSkuId(e.target.value)}
           autoComplete="off"
           aria-invalid={hint !== null || undefined}
           aria-describedby={hint ? `${id}-hint` : undefined}
@@ -37,7 +34,7 @@ export function AddStockPage() {
           {hint}
         </p>
       </div>
-      <StockForm key={skuId} operation="add" skuId={skuId} onSuccess={onSuccess} />
+      <StockForm operation="add" skuId={skuId} onSuccess={onSuccess} />
       {result && (
         <p>
           <a href={skuHref(result.skuId ?? skuId)}>View {result.skuId}</a>

@@ -8,6 +8,7 @@
   --error-bg: #fbeaea;
   --ok-fg: #14532d;
   --ok-bg: #e7f6ec;
+  --on-accent: #ffffff;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -21,6 +22,7 @@
     --error-bg: #3a1c1c;
     --ok-fg: #b7f0c7;
     --ok-bg: #16311f;
+    --on-accent: #131417;
   }
 }
 * {
@@ -84,7 +86,7 @@ button {
   border: 1px solid var(--accent);
   border-radius: 4px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   min-height: 44px;
 }

@@ -60,5 +60,6 @@ describe('phone width', () => {
     }
     expect(css).toMatch(/max-width/);
     expect(css).toMatch(/min-height:\s*44px/);
+    expect(css).toMatch(/--on-accent/);
   });
 });

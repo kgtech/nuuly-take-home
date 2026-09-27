@@ -34,6 +34,19 @@ describe('client', () => {
     expect(r).toEqual({ ok: false, status: 404, errorText: TEXT.notFound });
   });
 
+  it('falls back to HTTP <status> for an empty error body', async () => {
+    server.use(http.get('*/inventory/:skuId', () => new HttpResponse(null, { status: 502 })));
+    const r = await api.getInventory('A');
+    expect(r).toEqual({ ok: false, status: 502, errorText: 'HTTP 502' });
+  });
+
+  it('requests exactly the Link URL path and query', async () => {
+    store.seed({ A: 1, B: 2 });
+    await api.listInventoryAt('http://other:1/inventory?limit=7&after=A%20b');
+    const url = new URL(store.requests.at(-1)?.url ?? '');
+    expect(url.pathname + url.search).toBe('/inventory?limit=7&after=A%20b');
+  });
+
   it('sends the Idempotency-Key header', async () => {
     const key = '123e4567-e89b-42d3-a456-426614174000';
     const r = await api.addStock('A', { quantity: 3 }, key);
