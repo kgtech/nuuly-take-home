@@ -7,6 +7,7 @@ import static org.springframework.http.HttpHeaders.CONNECTION;
 import static org.springframework.http.HttpHeaders.CONTENT_LENGTH;
 import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
 import static org.springframework.http.HttpHeaders.HOST;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import static org.springframework.http.MediaType.TEXT_PLAIN;
 
@@ -40,7 +41,7 @@ import com.kgtech.inventoryapi.RawHttp.Response;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
- * C1, G11, S5, T3 through real Tomcat: a request Tomcat rejects before routing gets text/plain (400 "Invalid
+ * C1, C3, G11, S5, T3 through real Tomcat: a request Tomcat rejects before routing gets text/plain (400 "Invalid
  * request", or the reason phrase for other statuses), never Tomcat's HTML page, and an encoded slash in the SKU
  * reaches the controller, where SkuId.isValid rejects it (GET and purchase 404, create 400). MockMvc bypasses Tomcat,
  * so every request is written to a raw socket. Not @Transactional; the tables are emptied before each test.
@@ -97,6 +98,17 @@ class TomcatRejectionIntegrationTest {
         assertThat(response.contentType()).as(response.toString()).isNotNull();
         assertThat(response.contentType().isCompatibleWith(TEXT_PLAIN)).as(response.toString()).isTrue();
         assertThat(response.body()).as(response.toString()).doesNotContain("<html").isEqualTo(body);
+    }
+
+    private static void assertJson(Response response, String body) {
+        assertThat(response.status()).as(response.toString()).isEqualTo(200);
+        assertThat(response.contentType()).as(response.toString()).isNotNull();
+        assertThat(response.contentType().isCompatibleWith(APPLICATION_JSON)).as(response.toString()).isTrue();
+        assertThat(response.body()).as(response.toString()).isEqualTo(body);
+    }
+
+    private static String seeded(long quantity) {
+        return "{\"skuId\":\"" + SEEDED + "\",\"quantity\":" + quantity + "}";
     }
 
     private long count(String table) {
@@ -159,6 +171,77 @@ class TomcatRejectionIntegrationTest {
     @Test
     void encodedSlashBeforeSkuSegmentIsUnknownPath() throws IOException {
         assertText(send("GET", "/inventory%2FA", null), 404, "Not Found");
+    }
+
+    /**
+     * AC1, G11, C3: ";" content in the skuId segment is part of the ID (Tomcat keeps it in the request URI, Spring
+     * strips it from @PathVariable), so it never reaches the seeded SKU: create 400, GET and purchase 404, nothing
+     * written. The %3B forms already behaved this way.
+     */
+    @ParameterizedTest(name = "{0} {1} → {2}")
+    @CsvSource(delimiter = '|', value = {
+        "POST | /inventory/ABC-1;lot=7          | 400 | Invalid request",
+        "POST | /inventory/ABC-1;               | 400 | Invalid request",
+        "POST | /inventory/ABC-1;;              | 400 | Invalid request",
+        "POST | /inventory/ABC-1;x/purchase     | 404 | SKU not found",
+        "POST | /inventory/ABC-1;/purchase      | 404 | SKU not found",
+        "GET  | /inventory/ABC-1;x=y            | 404 | SKU not found",
+        "GET  | /inventory/ABC-1;               | 404 | SKU not found",
+        "POST | /inventory/ABC-1%3Blot=7        | 400 | Invalid request",
+        "POST | /inventory/ABC-1%3Bx/purchase   | 404 | SKU not found",
+        "GET  | /inventory/ABC-1%3Bx=y          | 404 | SKU not found"
+    })
+    void semicolonInSkuIdSegmentIsPartOfTheId(String method, String path, int status, String body)
+            throws IOException {
+        assertText(send(method, path, "POST".equals(method) ? QUANTITY_BODY : null), status, body);
+
+        assertThat(count("sku")).isEqualTo(1);
+        assertThat(count("inventory_ledger")).isEqualTo(1);
+        assertJson(send("GET", "/inventory/" + SEEDED, null), seeded(5));
+    }
+
+    /** AC1, S2, R1, C3: the keyed ";" requests are rejected before the claim and not stored. */
+    @Test
+    void semicolonOnKeyedCreateIsNotStored() throws IOException {
+        String key = RawHttp.header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+
+        assertText(send("POST", "/inventory/ABC-1;lot=7", QUANTITY_BODY, key), 400, "Invalid request");
+        assertText(send("POST", "/inventory/ABC-1;x/purchase", QUANTITY_BODY, key), 404, "SKU not found");
+
+        assertThat(count("idempotency_keys")).isZero();
+        assertThat(count("sku")).isEqualTo(1);
+        assertThat(count("inventory_ledger")).isEqualTo(1);
+    }
+
+    /** C3 (OQ1): ";" content on the literal segments is ignored, as Spring does; it never changes the SKU. */
+    @Test
+    void semicolonOnLiteralSegmentsIsIgnored() throws IOException {
+        assertJson(send("GET", "/inventory;v=1/" + SEEDED, null), seeded(5));
+        assertJson(send("GET", "/inventory;x", null), "[" + seeded(5) + "]");
+        assertJson(send("POST", "/inventory/" + SEEDED + "/purchase;x", QUANTITY_BODY), seeded(4));
+        assertJson(send("POST", "/inventory;x/" + SEEDED, QUANTITY_BODY), seeded(5));
+
+        Response notAllowed = send("POST", "/inventory;v=1", QUANTITY_BODY);
+        assertText(notAllowed, 405, "Method Not Allowed");
+        assertThat(notAllowed.allow()).as(notAllowed.toString()).contains("GET");
+        assertThat(count("inventory_ledger")).isEqualTo(3);
+    }
+
+    /**
+     * C3, U3 of the plan: an escaped ";" on a literal segment and an empty segment before the skuId match no handler,
+     * so the segment after /inventory is always the skuId once a handler matched.
+     */
+    @ParameterizedTest(name = "{0} {1} → 404")
+    @CsvSource(delimiter = '|', value = {
+        "POST | /inventory/ABC-1/purchase%3Bx",
+        "GET  | /inventory%3Bx/ABC-1",
+        "GET  | /inventory//ABC-1",
+        "POST | /inventory//ABC-1",
+        "POST | /inventory//ABC-1/purchase"
+    })
+    void unroutedPathIsNotFound(String method, String path) throws IOException {
+        assertText(send(method, path, "POST".equals(method) ? QUANTITY_BODY : null), 404, "Not Found");
+        assertThat(count("inventory_ledger")).isEqualTo(1);
     }
 
     /** C1: escapes Tomcat can't decode, %00, %5C and illegal characters: 400 "Invalid request" on any method. */

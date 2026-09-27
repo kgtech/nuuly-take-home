@@ -1,5 +1,9 @@
 package com.kgtech.inventoryapi.inventory.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -9,6 +13,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -25,6 +31,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -35,9 +42,10 @@ import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 
 /**
- * Request validation at the HTTP edge: G13/G3 bodies (AC3), G4/U3 ordering, U2/Y1 Accept handling. Every body or
- * Accept 400 is text/plain "Invalid request" and never reaches the service. G11/S2 (Z1): the controller passes a
- * malformed skuId to the service unchanged and maps the service's outcome; the no-I/O check is in the service tests.
+ * Request validation at the HTTP edge: G13/G3 bodies (AC3), G4/U3 ordering, U2/Y1/C3 Accept handling. Every body or
+ * Accept 400 is text/plain "Invalid request" and never reaches the service. G11/S2/C3 (Z1): the controller passes the
+ * raw skuId segment, ";" content included, to the service unchanged and maps the service's outcome; the no-I/O check
+ * is in the service tests.
  */
 @WebMvcTest(InventoryController.class)
 class InventoryRequestValidationTest {
@@ -230,6 +238,53 @@ class InventoryRequestValidationTest {
         expectItem(mvc.perform(jsonPost(Post.PURCHASE, skuId, VALID_BODY)), skuId, 5);
     }
 
+    /**
+     * G11, S2, C3: the service gets the skuId segment as sent, percent-decoded with its ";" content, never Spring's
+     * stripped @PathVariable. ";" on the literal segments is ignored. Each request is built with URI.create so the
+     * raw path reaches the DispatcherServlet unchanged; the service stubs give each operation's rejection.
+     */
+    @ParameterizedTest(name = "{0} {1} → service gets {2}")
+    @CsvSource(delimiter = '|', value = {
+        "GET      | /inventory/ABC-1;x=y              | ABC-1;x=y",
+        "GET      | /inventory/ABC-1;                 | ABC-1;",
+        "GET      | /inventory/AB%43-1;x=%41          | ABC-1;x=A",
+        "GET      | /inventory/ABC-1%3Bx=y            | ABC-1;x=y",
+        "GET      | /inventory;v=1/ABC-1              | ABC-1",
+        "CREATE   | /inventory/ABC-1;lot=7            | ABC-1;lot=7",
+        "CREATE   | /inventory/ABC-1;                 | ABC-1;",
+        "CREATE   | /inventory/ABC-1%3Bx              | ABC-1;x",
+        "CREATE   | /inventory;v=1/ABC-1              | ABC-1",
+        "PURCHASE | /inventory/ABC-1;x/purchase       | ABC-1;x",
+        "PURCHASE | /%69nventory/ABC-1;x/purchase     | ABC-1;x",
+        "PURCHASE | /inventory/ABC-1%3Bx/purchase     | ABC-1;x",
+        "PURCHASE | /inventory/ABC-1/purchase;x       | ABC-1"
+    })
+    void skuIdSegmentKeepsSemicolonContent(String op, String rawPath, String expectedSkuId) throws Exception {
+        when(service.find(anyString())).thenReturn(Optional.empty());
+        when(service.add(anyString(), anyInt(), isNull())).thenReturn(new WriteResult.InvalidRequest());
+        when(service.purchase(anyString(), anyInt(), isNull())).thenReturn(new StockOutcome.NotFound());
+        URI uri = URI.create(rawPath);
+        MockHttpServletRequestBuilder request = "GET".equals(op)
+                ? get(uri).accept(MediaType.APPLICATION_JSON)
+                : post(uri).accept(MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON)
+                        .content(VALID_BODY);
+
+        ResultActions result = mvc.perform(request);
+        MvcResult sent = result.andReturn();
+
+        assertThat(sent.getRequest().getRequestURI()).as("raw path sent").isEqualTo(rawPath);
+        switch (op) {
+            case "GET" -> verify(service).find(expectedSkuId);
+            case "CREATE" -> verify(service).add(expectedSkuId, 5, null);
+            default -> verify(service).purchase(expectedSkuId, 5, null);
+        }
+        if ("CREATE".equals(op)) {
+            expectInvalidRequest(result);
+        } else {
+            expectText(result, 404, "SKU not found");
+        }
+    }
+
     // --- G4 and U3: body validation runs before the skuId check and the service ---
 
     @Test
@@ -256,7 +311,8 @@ class InventoryRequestValidationTest {
 
     static Stream<Arguments> getIgnoresAcceptHeader() {
         List<Arguments> cases = new ArrayList<>();
-        for (String accept : List.of("application/xml", "text/plain", "text/html", "image/png")) {
+        for (String accept : List.of("application/xml", "text/plain", "text/html", "image/png",
+                "application/json;q=0")) {
             cases.add(Arguments.of("/inventory/" + SKU, accept, "{\"skuId\":\"widget\",\"quantity\":3}"));
             cases.add(Arguments.of("/inventory", accept, "[{\"skuId\":\"widget\",\"quantity\":3}]"));
         }
@@ -289,6 +345,10 @@ class InventoryRequestValidationTest {
         for (Post op : Post.values()) {
             cases.add(Arguments.of(op, MediaType.APPLICATION_XML_VALUE));
             cases.add(Arguments.of(op, MediaType.TEXT_PLAIN_VALUE));
+            // C3: q=0 on the most specific range matching JSON refuses it
+            cases.add(Arguments.of(op, "application/json;q=0"));
+            cases.add(Arguments.of(op, "application/json;q=0, */*"));
+            cases.add(Arguments.of(op, "*/*;q=0"));
         }
         return cases.stream();
     }
@@ -307,6 +367,9 @@ class InventoryRequestValidationTest {
             cases.add(Arguments.of(op, "*/*"));
             cases.add(Arguments.of(op, "application/*"));
             cases.add(Arguments.of(op, null));
+            // C3: a non-zero q, or a more specific range that accepts JSON, is fine
+            cases.add(Arguments.of(op, "*/*;q=0.1"));
+            cases.add(Arguments.of(op, "application/*;q=0, application/json"));
         }
         return cases.stream();
     }
@@ -323,5 +386,14 @@ class InventoryRequestValidationTest {
 
         expectItem(mvc.perform(request), SKU, 5);
         op.verifyCalled(service, SKU, 5);
+    }
+
+    /** C3, U3: the Accept gate fires before body parsing; a malformed body with q=0 is the same 400. */
+    @ParameterizedTest
+    @EnumSource(Post.class)
+    void postRefusingJsonWithMalformedBodyReturns400(Post op) throws Exception {
+        expectInvalidRequest(mvc.perform(post(op.template, SKU).header(ACCEPT, "application/json;q=0")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":")));
+        verifyNoInteractions(service);
     }
 }

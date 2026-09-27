@@ -107,15 +107,16 @@ class InventoryServiceReadTest {
     }
 
     static Stream<String> findWithInvalidSkuIdReturnsEmptyWithoutRepositoryAccess() {
-        return Stream.of("-bad", "a".repeat(65), "a b", "abc\n");
+        return Stream.of("-bad", "a".repeat(65), "a b", "abc\n", "ABC-1;lot=7", "ABC-1;");
     }
 
+    /** G11, S2, C3: the check runs before the read-only transaction, so no connection is borrowed. */
     @ParameterizedTest
     @NullSource
     @MethodSource
     void findWithInvalidSkuIdReturnsEmptyWithoutRepositoryAccess(String skuId) {
         assertThat(service.find(skuId)).isEmpty();
-        verifyNoInteractions(skus);
+        verifyNoInteractions(skus, transactionManager);
     }
 
     @Test
@@ -346,7 +347,7 @@ class InventoryServiceReadTest {
 
     static Stream<Arguments> writeWithMalformedSkuIdReturnsOutcomeWithoutRepositoryOrTransaction() {
         List<Arguments> cases = new ArrayList<>();
-        for (String skuId : Arrays.asList(null, "-bad", "a".repeat(65), "a b", "abc\n")) {
+        for (String skuId : Arrays.asList(null, "-bad", "a".repeat(65), "a b", "abc\n", "ABC-1;lot=7", "ABC-1;")) {
             for (String key : Arrays.asList(null, "3f2b8c1e-9a4d-4e7f-b6a0-1c2d3e4f5a6b", "nope")) {
                 cases.add(Arguments.of(skuId, key));
             }
