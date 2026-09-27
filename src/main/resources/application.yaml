@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: inventory-api
+  jackson:
+    mapper:
+      allow-coercion-of-scalars: false
+    deserialization:
+      accept-float-as-int: false
+      fail-on-unknown-properties: false   # explicit G13 (already the default)
+  mvc:
+    problemdetails:
+      enabled: false                      # explicit "ProblemDetail stays off"
+  data:
+    redis:
+      timeout: 250ms                      # DESIGN-V2 §4: a slow Redis costs at most this, then Postgres answers
+      connect-timeout: 250ms
+inventory:
+  cache:
+    stock-ttl: 5s                         # DESIGN-V2 §3: the staleness bound for a cached count
+    replay-ttl: 24h                       # DESIGN-V2 §2: matches T1's key validity
+springdoc:
+  override-with-generic-response: false
+  writer-with-order-by-keys: true         # byte-stable openapi.yaml export
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health                   # D10: health only
+  endpoint:
+    health:
+      probes:
+        enabled: true                     # D10: /actuator/health/liveness and /readiness
+      group:
+        readiness:
+          include: readinessState,db      # DESIGN-V2 §4: Redis down does not make the service unready
