@@ -35,7 +35,7 @@ import com.kgtech.inventoryapi.inventory.WriteResult;
 /**
  * U3, S3, G8, Z1 at the controller: @Valid runs first; after that the controller passes the raw skuId and the raw
  * Idempotency-Key header (null when absent) to the service and renders the WriteResult it gets back. Key and skuId
- * checks live in the @Idempotent interceptor and the service (IdempotencyInterceptorTest, InventoryServiceReadTest,
+ * checks live in the @Idempotent interceptor and the service (IdempotencyInterceptorTest, InventoryServiceTest,
  * IdempotencyApiIntegrationTest). The service is a mock, so no advice and no database are involved.
  */
 @WebMvcTest(InventoryController.class)
@@ -116,18 +116,18 @@ class IdempotencyHeaderOrderTest {
     }
 
     static Stream<Arguments> rawKeyAndSkuIdPassedThrough() {
-        List<Arguments> cases = new ArrayList<>();
-        for (Post op : Post.values()) {
-            for (String skuId : List.of("widget", "-bad", "ABC")) {
-                for (String key : List.of(KEY, KEY.toUpperCase(), "nope", "", "1-1-1-1-1")) {
-                    cases.add(Arguments.of(op, skuId, key));
-                }
-            }
-        }
-        return cases.stream();
+        return Stream.of(
+                Arguments.of(Post.CREATE, "widget", KEY),
+                Arguments.of(Post.CREATE, "-bad", ""),
+                Arguments.of(Post.PURCHASE, "ABC", "nope"),
+                Arguments.of(Post.PURCHASE, "-bad", KEY.toUpperCase()));
     }
 
-    /** S2, S3, Z1: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. */
+    /**
+     * S2, S3, Z1: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. A
+     * valid, an empty, a non-UUID and an upper-case key, and a malformed skuId, are enough: the full key and skuId
+     * matrices live in IdempotencyKeyTest and SkuIdTest.
+     */
     @ParameterizedTest(name = "{0} {1} key \"{2}\"")
     @MethodSource
     void rawKeyAndSkuIdPassedThrough(Post op, String skuId, String key) throws Exception {
@@ -168,20 +168,18 @@ class IdempotencyHeaderOrderTest {
     }
 
     static Stream<Arguments> storedResultRenderedUnchanged() {
-        List<Arguments> cases = new ArrayList<>();
-        for (Post op : Post.values()) {
-            for (StoredResponse stored : List.of(
-                    new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, "{\"skuId\":\"widget\",\"quantity\":5}"),
-                    new StoredResponse(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found"),
-                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory"),
-                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Invalid request"))) {
-                cases.add(Arguments.of(op, stored));
-            }
-        }
-        return cases.stream();
+        return Stream.of(
+                Arguments.of(Post.CREATE,
+                        new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, "{\"skuId\":\"widget\",\"quantity\":5}")),
+                Arguments.of(Post.PURCHASE, new StoredResponse(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found")),
+                Arguments.of(Post.PURCHASE, new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory")));
     }
 
-    /** Y4: a stored response (first keyed response or replay) is sent with its status, Content-Type and body. */
+    /**
+     * Y4: a stored response (first keyed response or replay) is sent with its status, Content-Type and body. One 200,
+     * one 404 and one 400 cover the single {@code case Stored} branch; StoredResponsesTest and
+     * IdempotencyApiIntegrationTest#replayed200IsJsonAndErrorsAreTextPlain hold the rest.
+     */
     @ParameterizedTest(name = "{0} {1}")
     @MethodSource
     void storedResultRenderedUnchanged(Post op, StoredResponse stored) throws Exception {

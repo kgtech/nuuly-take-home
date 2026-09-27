@@ -350,10 +350,9 @@ class IdempotencyApiIntegrationTest {
 
     // ---- AC6: malformed keys → 400 before any database work, nothing stored (S3, U3) ----
 
+    /** An empty and a non-UUID key per POST; the full format matrix is IdempotencyKeyTest's. */
     static Stream<Arguments> malformedKeyReturns400AndStoresNothing() {
-        String uuid = UUID.randomUUID().toString();
-        return Stream.of(Post.values()).flatMap(op -> Stream.of("", "abc", "1-1-1-1-1", "{" + uuid + "}", uuid + "x",
-                uuid.replace("-", "")).map(key -> Arguments.of(op, key)));
+        return Stream.of(Post.values()).flatMap(op -> Stream.of("", "abc").map(key -> Arguments.of(op, key)));
     }
 
     @ParameterizedTest(name = "{0} key \"{1}\"")

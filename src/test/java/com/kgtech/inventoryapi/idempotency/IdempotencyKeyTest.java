@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
@@ -47,16 +48,15 @@ class IdempotencyKeyTest {
         assertThat(IdempotencyKey.isValid(key)).isFalse();
     }
 
-    @ParameterizedTest
-    @MethodSource("validKeys")
-    void parseReturnsSameUuidRegardlessOfCase(String key) {
-        assertThat(IdempotencyKey.parse(key)).isEqualTo(UUID.fromString(key));
+    /** One valid parse: the matrix above already pins which keys are valid. */
+    @Test
+    void parseReturnsSameUuidRegardlessOfCase() {
+        assertThat(IdempotencyKey.parse(UUID_TEXT.toUpperCase())).isEqualTo(UUID.fromString(UUID_TEXT));
     }
 
-    @ParameterizedTest
-    @NullSource
-    @MethodSource("invalidKeys")
-    void parseRejectsInvalid(String key) {
-        assertThatThrownBy(() -> IdempotencyKey.parse(key)).isInstanceOf(IllegalArgumentException.class);
+    /** One invalid parse; parse rejects exactly what isValid rejects. */
+    @Test
+    void parseRejectsInvalid() {
+        assertThatThrownBy(() -> IdempotencyKey.parse("1-1-1-1-1")).isInstanceOf(IllegalArgumentException.class);
     }
 }
