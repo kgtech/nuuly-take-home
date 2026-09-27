@@ -170,7 +170,7 @@ class InventoryErrorAdviceTest {
         assertThat(output.getAll()).contains("java.lang.RuntimeException: boom-logged");
     }
 
-    /** PR #10 follow-up, W2: a serialization failure that escapes the retries is a plain 500. */
+    /** PR #10 follow-up, W2: a database failure that escapes the write is a plain 500. */
     @ParameterizedTest
     @EnumSource(value = Operation.class, names = {"CREATE", "PURCHASE"})
     void serializationFailureReturns500(Operation operation) throws Exception {

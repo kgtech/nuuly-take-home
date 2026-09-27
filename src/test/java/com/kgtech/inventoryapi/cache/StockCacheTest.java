@@ -43,7 +43,6 @@ class StockCacheTest {
     @BeforeEach
     void clean() {
         Tables.reset(jdbc);
-        Tables.flush(connections);
     }
 
     @Test

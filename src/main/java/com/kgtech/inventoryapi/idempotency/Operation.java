@@ -1,6 +1,6 @@
 package com.kgtech.inventoryapi.idempotency;
 
-/** The two keyed POST operations; dbValue matches the ledger reason (plan OQ3). */
+/** The two keyed POST operations; dbValue matches the ledger reason, so one vocabulary names both (S8). */
 public enum Operation {
     ADD("add"),
     PURCHASE("purchase");

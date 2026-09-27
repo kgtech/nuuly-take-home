@@ -33,7 +33,10 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * AC4, R2, W2 over real HTTP: concurrent requests with the same fresh Idempotency-Key produce one stock change and
- * the same response; the losers block on the claim row and replay once it is committed. Not @Transactional: tables are emptied before each
+ * the same response; the losers block on the claim row and replay once it is committed. Whether the 8 requests
+ * actually overlapped is not asserted (#57 AC3): a start latch releases them together and the work is one Postgres
+ * round trip each, so overlap is likely but not guaranteed; the invariant (one write, identical replies) holds either
+ * way, and the blocking semantics themselves are Postgres's unique-index behaviour under READ COMMITTED. Not @Transactional: tables are emptied before each
  * test (S11). At most 8 threads per SKU (W2).
  */
 @IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)

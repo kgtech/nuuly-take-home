@@ -6,6 +6,7 @@ spring:
       allow-coercion-of-scalars: false
     deserialization:
       accept-float-as-int: false
+      fail-on-trailing-tokens: true       # {"quantity":1}{"quantity":100} is malformed JSON, not quantity 1
       fail-on-unknown-properties: false   # explicit G13 (already the default)
   mvc:
     problemdetails:
@@ -32,6 +33,7 @@ management:
     health:
       probes:
         enabled: true                     # D10: /actuator/health/liveness and /readiness
+      show-components: always             # an operator sees which component (db, redis) is DOWN; no details
       group:
         readiness:
           include: readinessState,db      # DESIGN-V2 §4: Redis down does not make the service unready

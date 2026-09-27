@@ -126,6 +126,15 @@ class ApiDocsTest {
         assertThat(checked).isEqualTo(9);
     }
 
+    /** C-28 (#61): the catch-all handler must stay @Hidden, or springdoc could document a 500 on every operation. */
+    @Test
+    void catchAllHandlerIsHidden() throws Exception {
+        Class<?> advice = Class.forName("com.kgtech.inventoryapi.inventory.web.InventoryErrorAdvice");
+        java.lang.reflect.Method anyOther = advice.getDeclaredMethod("anyOther", Exception.class,
+                jakarta.servlet.http.HttpServletRequest.class);
+        assertThat(anyOther.isAnnotationPresent(io.swagger.v3.oas.annotations.Hidden.class)).isTrue();
+    }
+
     /** S6, S12: the @Hidden catch-all and override-with-generic-response=false keep 500 off the operations. */
     @Test
     void catchAllIsNotAddedToOperations() throws Exception {

@@ -5,13 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import com.kgtech.inventoryapi.Tables;
@@ -48,34 +41,9 @@ class InventoryConcurrencyTest {
         return prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
-    /** Runs {@code call} on {@link #THREADS} threads released together; any thrown exception fails the test. */
+    /** Runs {@code call} on {@link #THREADS} threads released together, with bounded waits (Concurrently, #57 AC4). */
     private <T> List<T> runTogether(Supplier<T> call) throws InterruptedException {
-        CountDownLatch ready = new CountDownLatch(THREADS);
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<T>> futures = new ArrayList<>();
-        try (ExecutorService pool = Executors.newFixedThreadPool(THREADS)) {
-            for (int i = 0; i < THREADS; i++) {
-                Callable<T> task = () -> {
-                    ready.countDown();
-                    start.await();
-                    return call.get();
-                };
-                futures.add(pool.submit(task));
-            }
-            assertThat(ready.await(30, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
-        }
-        List<T> results = new ArrayList<>();
-        List<Throwable> failures = new ArrayList<>();
-        for (Future<T> future : futures) {
-            try {
-                results.add(future.get());
-            } catch (ExecutionException e) {
-                failures.add(e.getCause());
-            }
-        }
-        assertThat(failures).as("exceptions thrown by writer threads (a row lock never fails a write)").isEmpty();
-        return results;
+        return Concurrently.run(THREADS, call::get);
     }
 
     private long balance(String sku) {
