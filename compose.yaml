@@ -1,0 +1,28 @@
+# Postgres and Redis. `./gradlew bootRun` reads this file; `docker compose up --build` also reads
+# compose.override.yaml, which adds the app (D8, S4 as superseded by DESIGN-V2). The image tags repeat the
+# catalog's versions (S10). Ports are published on loopback only (C-12).
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: inventory
+      POSTGRES_USER: inventory
+      POSTGRES_PASSWORD: inventory
+    ports:
+      - "127.0.0.1::5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:8
+    # A cache only (DESIGN-V2 §1): no persistence; bounded memory with least-frequently-used eviction (§3).
+    command: ["redis-server", "--appendonly", "no", "--save", "", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lfu"]
+    ports:
+      - "127.0.0.1::6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
