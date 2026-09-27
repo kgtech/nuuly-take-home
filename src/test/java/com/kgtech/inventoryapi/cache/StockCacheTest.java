@@ -1,10 +1,10 @@
 package com.kgtech.inventoryapi.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +22,7 @@ import com.kgtech.inventoryapi.inventory.InventoryService;
  * DESIGN-V2 §3: reads populate, writes refresh only existing entries, an older version never overwrites a newer one,
  * and a stale entry lives at most the stock TTL. The TTL is shortened here so the bound can be observed.
  */
-@IntegrationTest(properties = "inventory.cache.stock-ttl=700ms")
+@IntegrationTest(properties = "inventory.cache.stock-ttl=2s")
 class StockCacheTest {
 
     @Autowired
@@ -60,14 +60,30 @@ class StockCacheTest {
 
     /** The staleness bound: after the TTL the next read is correct again. */
     @Test
-    void staleEntryExpiresWithinTheTtl() {
+    void staleEntryExpiresWithinTheTtl() throws Exception {
         Tables.seed(jdbc, "hot", 10);
         service.find("hot");
         jdbc.sql("UPDATE sku SET quantity = 99, version = 2 WHERE sku_id = 'hot'").update();
 
-        await().atMost(Duration.ofSeconds(3)).pollInterval(Duration.ofMillis(50))
-                .untilAsserted(() -> assertThat(service.find("hot")).contains(new InventoryItem("hot", 99)));
-        assertThat(redis.getExpire(StockCache.key("hot"))).isBetween(1L, 1L); // seconds, rounded: a fresh TTL again
+        // Still stale a quarter into the TTL (the bound is real, not "eventually"); 1.5 s of headroom for slow hosts.
+        Thread.sleep(500);
+        assertThat(service.find("hot")).contains(new InventoryItem("hot", 10));
+        // Correct once the TTL (2 s) has passed, with a margin.
+        Thread.sleep(1700);
+        assertThat(service.find("hot")).contains(new InventoryItem("hot", 99));
+        Long ttl = redis.getExpire(StockCache.key("hot"), TimeUnit.MILLISECONDS);
+        assertThat(ttl).as("a fresh TTL after the re-populate").isBetween(1000L, 2000L);
+    }
+
+    /** DESIGN-V2 §3: a refresh keeps the remaining TTL; only a populate sets it. */
+    @Test
+    void refreshKeepsTheRemainingTtl() throws Exception {
+        cache.populate("hot", 1, 1);
+        Thread.sleep(500);
+        assertThat(cache.set("hot", 2, 2, true)).contains(1L);
+        Long ttl = redis.getExpire(StockCache.key("hot"), TimeUnit.MILLISECONDS);
+        assertThat(ttl).as("remaining TTL after the refresh (a reset would read close to 2000)").isBetween(1L, 1550L);
+        assertThat(cache.entry("hot")).contains(Map.of("q", "2", "v", "2"));
     }
 
     @Test
@@ -98,7 +114,7 @@ class StockCacheTest {
     @Test
     void entriesCarryTheConfiguredTtl() {
         cache.populate("hot", 1, 1);
-        Long millis = redis.getExpire(StockCache.key("hot"), java.util.concurrent.TimeUnit.MILLISECONDS);
-        assertThat(millis).isBetween(1L, 700L);
+        Long millis = redis.getExpire(StockCache.key("hot"), TimeUnit.MILLISECONDS);
+        assertThat(millis).isBetween(1L, 2000L);
     }
 }
