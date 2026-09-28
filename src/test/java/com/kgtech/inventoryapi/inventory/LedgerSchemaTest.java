@@ -3,6 +3,7 @@ package com.kgtech.inventoryapi.inventory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -21,6 +22,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
@@ -38,9 +40,12 @@ class LedgerSchemaTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void cleanTables() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
     }
 
     private static String suffix() {
@@ -58,14 +63,16 @@ class LedgerSchemaTest {
     }
 
     private void assertSqlState(ThrowingCallable call, String sqlState, String constraintOrNull) {
-        assertThatThrownBy(call).satisfies(thrown -> {
-            Throwable cause = NestedExceptionUtils.getMostSpecificCause(thrown);
-            assertThat(cause).isInstanceOfSatisfying(SQLException.class, sql -> {
-                assertThat(sql.getSQLState()).as("SQLState of: %s", sql.getMessage()).isEqualTo(sqlState);
-                if (constraintOrNull != null) {
-                    assertThat(sql.getMessage()).contains(constraintOrNull);
-                }
-            });
+        assertThatThrownBy(call).satisfies(thrown -> assertSqlState(thrown, sqlState, constraintOrNull));
+    }
+
+    private static void assertSqlState(Throwable thrown, String sqlState, String constraintOrNull) {
+        Throwable cause = NestedExceptionUtils.getMostSpecificCause(thrown);
+        assertThat(cause).isInstanceOfSatisfying(SQLException.class, sql -> {
+            assertThat(sql.getSQLState()).as("SQLState of: %s", sql.getMessage()).isEqualTo(sqlState);
+            if (constraintOrNull != null) {
+                assertThat(sql.getMessage()).contains(constraintOrNull);
+            }
         });
     }
 
@@ -105,9 +112,10 @@ class LedgerSchemaTest {
     }
 
     /**
-     * AC1, G5, V1 (C4): UPDATE and DELETE on inventory_ledger and sku fail with 23001, with and without a matching row
-     * (including a sku with no ledger rows, which the foreign key does not protect), and leave the balance unchanged.
-     * The WHERE false rows pin the statement-level trigger: a statement that matches no row fails too.
+     * AC1, G5, V1 (C4): UPDATE, DELETE and TRUNCATE on inventory_ledger and sku fail with 23001, with and without a
+     * matching row (including a sku with no ledger rows, which the foreign key does not protect), and leave the balance
+     * unchanged. The WHERE false rows pin the statement-level trigger: a statement that matches no row fails too. Each
+     * statement runs once; the thrown exception is then checked.
      */
     @ParameterizedTest(name = "{0} (ledger row: {1})")
     @CsvSource(delimiter = '|', textBlock = """
@@ -118,22 +126,49 @@ class LedgerSchemaTest {
             UPDATE sku SET created_at = now() WHERE sku_id = :sku                      | false
             UPDATE inventory_ledger SET quantity_delta = 1 WHERE false AND :sku = :sku | false
             DELETE FROM sku WHERE false AND :sku = :sku                                | false
+            TRUNCATE inventory_ledger                                                  | true
+            TRUNCATE sku CASCADE                                                       | true
             """)
-    void appendOnlyTablesRejectUpdateAndDelete(String statement, boolean withLedgerRow) {
+    void appendOnlyTablesRejectUpdateDeleteAndTruncate(String statement, boolean withLedgerRow) {
         String sku = "append-" + suffix();
         insertSku(sku);
         if (withLedgerRow) {
             insertLedger(sku, 5L, "add");
         }
-        ThrowingCallable call = () -> jdbc.sql(statement).param("sku", sku).update();
+        Throwable thrown = catchThrowable(() -> jdbc.sql(statement).param("sku", sku).update());
 
-        assertThatThrownBy(call).isInstanceOf(DataIntegrityViolationException.class);
-        assertSqlState(call, RESTRICT_VIOLATION, "append-only");
+        assertThat(thrown).as("exception from: %s", statement).isInstanceOf(DataIntegrityViolationException.class);
+        assertSqlState(thrown, RESTRICT_VIOLATION, "append-only");
 
         Long skuRows = jdbc.sql("SELECT count(*) FROM sku WHERE sku_id = ?").param(sku).query(Long.class).single();
         assertThat(skuRows).isEqualTo(1L);
         assertThat(ledgerRows(sku)).isEqualTo(withLedgerRow ? 1L : 0L);
         assertThat(balance(sku)).isEqualTo(withLedgerRow ? 5L : 0L);
+    }
+
+    /**
+     * C4: TestDatabase.truncateAll bypasses the triggers only inside its own transaction (SET LOCAL). Afterwards the
+     * pooled connection, reused on this thread, is back to the origin role and the triggers fire again.
+     */
+    @Test
+    void truncateAllLeavesNoReplicaRoleBehind() {
+        String sku = "wipe-" + suffix();
+        insertSku(sku);
+        insertLedger(sku, 5L, "add");
+        int pidBefore = backendPid();
+
+        TestDatabase.truncateAll(jdbc, transactionManager);
+
+        assertThat(backendPid()).as("same pooled connection").isEqualTo(pidBefore);
+        assertThat(jdbc.sql("SHOW session_replication_role").query(String.class).single()).isEqualTo("origin");
+        assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM inventory_ledger").query(Long.class).single()).isZero();
+        assertSqlState(() -> jdbc.sql("UPDATE inventory_ledger SET quantity_delta = 1 WHERE false").update(),
+                RESTRICT_VIOLATION, "append-only");
+    }
+
+    private int backendPid() {
+        return jdbc.sql("SELECT pg_backend_pid()").query(Integer.class).single();
     }
 
     private long ledgerRows(String sku) {

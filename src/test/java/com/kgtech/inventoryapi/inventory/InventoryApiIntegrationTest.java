@@ -25,6 +25,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
@@ -44,9 +45,12 @@ class InventoryApiIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void cleanTables() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
     }
 
     private ResultActions create(String skuId, long quantity) throws Exception {

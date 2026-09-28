@@ -46,7 +46,7 @@ class InventoryServiceTest {
 
     @BeforeEach
     void cleanTables() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
     }
 
     private String newSku(String prefix) {

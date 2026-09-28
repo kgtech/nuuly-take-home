@@ -25,6 +25,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
@@ -51,6 +52,9 @@ class IdempotencyHttpConcurrencyTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     private HttpClient http;
 
     private record Reply(int quantitySent, int status, String contentType, String body) {
@@ -58,7 +62,7 @@ class IdempotencyHttpConcurrencyTest {
 
     @BeforeEach
     void setUp() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
         http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(TIMEOUT).build();
     }
 

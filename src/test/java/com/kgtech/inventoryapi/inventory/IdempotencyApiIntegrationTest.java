@@ -27,6 +27,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
@@ -67,6 +68,9 @@ class IdempotencyApiIntegrationTest {
     JdbcClient jdbc;
 
     @Autowired
+    PlatformTransactionManager transactionManager;
+
+    @Autowired
     JdbcTemplate jdbcTemplate;
 
     private LedgerFaultTrigger fault;
@@ -75,7 +79,7 @@ class IdempotencyApiIntegrationTest {
     void cleanTables() {
         fault = new LedgerFaultTrigger(jdbcTemplate);
         fault.drop(); // in case an earlier run was killed before its @AfterEach
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
     }
 
     @AfterEach

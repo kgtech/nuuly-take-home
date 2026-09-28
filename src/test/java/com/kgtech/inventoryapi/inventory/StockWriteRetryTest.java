@@ -26,6 +26,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
@@ -69,6 +70,9 @@ class StockWriteRetryTest {
     JdbcClient jdbc;
 
     @Autowired
+    PlatformTransactionManager transactionManager;
+
+    @Autowired
     JdbcTemplate jdbcTemplate;
 
     private LedgerFaultTrigger fault;
@@ -77,7 +81,7 @@ class StockWriteRetryTest {
     void setUp() {
         fault = new LedgerFaultTrigger(jdbcTemplate);
         fault.drop(); // in case an earlier run was killed before its @AfterEach
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
     }
 
     @AfterEach

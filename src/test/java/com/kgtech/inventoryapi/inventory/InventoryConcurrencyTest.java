@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.TestDatabase;
 import com.kgtech.inventoryapi.TestcontainersConfiguration;
@@ -45,9 +46,12 @@ class InventoryConcurrencyTest {
     @Autowired
     JdbcClient jdbcClient;
 
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void cleanTables() {
-        TestDatabase.truncateAll(jdbcClient);
+        TestDatabase.truncateAll(jdbcClient, transactionManager);
     }
 
     private static String newSku(String prefix) {

@@ -35,6 +35,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
@@ -64,11 +65,14 @@ class TomcatRejectionIntegrationTest {
     JdbcClient jdbc;
 
     @Autowired
+    PlatformTransactionManager transactionManager;
+
+    @Autowired
     ApplicationContext context;
 
     @BeforeEach
     void seed() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
         jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(SEEDED).update();
         jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
                 .param(SEEDED).update();

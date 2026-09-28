@@ -31,6 +31,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.resilience.retry.AbstractRetryInterceptor;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 
 import com.kgtech.inventoryapi.TestDatabase;
@@ -55,12 +56,15 @@ class IdempotencyWiringTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     @MockitoSpyBean
     IdempotencyStore store;
 
     @BeforeEach
     void cleanTables() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
     }
 
     private MockHttpServletResponse create(String skuId, int quantity, String key) throws Exception {

@@ -47,7 +47,7 @@ class IdempotencyStoreTest {
 
     @BeforeEach
     void setUp() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
         serializable = new TransactionTemplate(transactionManager);
         serializable.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
         actionRuns.set(0);

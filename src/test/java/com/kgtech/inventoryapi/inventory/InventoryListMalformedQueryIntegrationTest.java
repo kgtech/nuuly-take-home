@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.jayway.jsonpath.JsonPath;
 import com.kgtech.inventoryapi.RawHttp;
@@ -47,9 +48,12 @@ class InventoryListMalformedQueryIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void seed() {
-        TestDatabase.truncateAll(jdbc);
+        TestDatabase.truncateAll(jdbc, transactionManager);
         for (String skuId : SEEDED) {
             jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(skuId).update();
             jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
