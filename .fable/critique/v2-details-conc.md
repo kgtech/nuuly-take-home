@@ -1,0 +1,8 @@
+# Critique — conc (concurrency and idempotency) — v2 @ d4d2681 (reviewer report, condensed)
+
+- F-conc-01 MAJOR — the 32 KB v2 body cap (bytes) rejects a contract-valid body whose JSON encoder escapes non-ASCII as `\uXXXX` (2,000-unit description → 12,000 bytes; worst valid body ≈ 33.3 KB > 32,768). `aBodyNearTheV2CapIsAccepted` only pads ASCII. Fix: raise the cap (~64 KB) and test the escaped maximum.
+- F-conc-02 MINOR — no concurrent test for a keyed v2 create (8 threads, one fresh key → one 201 + seven identical replays, one details row, one ledger row) nor for the 409 variant; no test that a PUT completes while a purchase holds the `sku` row lock.
+- F-conc-03 MINOR — `CappedBodyRequest` counts per `getInputStream()` call and does not wrap `getReader()`; the cap holds by Spring's single-read convention. Fix: count in a field; override `getReader()`.
+- F-conc-04 NIT — "a PUT never touches `sku`" overstates: the first insert takes a FK KEY SHARE on the `sku` row, compatible with the stock UPDATE's FOR NO KEY UPDATE; state the lock modes.
+
+Checked and found met: create atomicity and lock order; create vs create (8 threads) and create vs add; overflow unreachable on a new row; no post-commit code left; reads autocommit outside any transaction; A29 hash bytes and canonical fingerprint; pointcut shapes; 201/409 byte-identical via one render path; validation 400s never stored; same-key concurrency and rollback path; 24 h by the DB clock; tombstone; conditional PUT re-check (8 threads); 404 vs 412; PUT never changes stock; per-request cap wrapper; Concurrently bounded and failable.
