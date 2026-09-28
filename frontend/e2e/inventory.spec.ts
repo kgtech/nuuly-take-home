@@ -12,38 +12,72 @@ async function openSku(page: Page, skuId: string) {
 
 const addForm = (page: Page) => page.getByRole('form', { name: 'Add stock' });
 const buyForm = (page: Page) => page.getByRole('form', { name: 'Purchase' });
+// The SKU page owns one outcome area for both forms (FE32).
+const outcome = (page: Page) => page.getByRole('status');
+const failure = (page: Page) => page.getByRole('alert');
 
 async function addStock(page: Page, quantity: number) {
   await addForm(page).getByLabel('Quantity').fill(String(quantity));
   await addForm(page).getByRole('button', { name: 'Add stock' }).click();
-  await expect(addForm(page).getByRole('status')).toBeVisible();
+  await expect(outcome(page)).toBeVisible();
 }
 
 test('add stock then purchase', async ({ page }) => {
   const skuId = sku('e2e-add');
   await openSku(page, skuId);
-  await expect(page.getByRole('alert')).toHaveText('SKU not found');
+  await expect(failure(page)).toHaveText('SKU not found');
+
+  // Unavailable buttons carry a visible reason and send nothing (FE31).
+  const posts: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST') posts.push(r.url());
+  });
+  const add = addForm(page).getByRole('button', { name: 'Add stock' });
+  await expect(add).toHaveAttribute('aria-disabled', 'true');
+  await expect(addForm(page).getByText('Enter a whole number of at least 1.')).toBeVisible();
+  // Playwright's actionability check treats aria-disabled as not enabled, so the click is forced: the point is
+  // that the app itself ignores it.
+  await add.click({ force: true });
+  const buy = buyForm(page).getByRole('button', { name: 'Purchase' });
+  await expect(buy).toHaveAttribute('aria-disabled', 'true');
+  await expect(buyForm(page).getByText('Add stock first to create this SKU.')).toBeVisible();
+  await buyForm(page).getByLabel('Quantity').fill('1');
+  await buy.click({ force: true });
+  expect(posts).toHaveLength(0);
+  await buyForm(page).getByLabel('Quantity').fill('');
 
   await addStock(page, 5);
-  await expect(addForm(page).getByRole('status')).toContainText(`Added 5 to ${skuId}: now 5.`);
+  await expect(outcome(page)).toContainText(`Added 5 to ${skuId}: now 5.`);
   await expect(page.getByTestId('quantity')).toHaveText('5');
-
+  // The key sits behind a collapsed Request reference, not in the sentence (FE33).
+  const reference = outcome(page).locator('details');
+  await expect(reference).not.toHaveAttribute('open');
+  await expect(reference.locator('summary')).toHaveText('Request reference');
+  await expect(reference).toContainText(/Idempotency-Key [0-9a-f-]{36}/);
+  await expect(outcome(page).locator('> div > div').first()).not.toContainText('Idempotency-Key');
+  // The SKU now exists, so only the empty quantity keeps Purchase unavailable; a quantity releases it.
+  await expect(buyForm(page).getByText('Add stock first to create this SKU.')).toHaveCount(0);
   await buyForm(page).getByLabel('Quantity').fill('2');
-  await buyForm(page).getByRole('button', { name: 'Purchase' }).click();
-  await expect(buyForm(page).getByRole('status')).toContainText(`Purchased 2 of ${skuId}: 3 left.`);
+  await expect(buy).not.toHaveAttribute('aria-disabled', 'true');
+  await buy.click();
+  await expect(outcome(page)).toContainText(`Purchased 2 of ${skuId}: 3 left.`);
   await expect(page.getByTestId('quantity')).toHaveText('3');
+  await expect(page.getByRole('status')).toHaveCount(1);
 
   await buyForm(page).getByLabel('Quantity').fill('4');
-  await buyForm(page).getByRole('button', { name: 'Purchase' }).click();
-  await expect(buyForm(page).getByRole('alert')).toHaveText('Insufficient inventory');
+  await buy.click();
+  await expect(failure(page)).toContainText('Insufficient inventory');
+  await expect(failure(page)).toContainText('Only 3 on hand now. Lower the quantity or add stock.');
+  await expect(page.getByRole('status')).toHaveCount(0);
 
   await page.goto('/');
   await page.getByLabel('After SKU').fill(skuId.slice(0, -1));
   await page.getByRole('button', { name: 'Apply' }).click();
   const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: skuId }) });
   await expect(row).toBeVisible();
-  await expect(row.getByRole('cell').nth(1)).toHaveText('Almost gone');
-  await expect(row.getByRole('cell').nth(2)).toHaveText('3');
+  await expect(row.getByRole('cell').nth(1)).toHaveText('—');
+  await expect(row.getByRole('cell').nth(2)).toHaveText('Almost gone');
+  await expect(row.getByRole('cell').nth(3)).toHaveText('3');
 });
 
 test('a double-submitted purchase changes stock once', async ({ page }) => {
@@ -60,7 +94,7 @@ test('a double-submitted purchase changes stock once', async ({ page }) => {
 
   await buyForm(page).getByLabel('Quantity').fill('3');
   await buyForm(page).getByRole('button', { name: 'Purchase' }).dblclick();
-  await expect(buyForm(page).getByRole('status')).toContainText(`Purchased 3 of ${skuId}: 7 left.`);
+  await expect(outcome(page)).toContainText(`Purchased 3 of ${skuId}: 7 left.`);
   await expect(page.getByTestId('quantity')).toHaveText('7');
 
   await page.reload();
@@ -92,16 +126,37 @@ test('a retry after a network failure reuses the key and changes stock once', as
   await buyForm(page).getByLabel('Quantity').fill('4');
   const button = buyForm(page).getByRole('button', { name: 'Purchase' });
   await button.click();
-  await expect(buyForm(page).getByRole('alert')).toContainText('Network error');
-  await expect(button).toBeEnabled();
+  await expect(failure(page)).toContainText('Network error');
+  await expect(failure(page)).toContainText('Sending again is safe: the same request will not be applied twice.');
+  await expect(button).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(buyForm(page).getByLabel('Quantity')).not.toHaveAttribute('readonly');
   await button.click();
-  await expect(buyForm(page).getByRole('status')).toContainText(`Purchased 4 of ${skuId}: 6 left.`);
+  await expect(outcome(page)).toContainText(`Purchased 4 of ${skuId}: 6 left.`);
 
   expect(keys).toHaveLength(2);
   expect(keys[0]).toMatch(UUID_V4);
   expect(keys[1]).toBe(keys[0]);
   await page.reload();
   await expect(page.getByTestId('quantity')).toHaveText('6');
+});
+
+test('Find a SKU: Open is unavailable with a reason until the id is valid', async ({ page }) => {
+  await page.goto('/');
+  const open = page.getByRole('button', { name: 'Open' });
+  const input = page.getByRole('form', { name: 'Find a SKU' }).getByLabel('SKU ID');
+  await expect(open).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByText('Enter a SKU ID to open it.')).toBeVisible();
+  await open.click({ force: true });
+  await expect(page).toHaveURL(/\/#?\/?$/);
+  await input.fill('bad id');
+  await expect(page.getByText(/That isn't a valid SKU ID/)).toBeVisible();
+  await expect(open).toHaveAttribute('aria-disabled', 'true');
+  await input.press('Enter');
+  await expect(page).toHaveURL(/\/#?\/?$/);
+  await input.fill('ok-1');
+  await expect(open).not.toHaveAttribute('aria-disabled', 'true');
+  await input.press('Enter');
+  await expect(page).toHaveURL(/#\/sku\/ok-1$/);
 });
 
 test.describe('accessibility and phone width', () => {

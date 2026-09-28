@@ -9,7 +9,7 @@ function harness(replies: ApiResult<string>[]) {
   const keys: string[] = [];
   const send = vi.fn(async (key: string): Promise<ApiResult<string>> => {
     keys.push(key);
-    return replies.shift() ?? { ok: true, status: 200, data: 'x', next: null };
+    return replies.shift() ?? { ok: true, status: 200, data: 'x', next: null, etag: null };
   });
   const hook = renderHook(() => useIdempotentSubmit(send));
   return { keys, hook, send };
@@ -30,7 +30,7 @@ describe('useIdempotentSubmit key lifecycle', () => {
 
   it.each([200, 400, 404, 409])('drops the key after status %i', async (status) => {
     const reply: ApiResult<string> =
-      status === 200 ? { ok: true, status, data: 'x', next: null } : fail(status);
+      status === 200 ? { ok: true, status, data: 'x', next: null, etag: null } : fail(status);
     const { keys, hook } = harness([reply]);
     await act(() => hook.result.current.submit('f'));
     await act(() => hook.result.current.submit('f'));
@@ -58,7 +58,7 @@ describe('useIdempotentSubmit key lifecycle', () => {
     const send = vi
       .fn<(key: string) => Promise<ApiResult<string>>>()
       .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce({ ok: true, status: 200, data: 'x', next: null });
+      .mockResolvedValueOnce({ ok: true, status: 200, data: 'x', next: null, etag: null });
     const hook = renderHook(() => useIdempotentSubmit(send));
     await act(async () => {
       await hook.result.current.submit('f').catch(() => undefined);

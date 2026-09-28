@@ -4,36 +4,70 @@ import type { components } from '../api/schema';
 
 type Item = components['schemas']['InventoryItem'];
 type Body = components['schemas']['InventoryQuantity'];
+type SkuItem = components['schemas']['SkuItem'];
+type SkuDetails = components['schemas']['SkuDetails'];
+type CreateSkuRequest = components['schemas']['CreateSkuRequest'];
 
 export const TEXT = {
   notFound: 'SKU not found',
   insufficient: 'Insufficient inventory',
   invalid: 'Invalid request',
+  exists: 'SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}.',
+  changed: 'Details changed since you read them. Reload the SKU and retry with its new ETag.',
 } as const;
 
 const SKU = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const UUID = /^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$/;
+const CURRENCY = /^[A-Z]{3}$/;
 const MAX_PAGE = 250;
+const MAX_INT32 = 2_147_483_647;
 
-/** In-memory store mocking the contract, including Link paging and Idempotency-Key replay. */
+/**
+ * In-memory store mocking the contract: v1 stock (ordering, Link paging, Idempotency-Key
+ * replay) and v2 details (ETag versions, If-Match, 409 on an existing SKU, 412 on a stale tag).
+ */
 export const store = {
   items: new Map<string, number>(),
-  keys: new Map<string, { hash: string; status: number; body: string; contentType: string }>(),
+  details: new Map<string, { details: SkuDetails; version: number }>(),
+  keys: new Map<string, { hash: string; status: number; body: string; contentType: string; etag?: string }>(),
   requests: [] as Request[],
   reset() {
     this.items.clear();
+    this.details.clear();
     this.keys.clear();
     this.requests = [];
   },
   seed(entries: Record<string, number>) {
     for (const [k, v] of Object.entries(entries)) this.items.set(k, v);
   },
+  /** Seeds a SKU with details at version 1 (or the given one). */
+  seedDetails(skuId: string, quantity: number, details: SkuDetails, version = 1) {
+    this.items.set(skuId, quantity);
+    this.details.set(skuId, { details, version });
+  },
+  etag(skuId: string): string {
+    return `"${this.details.get(skuId)?.version ?? 0}"`;
+  },
 };
 
 const text = (status: number, body: string) =>
   new HttpResponse(body, { status, headers: { 'Content-Type': 'text/plain' } });
 
-function page(url: URL): Response {
+function skuItem(skuId: string): SkuItem {
+  const item: SkuItem = { skuId, quantity: store.items.get(skuId) ?? 0 };
+  const d = store.details.get(skuId);
+  if (d) item.details = d.details;
+  return item;
+}
+
+const withEtag = (skuId: string, body: SkuItem, status = 200) =>
+  HttpResponse.json(body, { status, headers: { ETag: store.etag(skuId) } });
+
+function sortedIds(): string[] {
+  return [...store.items.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+}
+
+function page(url: URL, path: '/inventory' | '/v2/inventory'): Response {
   const afterAll = url.searchParams.getAll('after');
   if (afterAll.length > 1) return text(400, TEXT.invalid);
   const after = afterAll[0] ?? null;
@@ -42,14 +76,17 @@ function page(url: URL): Response {
   if (rawLimit !== null && /^\d+$/.test(rawLimit) && Number(rawLimit) >= 1) {
     limit = Math.min(Number(rawLimit), MAX_PAGE);
   }
-  const ids = [...store.items.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  const ids = sortedIds();
   const rest = after === null ? ids : ids.filter((id) => id > after);
   const slice = rest.slice(0, limit);
-  const body: Item[] = slice.map((id) => ({ skuId: id, quantity: store.items.get(id) ?? 0 }));
+  const body: (Item | SkuItem)[] =
+    path === '/inventory'
+      ? slice.map((id) => ({ skuId: id, quantity: store.items.get(id) ?? 0 }))
+      : slice.map(skuItem);
   const headers: Record<string, string> = {};
   if (rest.length > limit) {
     const last = slice[slice.length - 1];
-    const next = new URL(url.origin + '/inventory');
+    const next = new URL(url.origin + path);
     next.searchParams.set('limit', String(limit));
     next.searchParams.set('after', last ?? '');
     headers.Link = `<${next.toString()}>; rel="next"`;
@@ -77,14 +114,8 @@ async function write(
 
   const hash = `${op}\n${skuId}\n${body.quantity}`;
   if (key !== null) {
-    const stored = store.keys.get(key);
-    if (stored) {
-      if (stored.hash !== hash) return text(400, TEXT.invalid);
-      return new HttpResponse(stored.body, {
-        status: stored.status,
-        headers: { 'Content-Type': stored.contentType },
-      });
-    }
+    const replay = replayFor(key, hash);
+    if (replay) return replay;
   }
   let status: number;
   let out: string;
@@ -114,8 +145,126 @@ async function write(
   return new HttpResponse(out, { status, headers: { 'Content-Type': contentType } });
 }
 
+/** The stored response for a reused key, 400 for a different request, or null for a fresh key. */
+function replayFor(key: string, hash: string): Response | null {
+  const stored = store.keys.get(key);
+  if (!stored) return null;
+  if (stored.hash !== hash) return text(400, TEXT.invalid);
+  const headers: Record<string, string> = { 'Content-Type': stored.contentType };
+  if (stored.etag) headers.ETag = stored.etag;
+  return new HttpResponse(stored.body, { status: stored.status, headers });
+}
+
+// The service's SkuDetails record (F-01, F-03): Java isBlank (NBSP is not blank), no control characters
+// (a description may hold \n and \t), no unpaired surrogate, and an image URL that java.net.URI parses
+// with a lowercase http/https scheme, a non-null host and an ASCII round-trip.
+// eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
+const JAVA_BLANK = /^[\t\n\v\f\r\x1C-\x1F \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]*$/;
+// eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
+const NAME_CONTROL = /[\x00-\x1F\x7F\p{Cs}]/u;
+// eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
+const DESCRIPTION_CONTROL = /[\x00-\x08\x0B-\x1F\x7F\p{Cs}]/u;
+const URI_REJECTS = /[^\x21-\x7E]|["<>\\^`{|}]/;
+const IMAGE_URL = /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?[A-Za-z0-9.-]+(?::\d*)?(?:[/?#][!-~]*)?$/;
+
+/** The server's field rules (DESIGN-V2 §8); returns the normalised details or null when invalid. */
+function validDetails(input: unknown): SkuDetails | null {
+  if (typeof input !== 'object' || input === null) return null;
+  const d = input as Record<string, unknown>;
+  if (typeof d.name !== 'string' || JAVA_BLANK.test(d.name) || d.name.length > 120 || NAME_CONTROL.test(d.name)) {
+    return null;
+  }
+  const out: SkuDetails = { name: d.name, description: '', images: [] };
+  if (d.description !== undefined) {
+    if (typeof d.description !== 'string' || d.description.length > 2000 || DESCRIPTION_CONTROL.test(d.description)) {
+      return null;
+    }
+    out.description = d.description;
+  }
+  if (d.images !== undefined) {
+    if (!Array.isArray(d.images) || d.images.length > 10) return null;
+    for (const u of d.images) {
+      if (typeof u !== 'string' || u.length > 2048 || URI_REJECTS.test(u) || !IMAGE_URL.test(u)) return null;
+    }
+    out.images = d.images as string[];
+  }
+  if (d.cost !== undefined && d.cost !== null) {
+    const c = d.cost as Record<string, unknown>;
+    if (typeof c.amount !== 'number' || !Number.isInteger(c.amount) || c.amount < 0) return null;
+    if (typeof c.currency !== 'string' || !CURRENCY.test(c.currency)) return null;
+    out.cost = { amount: c.amount, currency: c.currency };
+  }
+  return out;
+}
+
+const canonical = (d: SkuDetails, initialQuantity: number) =>
+  JSON.stringify([d.name, d.description ?? '', d.cost ?? null, d.images ?? [], initialQuantity]);
+
+async function create(request: Request, skuId: string): Promise<Response> {
+  let body: CreateSkuRequest;
+  try {
+    body = (await request.json()) as CreateSkuRequest;
+  } catch {
+    return text(400, TEXT.invalid);
+  }
+  const key = request.headers.get('Idempotency-Key');
+  if (key !== null && !UUID.test(key)) return text(400, TEXT.invalid);
+  if (!SKU.test(skuId)) return text(400, TEXT.invalid);
+  const details = validDetails(body?.details);
+  if (details === null) return text(400, TEXT.invalid);
+  const initial = body.initialQuantity ?? 0;
+  if (!Number.isInteger(initial) || initial < 0 || initial > MAX_INT32) return text(400, TEXT.invalid);
+
+  const hash = `create\n${skuId}\n${canonical(details, initial)}`;
+  if (key !== null) {
+    const replay = replayFor(key, hash);
+    if (replay) return replay;
+  }
+  if (store.items.has(skuId)) {
+    if (key !== null) store.keys.set(key, { hash, status: 409, body: TEXT.exists, contentType: 'text/plain' });
+    return text(409, TEXT.exists);
+  }
+  store.items.set(skuId, initial);
+  store.details.set(skuId, { details, version: 1 });
+  const out = JSON.stringify(skuItem(skuId));
+  if (key !== null) {
+    store.keys.set(key, { hash, status: 201, body: out, contentType: 'application/json', etag: store.etag(skuId) });
+  }
+  return withEtag(skuId, skuItem(skuId), 201);
+}
+
+async function replace(request: Request, skuId: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return text(400, TEXT.invalid);
+  }
+  if (!SKU.test(skuId) || !store.items.has(skuId)) return text(404, TEXT.notFound);
+  const details = validDetails(body);
+  if (details === null) return text(400, TEXT.invalid);
+  const ifMatch = request.headers.get('If-Match');
+  if (ifMatch !== null && ifMatch.trim() !== '*') {
+    const tags = ifMatch.split(',').map((t) => t.trim());
+    if (!tags.includes(store.etag(skuId))) return text(412, TEXT.changed);
+  }
+  const current = store.details.get(skuId);
+  store.details.set(skuId, { details, version: (current?.version ?? 0) + 1 });
+  return withEtag(skuId, skuItem(skuId));
+}
+
 export const handlers = [
-  http.get('*/inventory', ({ request }) => page(new URL(request.url))),
+  // v2 first: MSW's "*" also matches "/v2", so the v1 patterns below would otherwise catch these.
+  http.get('*/v2/inventory', ({ request }) => page(new URL(request.url), '/v2/inventory')),
+  http.get('*/v2/inventory/:skuId', ({ params }) => {
+    const skuId = String(params.skuId);
+    if (!SKU.test(skuId) || !store.items.has(skuId)) return text(404, TEXT.notFound);
+    return withEtag(skuId, skuItem(skuId));
+  }),
+  http.post('*/v2/inventory/:skuId', ({ request, params }) => create(request, String(params.skuId))),
+  http.put('*/v2/inventory/:skuId', ({ request, params }) => replace(request, String(params.skuId))),
+
+  http.get('*/inventory', ({ request }) => page(new URL(request.url), '/inventory')),
   http.get('*/inventory/:skuId', ({ params }) => {
     const skuId = String(params.skuId);
     const q = store.items.get(skuId);

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useState } from 'react';
 import { server, store } from './server';
-import { StockForm } from '../components/StockForm';
+import { StockForm, StockOutcomeView, type StockOutcome } from '../components/StockForm';
+import { GUIDANCE } from '../components/Messages';
 import { SkuView } from '../pages/SkuView';
 import { InventoryList } from '../pages/InventoryList';
 
@@ -12,26 +14,40 @@ const odd = () =>
 const boom = () =>
   new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } });
 
-describe('arbitrary server error texts are shown verbatim', () => {
-  for (const [label, reply, text] of [
-    ['odd', odd, 'Something odd happened'],
-    ['500', boom, 'Internal server error'],
+function Form({ operation }: { operation: 'add' | 'purchase' }) {
+  const [outcome, setOutcome] = useState<StockOutcome | null>(null);
+  return (
+    <>
+      <StockForm operation={operation} skuId="A" onOutcome={setOutcome} />
+      <StockOutcomeView outcome={outcome} />
+    </>
+  );
+}
+
+describe('arbitrary server error texts are shown verbatim, first, with one guidance line by status class', () => {
+  for (const [label, reply, text, guidance] of [
+    ['odd', odd, 'Something odd happened', null],
+    ['500', boom, 'Internal server error', GUIDANCE.retrySafe],
   ] as const) {
     it(`add: ${label}`, async () => {
       server.use(http.post('*/inventory/:skuId', reply));
       const user = userEvent.setup();
-      render(<StockForm operation="add" skuId="A" onSuccess={() => {}} />);
+      render(<Form operation="add" />);
       await user.type(screen.getByLabelText(/quantity/i), '1');
       await user.click(screen.getByRole('button', { name: 'Add stock' }));
-      expect(await screen.findByRole('alert')).toHaveTextContent(text);
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent!.startsWith(text)).toBe(true);
+      expect(alert.textContent!.replace(text, '').trim()).toBe(guidance ?? '');
     });
     it(`purchase: ${label}`, async () => {
       server.use(http.post('*/inventory/:skuId/purchase', reply));
       const user = userEvent.setup();
-      render(<StockForm operation="purchase" skuId="A" onSuccess={() => {}} />);
+      render(<Form operation="purchase" />);
       await user.type(screen.getByLabelText(/quantity/i), '1');
       await user.click(screen.getByRole('button', { name: 'Purchase' }));
-      expect(await screen.findByRole('alert')).toHaveTextContent(text);
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent!.startsWith(text)).toBe(true);
+      expect(alert.textContent!.replace(text, '').trim()).toBe(guidance ?? '');
     });
     it(`view: ${label}`, async () => {
       server.use(http.get('*/inventory/:skuId', reply));

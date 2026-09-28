@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useId, useState } from 'react';
-import { api, type InventoryItem } from '../api/client';
-import { StockForm } from '../components/StockForm';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { api, type SkuDetails, type SkuItem } from '../api/client';
+import { StockForm, StockOutcomeView, type StockOutcome } from '../components/StockForm';
 import { ErrorText, Loading } from '../components/Messages';
-import { ArrowLeft, PlusCircle, ShoppingBag } from '../components/Icons';
-import { SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
+import { ArrowLeft, PencilSimple, PlusCircle, ShoppingBag } from '../components/Icons';
+import { editHref } from '../hooks/useHashRoute';
+import { formatCost } from '../cost';
+import { INSUFFICIENT_INVENTORY, SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
+import { availability } from './InventoryList';
 
 type State =
   | { phase: 'loading' }
   | { phase: 'error'; status: number; errorText: string }
-  | { phase: 'ready'; item: InventoryItem };
+  | { phase: 'ready'; item: SkuItem };
+
+export const ADD_FIRST = 'Add stock first to create this SKU.';
+const onHandLine = (n: number) => `Only ${n.toLocaleString()} on hand now. Lower the quantity or add stock.`;
 
 /** Rendered with key={skuId} by the router, so a new SKU remounts it and starts loading. */
 export function SkuView({ skuId }: { skuId: string }) {
@@ -19,11 +25,16 @@ export function SkuView({ skuId }: { skuId: string }) {
   const invalid = !SKU_ID_PATTERN.test(skuId);
   const state: State = invalid ? { phase: 'error', status: 404, errorText: SKU_NOT_FOUND } : loaded;
   const [attempt, setAttempt] = useState(0);
+  // One outcome area for both forms (FE32); `extra` is the on-hand line after "Insufficient inventory".
+  const [outcome, setOutcome] = useState<{ outcome: StockOutcome; extra?: string } | null>(null);
+  // Sequence of outcomes: the re-fetch after "Insufficient inventory" is ignored when a newer outcome
+  // (e.g. an add) has landed meanwhile, so a late GET never overwrites a fresher quantity (F-08).
+  const seq = useRef(0);
 
   useEffect(() => {
     let live = true;
     if (invalid) return;
-    void api.getInventory(skuId).then((r) => {
+    void api.getSku(skuId).then((r) => {
       if (!live) return;
       setState(
         r.ok
@@ -41,7 +52,37 @@ export function SkuView({ skuId }: { skuId: string }) {
     setAttempt((n) => n + 1);
   };
 
-  const onChange = useCallback((item: InventoryItem) => setState({ phase: 'ready', item }), []);
+  const onOutcome = useCallback(
+    (o: StockOutcome) => {
+      const mine = ++seq.current;
+      if (o.kind === 'done') {
+        // The v1 response carries only the quantity; the details stay as read (FE38).
+        setState((cur) => ({
+          phase: 'ready',
+          item: { ...(cur.phase === 'ready' ? cur.item : {}), skuId: o.item.skuId ?? skuId, quantity: o.item.quantity ?? 0 },
+        }));
+        setOutcome({ outcome: o });
+        return;
+      }
+      if (o.status === 400 && o.errorText === INSUFFICIENT_INVENTORY) {
+        // Another client may have bought meanwhile: show what is on hand now, then the message.
+        void api.getSku(skuId).then((r) => {
+          if (seq.current !== mine) return;
+          if (r.ok) {
+            setState({ phase: 'ready', item: r.data });
+            setOutcome({ outcome: o, extra: onHandLine(r.data.quantity) });
+          } else {
+            setOutcome({ outcome: o });
+          }
+        });
+        return;
+      }
+      setOutcome({ outcome: o });
+    },
+    [skuId],
+  );
+
+  const missing = state.phase === 'error' && state.status === 404;
 
   return (
     <section className="page">
@@ -75,33 +116,102 @@ export function SkuView({ skuId }: { skuId: string }) {
                 <span className="big" data-testid="quantity">
                   {state.item.quantity}
                 </span>
-                {(state.item.quantity ?? 0) === 0 && <span className="badge out">Rented out</span>}
+                {(() => {
+                  const badge = availability(state.item.quantity);
+                  return <span className={`badge ${badge.tone}`}>{badge.text}</span>;
+                })()}
               </div>
             </>
           )}
         </div>
       </div>
+      {state.phase === 'ready' && <Details skuId={skuId} details={state.item.details} />}
       {state.phase !== 'loading' && (
-        <div className="cards forms">
-          <section className="card" aria-labelledby={`${id}-add`}>
-            <h2 id={`${id}-add`}>
-              <PlusCircle />
-              Add stock
-            </h2>
-            {state.phase === 'error' && (
-              <p className="note">Adding stock creates the SKU if it does not exist.</p>
-            )}
-            <StockForm operation="add" skuId={skuId} onSuccess={onChange} />
-          </section>
-          <section className="card" aria-labelledby={`${id}-buy`}>
-            <h2 id={`${id}-buy`}>
-              <ShoppingBag />
-              Purchase
-            </h2>
-            <StockForm operation="purchase" skuId={skuId} onSuccess={onChange} />
-          </section>
-        </div>
+        <>
+          <StockOutcomeView outcome={outcome?.outcome ?? null} extra={outcome?.extra} />
+          <div className="cards forms">
+            <section className="card" aria-labelledby={`${id}-add`}>
+              <h2 id={`${id}-add`}>
+                <PlusCircle />
+                Add stock
+              </h2>
+              {missing && <p className="note">Adding stock creates the SKU if it does not exist.</p>}
+              <StockForm operation="add" skuId={skuId} onOutcome={onOutcome} />
+            </section>
+            <section className="card" aria-labelledby={`${id}-buy`}>
+              <h2 id={`${id}-buy`}>
+                <ShoppingBag />
+                Purchase
+              </h2>
+              <StockForm
+                operation="purchase"
+                skuId={skuId}
+                onOutcome={onOutcome}
+                unavailable={missing ? ADD_FIRST : null}
+              />
+            </section>
+          </div>
+        </>
       )}
     </section>
   );
+}
+
+/** The v2 details card: name, description, cost from minor units, lazy thumbnails (FE36, FE38). */
+function Details({ skuId, details }: { skuId: string; details: SkuDetails | undefined }) {
+  const id = useId();
+  if (details === undefined) {
+    return (
+      <section className="card details" aria-labelledby={`${id}-h`}>
+        <h2 id={`${id}-h`}>No details yet</h2>
+        <p className="note">Give this SKU a name, a description, a cost and images.</p>
+        <p style={{ margin: 0 }}>
+          <a href={editHref(skuId)} className="back">
+            <PencilSimple />
+            Add details
+          </a>
+        </p>
+      </section>
+    );
+  }
+  const images = details.images ?? [];
+  return (
+    <section className="card details" aria-labelledby={`${id}-h`}>
+      <h2 id={`${id}-h`}>{details.name}</h2>
+      {details.description && <p className="description">{details.description}</p>}
+      {details.cost && (
+        <p className="cost">
+          <span className="label">Cost</span>{' '}
+          <span data-testid="cost">{formatCost(details.cost)}</span>
+        </p>
+      )}
+      {images.length > 0 && (
+        <ul className="images" aria-label="Images">
+          {images.map((url, i) => (
+            <li key={`${i}-${url}`}>
+              <Thumbnail url={url} alt={details.name} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <p style={{ margin: 0 }}>
+        <a href={editHref(skuId)} className="back">
+          <PencilSimple />
+          Edit details
+        </a>
+      </p>
+    </section>
+  );
+}
+
+function Thumbnail({ url, alt }: { url: string; alt: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    return (
+      <span className="thumb fallback" role="img" aria-label={`${alt} (image unavailable)`}>
+        <span aria-hidden="true">Image unavailable</span>
+      </span>
+    );
+  }
+  return <img className="thumb" src={url} alt={alt} loading="lazy" onError={() => setBroken(true)} />;
 }

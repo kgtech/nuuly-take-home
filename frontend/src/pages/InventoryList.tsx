@@ -1,16 +1,17 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { api, type ApiResult, type InventoryItem, type ListParams } from '../api/client';
+import { api, type ApiResult, type ListParams, type SkuItem } from '../api/client';
 import { skuHref } from '../hooks/useHashRoute';
-import { ErrorText, Loading } from '../components/Messages';
+import { ErrorText, Hint, Loading, SubmitButton } from '../components/Messages';
 import { FindSku } from '../components/FindSku';
 import { ArrowRight } from '../components/Icons';
 import { BRAND } from '../brand';
+import { limitReason } from '../validation';
 
-type PageRequest = { n: number; pageNo: number; params: ListParams; run: () => Promise<ApiResult<InventoryItem[]>> };
-type PageResult = { n: number; result: ApiResult<InventoryItem[]> };
+type PageRequest = { n: number; pageNo: number; params: ListParams; run: () => Promise<ApiResult<SkuItem[]>> };
+type PageResult = { n: number; result: ApiResult<SkuItem[]> };
 
 function firstPage(params: ListParams, n: number): PageRequest {
-  return { n, pageNo: 1, params, run: () => api.listInventory(params) };
+  return { n, pageNo: 1, params, run: () => api.listSkus(params) };
 }
 
 /** Badge thresholds from the design (FE27): 0 is rented out, 1–3 almost gone, above that available. */
@@ -49,13 +50,25 @@ export function InventoryList() {
 
   const retry = () => setRequest((r) => ({ ...r, n: r.n + 1 }));
 
+  /** Clears the cursor and lists from the start with the same page size. */
+  const clearCursor = () => {
+    setAfterInput('');
+    setRequest((r) => {
+      const params: ListParams = {};
+      if (r.params.limit !== undefined) params.limit = r.params.limit;
+      return firstPage(params, r.n + 1);
+    });
+    headingRef.current?.focus();
+  };
+
   const nextPage = (url: string) => {
-    setRequest((r) => ({ n: r.n + 1, pageNo: r.pageNo + 1, params: r.params, run: () => api.listInventoryAt(url) }));
+    setRequest((r) => ({ n: r.n + 1, pageNo: r.pageNo + 1, params: r.params, run: () => api.listSkusAt(url) }));
     headingRef.current?.focus();
   };
 
   const loading = response === null || response.n !== request.n;
   const result = loading ? null : response.result;
+  const limitHint = limitReason(limitInput);
 
   return (
     <section aria-labelledby={`${id}-h`} className="page">
@@ -70,7 +83,7 @@ export function InventoryList() {
         <FindSku />
         <section className="card" aria-labelledby={`${id}-paging`}>
           <h2 id={`${id}-paging`}>Page size + start</h2>
-          <form onSubmit={apply} className="paging-form" aria-label="Paging" noValidate>
+          <form onSubmit={apply} className="paging-form" aria-label="Paging" aria-busy={loading} noValidate>
             <div className="field">
               <label htmlFor={`${id}-limit`}>Per page (1–250)</label>
               <input
@@ -82,7 +95,9 @@ export function InventoryList() {
                 value={limitInput}
                 onChange={(e) => setLimitInput(e.target.value)}
                 placeholder="250"
+                aria-describedby={`${id}-limit-hint`}
               />
+              <Hint id={`${id}-limit-hint`}>{limitHint}</Hint>
             </div>
             <div className="field">
               <label htmlFor={`${id}-after`}>After SKU</label>
@@ -94,9 +109,9 @@ export function InventoryList() {
                 autoComplete="off"
               />
             </div>
-            <button type="submit" className="secondary">
-              Apply
-            </button>
+            {/* Always available for an out-of-range limit (FE17); unavailable only while a page loads (F-11). */}
+            <SubmitButton label="Apply" busyLabel="Loading…" className="secondary" unavailable={false} inFlight={loading} />
+
           </form>
         </section>
       </div>
@@ -110,12 +125,21 @@ export function InventoryList() {
           </button>
         </div>
       )}
-      {result?.ok && result.data.length === 0 && (
+      {result?.ok && result.data.length === 0 && request.params.after === undefined && (
         <div className="empty">
           <h3>The closet is empty</h3>
           <p>
-            No SKUs yet. <a href="#/add">Add stock</a> to create one.
+            No SKUs yet. <a href="#/new">Create a SKU</a> or <a href="#/add">add stock</a> to make one.
           </p>
+        </div>
+      )}
+      {result?.ok && result.data.length === 0 && request.params.after !== undefined && (
+        <div className="empty">
+          <h3>Nothing after that</h3>
+          <p>No SKUs after '{request.params.after}'.</p>
+          <button type="button" className="secondary" onClick={clearCursor}>
+            Show from the start
+          </button>
         </div>
       )}
       {result?.ok && result.data.length > 0 && (
@@ -131,6 +155,7 @@ export function InventoryList() {
               <thead>
                 <tr>
                   <th scope="col">SKU</th>
+                  <th scope="col">Name</th>
                   <th scope="col">Availability</th>
                   <th scope="col" className="num">
                     Quantity
@@ -139,18 +164,19 @@ export function InventoryList() {
               </thead>
               <tbody>
                 {result.data.map((item) => {
-                  const badge = availability(item.quantity ?? 0);
+                  const badge = availability(item.quantity);
                   return (
                     <tr key={item.skuId}>
                       <td>
-                        <a href={skuHref(item.skuId ?? '')} className="row-link">
+                        <a href={skuHref(item.skuId)} className="row-link">
                           {item.skuId}
                         </a>
                       </td>
+                      <td className="name">{item.details?.name ?? '—'}</td>
                       <td>
                         <span className={`badge ${badge.tone}`}>{badge.text}</span>
                       </td>
-                      <td className="num">{(item.quantity ?? 0).toLocaleString()}</td>
+                      <td className="num">{item.quantity.toLocaleString()}</td>
                     </tr>
                   );
                 })}

@@ -17,6 +17,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/inventory': { target: apiUrl, changeOrigin: false },
+      '/v2': { target: apiUrl, changeOrigin: false },
     },
   },
   test: {

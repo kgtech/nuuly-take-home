@@ -1,26 +1,31 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { api, type InventoryItem } from '../api/client';
 import { useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
-import { certainRejection, quantityHint } from '../validation';
-import { ErrorText, Success } from './Messages';
+import { quantityReason, skuIdReason } from '../validation';
+import { ErrorText, Hint, SubmitButton, Success, writeGuidance } from './Messages';
 
 export type Operation = 'add' | 'purchase';
+
+/** What a submit ended in; the page that owns the outcome area renders it (FE32). */
+export type StockOutcome =
+  | { kind: 'done'; operation: Operation; sent: number; item: InventoryItem; key: string }
+  | { kind: 'failed'; operation: Operation; sent: number; status: number; errorText: string };
 
 interface Props {
   operation: Operation;
   skuId: string;
-  onSuccess: (item: InventoryItem) => void;
+  onOutcome: (outcome: StockOutcome) => void;
+  /** Id of an element that already shows the SKU ID reason (the Add page's field hint); else the form shows it. */
+  skuReasonId?: string;
+  /** A reason from the page that makes the submit unavailable, e.g. purchase on a missing SKU. */
+  unavailable?: string | null;
 }
 
 const LABEL: Record<Operation, string> = { add: 'Add stock', purchase: 'Purchase' };
 
-export function StockForm({ operation, skuId, onSuccess }: Props) {
+export function StockForm({ operation, skuId, onOutcome, skuReasonId, unavailable = null }: Props) {
   const id = useId();
   const [quantity, setQuantity] = useState('');
-  const [sent, setSent] = useState(0);
-  const [rejected, setRejected] = useState<string | null>(null);
-  const statusRef = useRef<HTMLDivElement>(null);
-  const alertRef = useRef<HTMLParagraphElement>(null);
 
   const send = useCallback(
     (key: string) => {
@@ -29,34 +34,30 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
     },
     [operation, skuId, quantity],
   );
-  const { state, submit, inFlight } = useIdempotentSubmit(send);
+  const { submit, inFlight } = useIdempotentSubmit(send);
 
-  // Move focus to the outcome so keyboard and screen-reader users hear it.
-  useEffect(() => {
-    if (state.phase === 'done') statusRef.current?.focus();
-    else if (state.phase === 'failed') alertRef.current?.focus();
-  }, [state]);
-  useEffect(() => {
-    if (rejected !== null) alertRef.current?.focus();
-  }, [rejected]);
+  const qtyReason = quantityReason(quantity);
+  const skuReason = skuIdReason(skuId);
+  const blocked = qtyReason !== null || skuReason !== null || unavailable !== null;
+  const ownSkuReasonId = `${id}-sku`;
+  const describedBy = [
+    `${id}-hint`,
+    ...(skuReason !== null ? [skuReasonId ?? ownSkuReasonId] : []),
+    ...(unavailable !== null ? [`${id}-why`] : []),
+  ];
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    // Only what the server is certain to reject is answered locally, with its text (PROMPT.md).
-    const certain = certainRejection(operation, skuId, quantity);
-    setRejected(certain);
-    if (certain !== null) return;
-    setSent(Number(quantity));
-    const result = await submit(`${operation}\n${skuId}\n${Number(quantity)}`);
+    if (blocked || inFlight) return;
+    const sent = Number(quantity);
+    const result = await submit(`${operation}\n${skuId}\n${sent}`);
     if (result?.phase === 'done') {
-      onSuccess(result.data);
       setQuantity('');
+      onOutcome({ kind: 'done', operation, sent, item: result.data, key: result.key });
+    } else if (result?.phase === 'failed') {
+      onOutcome({ kind: 'failed', operation, sent, status: result.status, errorText: result.errorText });
     }
   };
-
-  const hint = quantityHint(quantity);
-  const done = state.phase === 'done' ? state : null;
-  const errorText = rejected ?? (state.phase === 'failed' ? state.errorText : null);
 
   return (
     <form
@@ -76,29 +77,51 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
           min={1}
           step={1}
           value={quantity}
-          onChange={(e) => {
-            setQuantity(e.target.value);
-            setRejected(null);
-          }}
-          aria-invalid={hint !== null || undefined}
-          aria-describedby={hint ? `${id}-hint` : undefined}
-          disabled={inFlight}
+          onChange={(e) => setQuantity(e.target.value)}
+          aria-invalid={(quantity !== '' && qtyReason !== null) || undefined}
+          aria-describedby={`${id}-hint`}
+          readOnly={inFlight}
         />
-        <p id={`${id}-hint`} className="hint" aria-live="polite">
-          {hint}
-        </p>
+        <Hint id={`${id}-hint`}>{qtyReason}</Hint>
       </div>
-      <button type="submit" className="wide" disabled={inFlight}>
-        {inFlight ? 'Sending…' : LABEL[operation]}
-      </button>
-      {done && rejected === null && (
-        <Success idempotencyKey={done.key} ref={statusRef}>
-          {operation === 'add'
-            ? `Added ${sent} to ${done.data.skuId}: now ${done.data.quantity}.`
-            : `Purchased ${sent} of ${done.data.skuId}: ${done.data.quantity} left.`}
-        </Success>
-      )}
-      {errorText !== null && <ErrorText text={errorText} ref={alertRef} />}
+      <SubmitButton
+        label={LABEL[operation]}
+        className="wide"
+        unavailable={blocked}
+        inFlight={inFlight}
+        describedBy={describedBy}
+      />
+      {skuReason !== null && skuReasonId === undefined && <Hint id={ownSkuReasonId}>{skuReason}</Hint>}
+      {unavailable !== null && <Hint id={`${id}-why`}>{unavailable}</Hint>}
     </form>
+  );
+}
+
+/**
+ * The outcome area: one success (role=status) or one failure (role=alert), focused when
+ * it changes. `extra` replaces the generic guidance line (e.g. the on-hand count after
+ * "Insufficient inventory").
+ */
+export function StockOutcomeView({ outcome, extra }: { outcome: StockOutcome | null; extra?: ReactNode }) {
+  const statusRef = useRef<HTMLDivElement>(null);
+  const alertRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (outcome !== null) (statusRef.current ?? alertRef.current)?.focus();
+  }, [outcome]);
+  if (outcome === null) return null;
+  if (outcome.kind === 'done') {
+    const { item, sent, operation, key } = outcome;
+    return (
+      <Success idempotencyKey={key} ref={statusRef}>
+        {operation === 'add'
+          ? `Added ${sent} to ${item.skuId}: now ${item.quantity}.`
+          : `Purchased ${sent} of ${item.skuId}: ${item.quantity} left.`}
+      </Success>
+    );
+  }
+  return (
+    <ErrorText text={outcome.errorText} ref={alertRef}>
+      {extra ?? writeGuidance(outcome.status)}
+    </ErrorText>
   );
 }
