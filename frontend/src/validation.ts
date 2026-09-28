@@ -124,10 +124,10 @@ export function parseImages(text: string): string[] {
  * http/https scheme, and a host of letters, digits, '.' and '-' (an underscore host makes
  * getHost() null), so that toASCIIString() round-trips. The value is checked as typed, never rewritten.
  */
-// The host is a name of letters, digits, '.' and '-', or an IPv6 literal in brackets, which java.net.URI
-// also accepts (F-fe-01); both may carry a port.
+// The host is a name of letters, digits, '.' and '-', or an IPv6 literal in brackets with an optional zone id
+// (`[fe80::1%eth0]`), which java.net.URI also accepts (F-fe-01, R-03); both may carry a port.
 const IMAGE_URL =
-  /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d*)?(?:[/?#][!-~]*)?$/;
+  /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+(?:%[A-Za-z0-9]+)?\])(?::\d*)?(?:[/?#][!-~]*)?$/;
 const URI_REJECTS = /[^\x21-\x7E]|["<>\\^`{|}]/;
 
 export function isServerImageUrl(u: string): boolean {

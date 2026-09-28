@@ -81,10 +81,8 @@ export function CreateSkuPage() {
             min={0}
             step={1}
             value={initial}
-            onChange={(e) => {
-              setInitial(e.target.value);
-              setInitialBadInput(e.target.validity?.badInput ?? false);
-            }}
+            onChange={(e) => setInitial(e.target.value)}
+            onInput={(e) => setInitialBadInput(e.currentTarget.validity?.badInput ?? false)}
             aria-invalid={initialReason !== null || undefined}
             aria-describedby={`${id}-initial-hint`}
             readOnly={inFlight}

@@ -11,7 +11,7 @@ import { availability } from './InventoryList';
 type State =
   | { phase: 'loading' }
   | { phase: 'error'; status: number; errorText: string }
-  | { phase: 'ready'; item: SkuItem };
+  | { phase: 'ready'; item: SkuItem; detailsError?: { status: number; errorText: string } };
 
 export const ADD_FIRST = 'Add stock first to create this SKU.';
 const onHandLine = (n: number) => `Only ${n.toLocaleString()} on hand now. Lower the quantity or add stock.`;
@@ -74,10 +74,16 @@ export function SkuView({ skuId }: { skuId: string }) {
           }
           const r = await api.getSku(skuId);
           if (seq.current !== mine) return;
+          // A second failure keeps the quantity the add returned and shows a details error with Retry, never
+          // "No details yet" for a SKU that may have details (R-04).
           setState(
             r.ok
               ? { phase: 'ready', item: r.data }
-              : { phase: 'ready', item: { skuId: o.item.skuId ?? skuId, quantity: o.item.quantity ?? 0 } },
+              : {
+                  phase: 'ready',
+                  item: { skuId: o.item.skuId ?? skuId, quantity: o.item.quantity ?? 0 },
+                  detailsError: { status: r.status, errorText: r.errorText },
+                },
           );
         })();
         return;
@@ -101,6 +107,20 @@ export function SkuView({ skuId }: { skuId: string }) {
   );
 
   const missing = state.phase === 'error' && state.status === 404;
+
+  /** Re-fetches GET /v2 after a failed details load, keeping the quantity on screen meanwhile. */
+  const retryDetails = () => {
+    const mine = ++seq.current;
+    void api.getSku(skuId).then((r) => {
+      if (seq.current !== mine) return;
+      setState((cur) => {
+        if (cur.phase !== 'ready') return cur;
+        return r.ok
+          ? { phase: 'ready', item: r.data }
+          : { phase: 'ready', item: cur.item, detailsError: { status: r.status, errorText: r.errorText } };
+      });
+    });
+  };
 
   return (
     <section className="page">
@@ -143,7 +163,15 @@ export function SkuView({ skuId }: { skuId: string }) {
           )}
         </div>
       </div>
-      {state.phase === 'ready' && <Details skuId={skuId} details={state.item.details} />}
+      {state.phase === 'ready' && state.detailsError !== undefined && (
+        <section className="card details stack" aria-label="Details">
+          <ErrorText text={state.detailsError.errorText}>Could not load the details; the count above is current.</ErrorText>
+          <button type="button" className="secondary" onClick={retryDetails}>
+            Retry details
+          </button>
+        </section>
+      )}
+      {state.phase === 'ready' && state.detailsError === undefined && <Details skuId={skuId} details={state.item.details} />}
       {state.phase !== 'loading' && (
         <>
           <StockOutcomeView outcome={outcome?.outcome ?? null} extra={outcome?.extra} />
