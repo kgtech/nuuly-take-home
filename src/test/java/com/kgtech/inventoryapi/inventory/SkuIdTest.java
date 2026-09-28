@@ -2,19 +2,15 @@ package com.kgtech.inventoryapi.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import com.kgtech.inventoryapi.idempotency.Operation;
-
 /**
- * G11, R7, S2: the skuId pattern ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, matched whole, and the outcome a malformed
- * skuId becomes (create → InvalidRequest, purchase → NotFound). Plain unit test.
+ * G11, R7, S2: the skuId pattern ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$, matched whole. The outcome a malformed skuId
+ * becomes (create → InvalidRequest, purchase → NotFound) is InventoryServiceWriteChecksTest's. Plain unit test.
  */
 class SkuIdTest {
 
@@ -41,30 +37,5 @@ class SkuIdTest {
     @Test
     void nullIsInvalid() {
         assertThat(SkuId.isValid(null)).isFalse();
-    }
-
-    @ParameterizedTest
-    @MethodSource("invalidIds")
-    void rejectionOnCreateIsInvalidRequest(String skuId) {
-        assertThat(SkuId.rejection(Operation.ADD, skuId)).contains(new WriteResult.InvalidRequest());
-    }
-
-    @ParameterizedTest
-    @MethodSource("invalidIds")
-    void rejectionOnPurchaseIsNotFound(String skuId) {
-        assertThat(SkuId.rejection(Operation.PURCHASE, skuId)).contains(new StockOutcome.NotFound());
-    }
-
-    @Test
-    void rejectionOfNullSkuId() {
-        assertThat(SkuId.rejection(Operation.ADD, null)).contains(new WriteResult.InvalidRequest());
-        assertThat(SkuId.rejection(Operation.PURCHASE, null)).contains(new StockOutcome.NotFound());
-    }
-
-    @ParameterizedTest
-    @EnumSource(Operation.class)
-    void noRejectionForValidIds(Operation operation) {
-        validIds().forEach(skuId ->
-                assertThat(SkuId.rejection(operation, skuId)).as(skuId).isEqualTo(Optional.empty()));
     }
 }

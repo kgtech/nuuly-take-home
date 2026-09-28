@@ -2,7 +2,7 @@ package com.kgtech.inventoryapi.inventory;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 
-/** What a keyed write returns: a stock or details outcome, a stored keyed response, or an invalid request (R1, Z1). */
+/** What a write returns: a stock or details outcome, a stored keyed response, or an invalid request (R1, A33). */
 public sealed interface WriteResult permits StockOutcome, DetailsOutcome, WriteResult.Stored, WriteResult.InvalidRequest {
 
     /** A first or replayed keyed response, sent unchanged (Y4). */

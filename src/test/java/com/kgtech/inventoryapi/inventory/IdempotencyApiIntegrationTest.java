@@ -30,7 +30,7 @@ import com.kgtech.inventoryapi.IntegrationTest;
 
 /**
  * Issue #6 end to end against Postgres: Idempotency-Key claim, replay, mismatch, expiry and what is never stored
- * (G8, G14, R1, R2, S2, S3, S8, T1, U3, W2, X1, Y1, Y3, Y4, Z1). Not @Transactional: every request commits its own
+ * (G8, G14, R1, R2, S2, S3, S8, T1, U3, Y1, Y3, Y4, A33). Not @Transactional: every request commits its own
  * transaction, so the tables are emptied before each test. Same annotations as InventoryApiIntegrationTest so the
  * context and container are reused.
  */
@@ -453,7 +453,7 @@ class IdempotencyApiIntegrationTest {
         assertThat(allSkuRows()).as("sku rows").isZero();
     }
 
-    /** U3, Z1: the key check (interceptor) runs before the skuId check, so a bad key wins with 400. */
+    /** U3, A33: the service checks the key before the skuId, so a bad key wins with 400. */
     @Test
     void badKeyWinsOverBadSkuIdOnPurchase() throws Exception {
         assertText(purchase("-bad", 1, "nope"), 400, INVALID_REQUEST);
@@ -461,7 +461,7 @@ class IdempotencyApiIntegrationTest {
         assertNothingWritten();
     }
 
-    /** S2, U3, Z1: with a valid key, a malformed skuId on purchase is 404 before the claim; nothing is stored. */
+    /** S2, U3, A33: with a valid key, a malformed skuId on purchase is 404 before the claim; nothing is stored. */
     @Test
     void validKeyBadSkuIdOnPurchase404() throws Exception {
         String key = newKey();
@@ -472,7 +472,7 @@ class IdempotencyApiIntegrationTest {
         assertNothingWritten();
     }
 
-    /** S2, U3, Z1: with a valid key, a malformed skuId on create is 400 before the claim; nothing is stored. */
+    /** S2, U3, A33: with a valid key, a malformed skuId on create is 400 before the claim; nothing is stored. */
     @Test
     void validKeyBadSkuIdOnCreate400() throws Exception {
         String key = newKey();

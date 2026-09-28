@@ -4,18 +4,16 @@ import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import com.kgtech.inventoryapi.idempotency.Fingerprinted;
-
 /**
  * The v2 create request (DESIGN-V2 §8 "Create"): the details plus optional initial stock. Its fingerprint is the
- * canonical, length-prefixed rendering of every field (Y3, A29), so two requests replay only when they are the same
- * request, and a newline inside a value cannot collide with a field boundary.
+ * canonical, length-prefixed rendering of every field (Y3, A29, A33), so two requests replay only when they are the
+ * same request, and a newline inside a value cannot collide with a field boundary.
  */
 @Schema(name = "CreateSkuRequest")
 public record CreateSku(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED) SkuDetails details,
         @Schema(description = "Stock to record at creation (absent or null means 0), through the same ledger as an add",
-                minimum = "0", defaultValue = "0") Integer initialQuantity) implements Fingerprinted {
+                minimum = "0", defaultValue = "0") Integer initialQuantity) {
 
     public CreateSku {
         if (details == null) {
@@ -27,8 +25,8 @@ public record CreateSku(
         }
     }
 
-    @Override
-    public String fingerprint() {
+    /** The canonical request hashed against an Idempotency-Key; built from the parsed request, never the raw body. */
+    String fingerprint() {
         StringBuilder out = new StringBuilder();
         field(out, details.name());
         field(out, details.description());

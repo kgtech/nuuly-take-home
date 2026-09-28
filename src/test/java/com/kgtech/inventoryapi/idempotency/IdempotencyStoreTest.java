@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import com.kgtech.inventoryapi.Tables;
@@ -15,14 +18,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
 
 /**
- * R2, G14, S8, T1, Y4: claim, replay, mismatch and expiry against Postgres, with {@code execute} run inside a
- * READ COMMITTED TransactionTemplate as the @Idempotent interceptor runs it (DESIGN-V2 §2). Not @Transactional: each
- * call commits.
+ * R2, G14, S8, T1, Y4, A33: claim, replay, mismatch and expiry against Postgres through {@code run}, which opens its
+ * own READ COMMITTED transaction or joins the caller's (DESIGN-V2 §2). Not @Transactional: each call commits.
  */
 @IntegrationTest
 class IdempotencyStoreTest {
@@ -51,19 +55,35 @@ class IdempotencyStoreTest {
         actionRuns.set(0);
     }
 
-    private KeyedResult execute(IdempotentRequest request, Supplier<StoredResponse> action) {
-        return transaction.execute(status -> store.execute(request, action));
+    /** A keyed write as InventoryService passes it: the spec POSTs' canonical request is the quantity's digits. */
+    private record Request(UUID key, Operation operation, String skuId, String canonicalRequest) {
+
+        byte[] requestHash() {
+            return RequestHash.of(operation, skuId, canonicalRequest);
+        }
     }
 
-    private KeyedResult execute(IdempotentRequest request, StoredResponse response) {
+    private Keyed execute(Request request, Supplier<StoredResponse> action) {
+        return store.run(request.key(), request.operation(), request.skuId(), request.canonicalRequest(), action);
+    }
+
+    private Keyed execute(Request request, StoredResponse response) {
         return execute(request, () -> {
             actionRuns.incrementAndGet();
             return response;
         });
     }
 
-    private static IdempotentRequest add(UUID key, String skuId, int quantity) {
-        return IdempotentRequest.of(key, Operation.ADD, skuId, quantity);
+    private static Request add(UUID key, String skuId, int quantity) {
+        return new Request(key, Operation.ADD, skuId, Integer.toString(quantity));
+    }
+
+    private static Request purchase(UUID key, String skuId, int quantity) {
+        return new Request(key, Operation.PURCHASE, skuId, Integer.toString(quantity));
+    }
+
+    private static void assertResponse(Keyed result, StoredResponse expected) {
+        assertThat(result).isEqualTo(new Keyed.Response(expected));
     }
 
     private Map<String, Object> row(UUID key) {
@@ -86,9 +106,9 @@ class IdempotencyStoreTest {
     @Test
     void firstExecuteClaimsRunsActionAndStores() {
         UUID key = UUID.randomUUID();
-        IdempotentRequest request = add(key, "widget", 5);
+        Request request = add(key, "widget", 5);
 
-        assertThat(execute(request, OK)).isInstanceOfSatisfying(KeyedResult.Executed.class, e -> assertThat(e.response()).isEqualTo(OK));
+        assertResponse(execute(request, OK), OK);
 
         assertThat(actionRuns).hasValue(1);
         Map<String, Object> row = row(key);
@@ -105,9 +125,9 @@ class IdempotencyStoreTest {
         UUID key = UUID.randomUUID();
         execute(add(key, "widget", 5), OK);
 
-        KeyedResult replay = execute(add(key, "widget", 5), new StoredResponse(400, "text/plain", "changed"));
+        Keyed replay = execute(add(key, "widget", 5), new StoredResponse(400, "text/plain", "changed"));
 
-        assertThat(replay).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(OK));
+        assertResponse(replay, OK);
         assertThat(actionRuns).hasValue(1);
         assertThat(rows()).isEqualTo(1);
     }
@@ -117,18 +137,18 @@ class IdempotencyStoreTest {
     void storedErrorReplaysUnchanged() {
         UUID key = UUID.randomUUID();
         StoredResponse notFound = new StoredResponse(404, "text/plain", "SKU not found");
-        IdempotentRequest request = IdempotentRequest.of(key, Operation.PURCHASE, "ghost", 1);
+        Request request = purchase(key, "ghost", 1);
         execute(request, notFound);
 
-        assertThat(execute(request, OK)).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(notFound));
+        assertResponse(execute(request, OK), notFound);
         assertThat(actionRuns).hasValue(1);
     }
 
-    private void assertRejectedAndUnchanged(UUID key, IdempotentRequest reuse) {
+    private void assertRejectedAndUnchanged(UUID key, Request reuse) {
         Map<String, Object> before = row(key);
 
         assertThat(execute(reuse, new StoredResponse(200, "application/json", "other")))
-                .isInstanceOf(KeyedResult.Rejected.class);
+                .isEqualTo(new Keyed.Invalid());
 
         assertThat(actionRuns).as("action runs").hasValue(1);
         Map<String, Object> after = row(key);
@@ -169,7 +189,7 @@ class IdempotencyStoreTest {
         UUID key = UUID.randomUUID();
         execute(add(key, "widget", 5), OK);
 
-        assertRejectedAndUnchanged(key, IdempotentRequest.of(key, Operation.PURCHASE, "widget", 5));
+        assertRejectedAndUnchanged(key, purchase(key, "widget", 5));
     }
 
     /** T1: a key older than 24h is rejected even with the same request, and is never reused. */
@@ -191,13 +211,13 @@ class IdempotencyStoreTest {
         UUID key = UUID.randomUUID();
         execute(add(key, "widget", 5), OK);
 
-        KeyedResult result = transaction.execute(status -> {
+        Keyed result = transaction.execute(status -> {
             jdbc.sql("UPDATE idempotency_keys SET created_at = now() - interval '24 hours' WHERE idempotency_key = ?")
                     .param(key).update();
-            return store.execute(add(key, "widget", 5), () -> OK);
+            return execute(add(key, "widget", 5), () -> OK);
         });
 
-        assertThat(result).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(OK));
+        assertResponse(result, OK);
     }
 
     @Test
@@ -206,7 +226,7 @@ class IdempotencyStoreTest {
         execute(add(key, "widget", 5), OK);
         backdate(key, "23 hours 59 minutes");
 
-        assertThat(execute(add(key, "widget", 5), OK)).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(OK));
+        assertResponse(execute(add(key, "widget", 5), OK), OK);
         assertThat(actionRuns).hasValue(1);
     }
 
@@ -220,37 +240,70 @@ class IdempotencyStoreTest {
         })).isInstanceOf(IllegalStateException.class).hasMessage("boom");
 
         assertThat(rows()).isZero();
-        assertThat(execute(add(key, "widget", 5), OK)).isInstanceOfSatisfying(KeyedResult.Executed.class, e -> assertThat(e.response()).isEqualTo(OK));
+        assertResponse(execute(add(key, "widget", 5), OK), OK);
     }
 
+    /** Without a caller's transaction, run opens its own at READ COMMITTED and commits it (A33). */
     @Test
-    void executeOutsideTransactionThrows() {
+    void runOutsideATransactionOpensAReadCommittedOne() {
         UUID key = UUID.randomUUID();
+        AtomicBoolean active = new AtomicBoolean();
+        AtomicReference<Integer> isolation = new AtomicReference<>();
 
-        assertThatThrownBy(() -> store.execute(add(key, "widget", 5), () -> {
-            actionRuns.incrementAndGet();
+        assertResponse(execute(add(key, "widget", 5), () -> {
+            active.set(TransactionSynchronizationManager.isActualTransactionActive());
+            isolation.set(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
             return OK;
-        })).isInstanceOf(IllegalStateException.class);
+        }), OK);
 
-        assertThat(actionRuns).hasValue(0);
-        assertThat(rows()).isZero();
+        assertThat(active).isTrue();
+        assertThat(isolation).hasValue(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        assertThat(rows()).isEqualTo(1);
     }
 
     /**
-     * A committed row without a response is a tombstone: the README's clean-up cleared it (#56, C-16). The key stays
-     * used up (400), whether or not the row is older than 24h, and the action never runs.
+     * A33 (PROPAGATION_REQUIRED): inside a caller's transaction, run joins it instead of suspending it. The write runs
+     * in the caller's Postgres transaction, and the caller's rollback takes the claim and the stored response with it.
+     */
+    @Test
+    void runInsideAnOuterTransactionJoinsIt() {
+        UUID key = UUID.randomUUID();
+        AtomicLong writeTransaction = new AtomicLong();
+
+        long outerTransaction = transaction.execute(status -> {
+            long outer = currentTransactionId();
+            execute(add(key, "widget", 5), () -> {
+                writeTransaction.set(currentTransactionId());
+                return OK;
+            });
+            assertThat(rows()).as("the claim, visible to the caller before it commits").isEqualTo(1);
+            status.setRollbackOnly();
+            return outer;
+        });
+
+        assertThat(writeTransaction).hasValue(outerTransaction);
+        assertThat(rows()).as("rolled back with the caller").isZero();
+    }
+
+    private long currentTransactionId() {
+        return jdbc.sql("SELECT txid_current()").query(Long.class).single();
+    }
+
+    /**
+     * A committed row without a response is a tombstone: the README's retention clean-up cleared it (#56, C-16, A18).
+     * The key stays used up (400), whether or not the row is older than 24h, and the action never runs.
      */
     @Test
     void tombstonedRowIsRejectedNotReplayed() {
         UUID key = UUID.randomUUID();
-        IdempotentRequest request = add(key, "widget", 5);
+        Request request = add(key, "widget", 5);
         execute(request, OK);
         jdbc.sql("UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL WHERE idempotency_key = ?")
                 .param(key).update();
 
-        assertThat(execute(request, OK)).isInstanceOf(KeyedResult.Rejected.class);
+        assertThat(execute(request, OK)).isEqualTo(new Keyed.Invalid());
         backdate(key, "25 hours");
-        assertThat(execute(request, OK)).isInstanceOf(KeyedResult.Rejected.class);
+        assertThat(execute(request, OK)).isEqualTo(new Keyed.Invalid());
         assertThat(actionRuns).hasValue(1);
     }
 }

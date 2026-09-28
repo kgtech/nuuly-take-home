@@ -2,22 +2,35 @@ package com.kgtech.inventoryapi.idempotency;
 
 import java.security.MessageDigest;
 import java.time.Duration;
-import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Claims, completes and replays Idempotency-Keys inside the caller's READ COMMITTED transaction (R2, G14, DESIGN-V2
- * §2). A concurrent claim of the same key blocks on the primary key until the first transaction ends, then finds the
- * committed row and replays it. A {@code @Component}, not a {@code @Repository}: persistence exception translation
- * would turn the documented IllegalStateException (and any exception from the action) into
- * InvalidDataAccessApiUsageException.
+ * Runs a keyed write once (R2, G14, DESIGN-V2 §2, A33): claims the Idempotency-Key, runs the write and stores its
+ * response in one READ COMMITTED transaction, joining the caller's when there is one. A concurrent claim of the same
+ * key blocks on the primary key until the first transaction ends, then finds the committed row and replays it. A
+ * {@code @Component}, not a {@code @Repository}: persistence exception translation would turn the write's own
+ * exceptions into InvalidDataAccessApiUsageException.
  */
 @Component
-class IdempotencyStore {
+public class IdempotencyStore {
+
+    /** A keyed write's answer: the stored response, first run or replay alike, or 400 "Invalid request". */
+    public sealed interface Keyed {
+
+        record Response(StoredResponse response) implements Keyed {
+        }
+
+        /** Different operation, skuId or request (S8), older than 24h (T1), or a cleared response (A18). */
+        record Invalid() implements Keyed {
+        }
+    }
 
     /** R2: claim the key; no row back means it already exists. */
     static final String CLAIM = """
@@ -44,77 +57,73 @@ class IdempotencyStore {
             """;
 
     private final JdbcClient jdbc;
+    private final TransactionTemplate transaction;
 
-    IdempotencyStore(JdbcClient jdbc) {
+    IdempotencyStore(JdbcClient jdbc, PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
+        this.transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
     /**
-     * Must run inside an active transaction, else IllegalStateException. Claim → action → store → Executed. No claim
-     * row: expired → Rejected; different operation, skuId or hash → Rejected; else Replayed. A missing or incomplete
-     * stored row → IllegalStateException.
+     * Claimed → write → store → Response. Not claimed → the stored Response, or Invalid (see
+     * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3). A
+     * runtime exception from the write escapes unchanged and rolls the claim back.
      */
-    KeyedResult execute(IdempotentRequest request, Supplier<StoredResponse> action) {
-        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
-            throw new IllegalStateException("IdempotencyStore.execute needs an active transaction");
-        }
-        byte[] hash = request.requestHash();
-        if (claim(request, hash)) {
-            StoredResponse response = action.get();
-            complete(request, response);
-            return new KeyedResult.Executed(response);
-        }
-        StoredRow row = stored(request).orElseThrow(
-                () -> new IllegalStateException("Idempotency-Key " + request.key() + " neither claimed nor stored"));
-        if (row.expired()
-                || !row.operation().equals(request.operation().dbValue())
-                || !row.skuId().equals(request.skuId())
-                || !MessageDigest.isEqual(row.requestHash(), hash)) {
-            return new KeyedResult.Rejected();
-        }
-        StoredResponse response = row.response();
-        if (response == null) {
-            // A committed row without a response is a tombstone (the README's clean-up ran early): the key is used up.
-            return new KeyedResult.Rejected();
-        }
-        return new KeyedResult.Replayed(response);
+    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+            Supplier<StoredResponse> write) {
+        byte[] hash = RequestHash.of(operation, skuId, canonicalRequest);
+        return transaction.execute(status -> {
+            if (!claim(key, operation, skuId, hash)) {
+                return replay(key, operation, skuId, hash);
+            }
+            StoredResponse response = write.get();
+            complete(key, response);
+            return new Keyed.Response(response);
+        });
     }
 
-    private boolean claim(IdempotentRequest request, byte[] hash) {
+    private boolean claim(UUID key, Operation operation, String skuId, byte[] hash) {
         return jdbc.sql(CLAIM)
-                .param("key", request.key())
-                .param("operation", request.operation().dbValue())
-                .param("skuId", request.skuId())
+                .param("key", key)
+                .param("operation", operation.dbValue())
+                .param("skuId", skuId)
                 .param("hash", hash)
                 .query((rs, n) -> rs.getObject(1))
                 .optional()
                 .isPresent();
     }
 
-    private Optional<StoredRow> stored(IdempotentRequest request) {
+    private Keyed replay(UUID key, Operation operation, String skuId, byte[] hash) {
         return jdbc.sql(STORED)
-                .param("key", request.key())
+                .param("key", key)
                 .param("validitySeconds", KEY_VALIDITY.toSeconds())
-                .query((rs, n) -> new StoredRow(
-                        rs.getString("operation"),
-                        rs.getString("sku_id"),
-                        rs.getBytes("request_hash"),
-                        rs.getObject("status", Integer.class),
-                        rs.getString("content_type"),
-                        rs.getString("body"),
-                        rs.getBoolean("expired")))
-                .optional();
+                .<Keyed>query((rs, n) -> {
+                    boolean sameRequest = rs.getString("operation").equals(operation.dbValue())
+                            && rs.getString("sku_id").equals(skuId)
+                            && MessageDigest.isEqual(rs.getBytes("request_hash"), hash);
+                    Integer status = rs.getObject("status", Integer.class);
+                    // A committed row without a response was cleared by the README's retention clean-up: used up (A18).
+                    if (rs.getBoolean("expired") || !sameRequest || status == null) {
+                        return new Keyed.Invalid();
+                    }
+                    return new Keyed.Response(
+                            new StoredResponse(status, rs.getString("content_type"), rs.getString("body")));
+                })
+                .optional()
+                .orElseThrow(() -> new IllegalStateException("Idempotency-Key " + key + " neither claimed nor stored"));
     }
 
-    private void complete(IdempotentRequest request, StoredResponse response) {
+    private void complete(UUID key, StoredResponse response) {
         int updated = jdbc.sql(COMPLETE)
-                .param("key", request.key())
+                .param("key", key)
                 .param("status", response.status())
                 .param("contentType", response.contentType())
                 .param("body", response.body())
                 .update();
         if (updated != 1) {
-            throw new IllegalStateException("Idempotency-Key " + request.key() + " was not completed");
+            throw new IllegalStateException("Idempotency-Key " + key + " was not completed");
         }
     }
 }

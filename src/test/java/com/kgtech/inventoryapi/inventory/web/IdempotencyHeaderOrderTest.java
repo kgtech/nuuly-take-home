@@ -33,10 +33,10 @@ import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 
 /**
- * U3, S3, G8, Z1 at the controller: @Valid runs first; after that the controller passes the raw skuId and the raw
+ * U3, S3, G8, A33 at the controller: @Valid runs first; after that the controller passes the raw skuId and the raw
  * Idempotency-Key header (null when absent) to the service and renders the WriteResult it gets back. Key and skuId
- * checks live in the @Idempotent interceptor and the service (IdempotencyInterceptorTest, InventoryServiceTest,
- * IdempotencyApiIntegrationTest). The service is a mock, so no advice and no database are involved.
+ * checks live in the service (InventoryServiceWriteChecksTest, InventoryServiceTest, IdempotencyApiIntegrationTest).
+ * The service is a mock, so no database is involved.
  */
 @WebMvcTest(InventoryController.class)
 @Import(OutcomeResponses.class)
@@ -124,7 +124,7 @@ class IdempotencyHeaderOrderTest {
     }
 
     /**
-     * S2, S3, Z1: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. A
+     * S2, S3, A33: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. A
      * valid, an empty, a non-UUID and an upper-case key, and a malformed skuId, are enough: the full key and skuId
      * matrices live in IdempotencyKeyTest and SkuIdTest.
      */
@@ -142,7 +142,7 @@ class IdempotencyHeaderOrderTest {
         op.verifyCalled(service, skuId, 1, key);
     }
 
-    /** Two header values reach the service as one comma-joined string, which the interceptor rejects. */
+    /** Two header values reach the service as one comma-joined string, which the service rejects. */
     @ParameterizedTest
     @EnumSource(Post.class)
     void duplicateKeyHeadersPassedThroughJoined(Post op) throws Exception {
