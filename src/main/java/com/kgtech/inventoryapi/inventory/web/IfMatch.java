@@ -60,12 +60,16 @@ final class IfMatch {
         return Optional.of(new DetailsPrecondition.Versions(versions));
     }
 
-    /** A non-negative decimal of at most 18 digits; anything else is a tag this server never issued. */
+    /**
+     * Exactly the digits this server issues (no leading zeros, at most 18 digits): strong comparison is byte-wise
+     * (RFC 9110 §8.8.3.2), so "01" is a tag this server never issued and never matches (review R-04).
+     */
     private static Optional<Long> version(String tag) {
         if (tag.isEmpty() || tag.length() > 18 || !tag.chars().allMatch(ch -> ch >= '0' && ch <= '9')) {
             return Optional.empty();
         }
-        return Optional.of(Long.parseLong(tag));
+        long value = Long.parseLong(tag);
+        return Long.toString(value).equals(tag) ? Optional.of(value) : Optional.empty();
     }
 
     static String etag(long version) {

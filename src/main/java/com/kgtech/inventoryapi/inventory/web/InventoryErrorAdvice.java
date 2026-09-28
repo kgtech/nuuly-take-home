@@ -41,9 +41,9 @@ class InventoryErrorAdvice {
             .map(PathPatternParser.defaultInstance::parse)
             .toList();
 
-    /** Malformed or missing body, failed @Valid, wrong or missing Content-Type: 400, not 415 (G3, G13). */
+    /** Malformed, missing or oversized body, failed @Valid, wrong or missing Content-Type: 400, not 415 (G3, G13). */
     @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentNotValidException.class,
-            HttpMediaTypeNotSupportedException.class})
+            HttpMediaTypeNotSupportedException.class, BodyTooLargeException.class})
     ResponseEntity<String> invalidRequest(Exception ex, HttpServletRequest request) throws Exception {
         leaveLibraryPathsToSpring(ex, request);
         log.debug("Invalid request: {}", ex.getMessage());

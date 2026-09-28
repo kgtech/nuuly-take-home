@@ -79,6 +79,11 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
                 write(response, TextErrors.invalidRequest()); // larger than any body the contract describes
                 return;
             }
+            if (write && routed.v2()) {
+                // A chunked body has no Content-Length: count it as it is read (review R-01).
+                chain.doFilter(new CappedBodyRequest(request, cap), response);
+                return;
+            }
         }
         chain.doFilter(request, response);
     }

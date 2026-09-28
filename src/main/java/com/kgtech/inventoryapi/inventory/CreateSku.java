@@ -14,7 +14,7 @@ import com.kgtech.inventoryapi.idempotency.Fingerprinted;
 @Schema(name = "CreateSkuRequest")
 public record CreateSku(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED) SkuDetails details,
-        @Schema(description = "Stock to record at creation (default 0), through the same ledger as an add",
+        @Schema(description = "Stock to record at creation (absent or null means 0), through the same ledger as an add",
                 minimum = "0", defaultValue = "0") Integer initialQuantity) implements Fingerprinted {
 
     public CreateSku {

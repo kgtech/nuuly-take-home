@@ -242,6 +242,12 @@ class SkuDetailsApiIntegrationTest {
                 Arguments.of("2049-char image url", createBody("{\"name\":\"n\",\"images\":[\"" + longUrl + "\"]}",
                         null)),
                 Arguments.of("null image", createBody("{\"name\":\"n\",\"images\":[null]}", null)),
+                Arguments.of("NUL in name", createBody("{\"name\":\"a\\u0000b\"}", null)),
+                Arguments.of("NUL in description", createBody("{\"name\":\"n\",\"description\":\"a\\u0000b\"}", null)),
+                Arguments.of("newline in name", createBody("{\"name\":\"a\\nb\"}", null)),
+                Arguments.of("lone surrogate", createBody("{\"name\":\"a\\ud800b\"}", null)),
+                Arguments.of("non-ascii image url", createBody("{\"name\":\"n\",\"images\":[\"https://x/\u00fc.jpg\"]}", null)),
+                Arguments.of("currency without amount", createBody("{\"name\":\"n\",\"cost\":{\"currency\":\"USD\"}}", null)),
                 Arguments.of("negative initial quantity", createBody("{\"name\":\"n\"}", -1)),
                 Arguments.of("initial quantity above int32", "{\"details\":{\"name\":\"n\"},\"initialQuantity\":2147483648}"),
                 Arguments.of("string initial quantity", "{\"details\":{\"name\":\"n\"},\"initialQuantity\":\"5\"}"),
@@ -261,6 +267,19 @@ class SkuDetailsApiIntegrationTest {
     void unknownPropertiesAreIgnored() throws Exception {
         String body = "{\"details\":{\"name\":\"n\",\"colour\":\"red\"},\"initialQuantity\":1,\"extra\":true}";
         assertThat(create("NEW-2", body, null).status()).isEqualTo(201);
+    }
+
+    /** R-07: an explicit null initialQuantity or cost means absent (0, no cost); a newline in a description is text. */
+    @Test
+    void nullOptionalsMeanAbsentAndDescriptionsMayHoldNewlines() throws Exception {
+        Reply reply = create("NEW-3", "{\"details\":{\"name\":\"n\",\"description\":\"line 1\\nline 2\\tend\","
+                + "\"cost\":null},\"initialQuantity\":null}", null);
+
+        assertThat(reply.status()).as(reply.body()).isEqualTo(201);
+        assertThat(json(reply)).containsEntry("quantity", 0);
+        assertThat(JsonPath.<Map<String, Object>>read(reply.body(), "$.details")).doesNotContainKey("cost");
+        assertThat(JsonPath.<String>read(reply.body(), "$.details.description")).isEqualTo("line 1\nline 2\tend");
+        assertThat(ledgerRows("NEW-3")).isZero();
     }
 
     @Test
@@ -287,6 +306,15 @@ class SkuDetailsApiIntegrationTest {
         assertThat(ledgerRows("K-1")).isEqualTo(1);
         assertThat(redis.<String, String>opsForHash().get("idem:" + key, "status")).as("Redis replay copy")
                 .isEqualTo("201");
+
+        // R-06b: tombstone the Postgres row (the README's clean-up); the next replay can only come from Redis.
+        jdbc.sql("UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL "
+                + "WHERE idempotency_key = ?::uuid").param(key).update();
+        Reply fromRedis = create("K-1", createBody(DETAILS, 4), key);
+        assertThat(fromRedis.status()).isEqualTo(201);
+        assertThat(fromRedis.body()).isEqualTo(first.body());
+        assertThat(fromRedis.etag()).isEqualTo("\"1\"");
+        assertThat(ledgerRows("K-1")).isEqualTo(1);
     }
 
     @Test
@@ -301,6 +329,9 @@ class SkuDetailsApiIntegrationTest {
         assertThat(replay.body()).isEqualTo(first.body());
         assertThat(replay.contentType()).isEqualTo(first.contentType());
         assertThat(redis.<String, String>opsForHash().get("idem:" + key, "status")).isEqualTo("409");
+        jdbc.sql("UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL "
+                + "WHERE idempotency_key = ?::uuid").param(key).update();
+        assertText(create("K-2", createBody(DETAILS, 2), key), 409, SKU_EXISTS);
     }
 
     static Stream<Arguments> differentRequests() {
@@ -390,6 +421,7 @@ class SkuDetailsApiIntegrationTest {
         assertThat(replace("P-2", OTHER_DETAILS, "*").status()).as("any").isEqualTo(200);
         assertThat(getV2("P-2").etag()).isEqualTo("\"4\"");
         assertText(replace("P-2", DETAILS, "W/\"4\""), 412, DETAILS_CHANGED);
+        assertText(replace("P-2", DETAILS, "\"04\""), 412, DETAILS_CHANGED); // R-04: byte-wise strong comparison
         assertText(replace("P-2", DETAILS, "\"abc\""), 412, DETAILS_CHANGED);
         assertText(replace("P-2", DETAILS, "4"), 400, INVALID_REQUEST);
         assertText(replace("P-2", DETAILS, "\"4"), 400, INVALID_REQUEST);
@@ -477,6 +509,25 @@ class SkuDetailsApiIntegrationTest {
             assertThat(v2.get(i).get("skuId")).isEqualTo(v1.get(i).get("skuId"));
             assertThat(v2.get(i).get("quantity")).isEqualTo(v1.get(i).get("quantity"));
         }
+    }
+
+    /** C2 for v2 (R-06c): more than 250 SKUs page at 250 with a Link on /v2/inventory; following it visits every SKU. */
+    @Test
+    void listV2DefaultsTo250AndTheLinkVisitsEverySku() throws Exception {
+        for (int i = 0; i < 251; i++) {
+            jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(String.format("P-%03d", i)).update();
+        }
+        MockHttpServletResponse first = mvc.perform(get("/v2/inventory").accept(APPLICATION_JSON)).andReturn()
+                .getResponse();
+        List<String> ids = JsonPath.read(first.getContentAsString(), "$[*].skuId");
+        assertThat(ids).hasSize(250);
+        assertThat(first.getHeader(LINK)).isEqualTo("<http://localhost/v2/inventory?limit=250&after=P-249>; rel=\"next\"");
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("<([^>]+)>").matcher(first.getHeader(LINK));
+        assertThat(m.find()).isTrue();
+        MockHttpServletResponse second = mvc.perform(get(java.net.URI.create(m.group(1))).accept(APPLICATION_JSON))
+                .andReturn().getResponse();
+        assertThat(JsonPath.<List<String>>read(second.getContentAsString(), "$[*].skuId")).containsExactly("P-250");
+        assertThat(second.getHeader(LINK)).isNull();
     }
 
     @Test

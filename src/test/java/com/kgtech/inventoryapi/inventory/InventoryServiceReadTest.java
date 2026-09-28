@@ -27,8 +27,19 @@ import com.kgtech.inventoryapi.cache.StockCache;
 class InventoryServiceReadTest {
 
     private final StockRepository stock = mock(StockRepository.class);
-    private final InventoryService service = new InventoryService(stock, mock(DetailsRepository.class),
-            mock(StockCache.class), mock(PlatformTransactionManager.class));
+    private final DetailsRepository details = mock(DetailsRepository.class);
+    private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
+    private final InventoryService service = new InventoryService(stock, details, mock(StockCache.class),
+            transactions);
+
+    /** C3 for v2 (review R-06e): a malformed skuId is answered before any repository or transaction access. */
+    @org.junit.jupiter.api.Test
+    void v2ReadAndReplaceWithAMalformedSkuIdTouchNothing() {
+        assertThat(service.findSku("bad id")).isEmpty();
+        assertThat(service.replaceDetails("bad id", new SkuDetails("n", "", java.util.Optional.empty(), List.of()),
+                new DetailsPrecondition.Any())).isInstanceOf(ReplaceResult.InvalidRequest.class);
+        org.mockito.Mockito.verifyNoInteractions(details, transactions);
+    }
 
     private InventoryPage list(String limit, String after) {
         when(stock.page(anyString(), anyLong())).thenReturn(List.of());

@@ -107,8 +107,13 @@ public class InventoryService {
         return transaction.execute(status -> details.replace(skuId, replacement, precondition)
                 .<ReplaceResult>map(version -> new ReplaceResult.Replaced(details.find(skuId)
                         .orElseThrow(() -> new IllegalStateException("replaced details vanished: " + skuId))))
-                .orElseGet(() -> details.exists(skuId) ? new ReplaceResult.VersionMismatch()
-                        : new ReplaceResult.NotFound()));
+                .orElseGet(() -> switch (precondition) {
+                    // Unconditional: the only way to get no row is a missing SKU; no probe, so a create that commits
+                    // between the two statements can never turn it into a 412 (review R-03).
+                    case DetailsPrecondition.Any _ -> new ReplaceResult.NotFound();
+                    case DetailsPrecondition.Versions _ -> details.exists(skuId) ? new ReplaceResult.VersionMismatch()
+                            : new ReplaceResult.NotFound();
+                }));
     }
 
     /** DESIGN-V2 §8 "Reads": G11 first, then one join; never the stock cache (A27). */

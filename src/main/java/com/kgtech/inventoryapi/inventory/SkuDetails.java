@@ -22,7 +22,7 @@ public record SkuDetails(
         String description,
         @Schema(implementation = SkuCost.class) Optional<SkuCost> cost,
         @ArraySchema(maxItems = SkuDetails.MAX_IMAGES, arraySchema = @Schema(
-                description = "Up to 10 absolute http or https URLs; default []"),
+                description = "Up to 10 absolute http or https URLs in ASCII (percent-encoded); default []"),
                 schema = @Schema(type = "string", format = "uri", maxLength = SkuDetails.MAX_URL))
         List<String> images) {
 
@@ -35,10 +35,12 @@ public record SkuDetails(
         if (name == null || name.isBlank() || name.length() > MAX_NAME) {
             throw new IllegalArgumentException("name must be 1 to " + MAX_NAME + " characters and not blank");
         }
+        requirePrintable(name, false);
         description = description == null ? "" : description;
         if (description.length() > MAX_DESCRIPTION) {
             throw new IllegalArgumentException("description must be at most " + MAX_DESCRIPTION + " characters");
         }
+        requirePrintable(description, true);
         cost = cost == null ? Optional.empty() : cost;
         images = images == null ? List.of() : List.copyOf(images);
         if (images.size() > MAX_IMAGES) {
@@ -49,7 +51,33 @@ public record SkuDetails(
         }
     }
 
-    /** An absolute http or https URL of at most 2048 characters (no spaces or control characters: URI rejects them). */
+    /**
+     * No control characters (a newline and a tab are allowed in a description) and no unpaired surrogate: Postgres
+     * text cannot hold NUL and a lone surrogate cannot be encoded, and either would answer 500 instead of 400
+     * (review R-02). Lengths are UTF-16 units, the same as the JSON string's length in JavaScript.
+     */
+    private static void requirePrintable(String value, boolean multiline) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            boolean allowed = c >= 0x20 && c != 0x7F || multiline && (c == '\n' || c == '\t');
+            if (!allowed) {
+                throw new IllegalArgumentException("control character in text");
+            }
+            if (Character.isHighSurrogate(c)) {
+                if (i + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(i + 1))) {
+                    throw new IllegalArgumentException("unpaired surrogate in text");
+                }
+                i++;
+            } else if (Character.isLowSurrogate(c)) {
+                throw new IllegalArgumentException("unpaired surrogate in text");
+            }
+        }
+    }
+
+    /**
+     * An absolute http or https URL of at most 2048 ASCII characters (percent-encoded; review R-05), so its byte
+     * length is its length and the 32 KB body cap always fits a contract-valid body. URI rejects spaces and controls.
+     */
     private static void requireAbsoluteHttpUrl(String image) {
         if (image.length() > MAX_URL) {
             throw new IllegalArgumentException("image URL longer than " + MAX_URL);
@@ -63,6 +91,9 @@ public record SkuDetails(
         String scheme = uri.getScheme();
         if (!uri.isAbsolute() || !("http".equals(scheme) || "https".equals(scheme)) || uri.getHost() == null) {
             throw new IllegalArgumentException("image must be an absolute http or https URL");
+        }
+        if (!uri.toASCIIString().equals(image)) {
+            throw new IllegalArgumentException("image URL must be ASCII (percent-encoded)");
         }
     }
 }

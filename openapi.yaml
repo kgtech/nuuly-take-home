@@ -405,8 +405,8 @@ components:
           type: integer
           format: int32
           default: 0
-          description: "Stock to record at creation (default 0), through the same\
-            \ ledger as an add"
+          description: "Stock to record at creation (absent or null means 0), through\
+            \ the same ledger as an add"
           minimum: 0
       required:
       - details
@@ -455,7 +455,8 @@ components:
           maxLength: 2000
         images:
           type: array
-          description: "Up to 10 absolute http or https URLs; default []"
+          description: "Up to 10 absolute http or https URLs in ASCII (percent-encoded);\
+            \ default []"
           items:
             type: string
             format: uri

@@ -26,6 +26,8 @@ class IfMatchTest {
                 Arguments.of(List.of("\"abc\""), Optional.of(new DetailsPrecondition.Versions(List.of()))),
                 Arguments.of(List.of("\"3\", W/\"4\", \"x\""), Optional.of(new DetailsPrecondition.Versions(List.of(3L)))),
                 Arguments.of(List.of("\"-1\""), Optional.of(new DetailsPrecondition.Versions(List.of()))),
+                Arguments.of(List.of("\"01\""), Optional.of(new DetailsPrecondition.Versions(List.of()))),
+                Arguments.of(List.of("\"0\""), Optional.of(new DetailsPrecondition.Versions(List.of(0L)))),
                 Arguments.of(List.of("\"99999999999999999999\""), Optional.of(new DetailsPrecondition.Versions(List.of()))),
                 Arguments.of(List.of("3"), Optional.empty()),
                 Arguments.of(List.of("\"3"), Optional.empty()),

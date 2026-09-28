@@ -37,6 +37,18 @@ class SkuDetailsTest {
                         List.of("https://x/a b.jpg"))),
                 Arguments.of("2049-char url", (Runnable) () -> new SkuDetails("n", "", Optional.empty(),
                         List.of("https://x/" + "a".repeat(2039)))),
+                Arguments.of("newline in url", (Runnable) () -> new SkuDetails("n", "", Optional.empty(),
+                        List.of("https://x/a\nb.jpg"))),
+                Arguments.of("non-ascii url", (Runnable) () -> new SkuDetails("n", "", Optional.empty(),
+                        List.of("https://x/\u00fc.jpg"))),
+                Arguments.of("NUL in name", (Runnable) () -> new SkuDetails("a\u0000b", "", Optional.empty(), List.of())),
+                Arguments.of("newline in name", (Runnable) () -> new SkuDetails("a\nb", "", Optional.empty(), List.of())),
+                Arguments.of("DEL in description", (Runnable) () -> new SkuDetails("n", "a\u007fb", Optional.empty(),
+                        List.of())),
+                Arguments.of("lone high surrogate", (Runnable) () -> new SkuDetails("a\ud800", "", Optional.empty(),
+                        List.of())),
+                Arguments.of("lone low surrogate", (Runnable) () -> new SkuDetails("n", "\udc00x", Optional.empty(),
+                        List.of())),
                 Arguments.of("negative amount", (Runnable) () -> new SkuCost(-1, "USD")),
                 Arguments.of("lowercase currency", (Runnable) () -> new SkuCost(1, "usd")),
                 Arguments.of("two-letter currency", (Runnable) () -> new SkuCost(1, "US")),
@@ -59,6 +71,8 @@ class SkuDetailsTest {
         assertThat(new CreateSku(details, 0).initialQuantity()).isZero();
         assertThat(new CreateSku(details, Integer.MAX_VALUE).initialQuantity()).isEqualTo(Integer.MAX_VALUE);
         assertThat(new SkuDetails("n", "", Optional.empty(), List.of()).description()).isEmpty();
+        assertThat(new SkuDetails("Caf\u00e9 \ud83d\ude00", "line\nnext\ttab", Optional.empty(), List.of()).name())
+                .isEqualTo("Caf\u00e9 \ud83d\ude00");
     }
 
     /** Y3 for creates: the canonical form is built field by field; the same request always renders the same. */
@@ -83,8 +97,11 @@ class SkuDetailsTest {
                 .as("no cost").isNotEqualTo(fingerprint);
         assertThat(new CreateSku(new SkuDetails("Shirt", "Long", Optional.of(new SkuCost(5, "USD")), List.of()), 3)
                 .fingerprint()).as("images").isNotEqualTo(fingerprint);
-        // A newline inside a value cannot collide with the field separator: the form is length-prefixed.
-        assertThat(new CreateSku(new SkuDetails("a\nb", "c", Optional.empty(), List.of()), 1).fingerprint())
-                .isNotEqualTo(new CreateSku(new SkuDetails("a", "b\nc", Optional.empty(), List.of()), 1).fingerprint());
+        // A separator-like value cannot collide with a field boundary: the form is length-prefixed.
+        assertThat(new CreateSku(new SkuDetails("n", "1:a\n", Optional.empty(), List.of()), 1).fingerprint())
+                .isNotEqualTo(new CreateSku(new SkuDetails("n", "a", Optional.empty(), List.of()), 1).fingerprint());
+        assertThat(new CreateSku(new SkuDetails("n", "", Optional.empty(), List.of("https://x/a")), 1).fingerprint())
+                .isNotEqualTo(new CreateSku(new SkuDetails("n", "12:https://x/a", Optional.empty(), List.of()), 1)
+                        .fingerprint());
     }
 }
