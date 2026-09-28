@@ -16,7 +16,6 @@ dependencies {
     implementation(platform(SpringBootPlugin.BOM_COORDINATES)) // BOM without a second plugin or version
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.jdbc)
-    implementation(libs.spring.boot.starter.data.redis)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.spring.boot.starter.actuator)
@@ -40,7 +39,6 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.test {
     useJUnitPlatform()
     systemProperty("inventory.test.postgres-image", "postgres:${libs.versions.postgres.get()}")
-    systemProperty("inventory.test.redis-image", "redis:${libs.versions.redis.get()}")
     // ApiDocsTest compares the committed export with the code: an edit to it, or its removal, must re-run the test (D7).
     // inputs.files, not inputs.file, so a missing openapi.yaml reaches the test instead of failing Gradle validation.
     inputs.files("openapi.yaml").withPropertyName("openapiExport").withPathSensitivity(PathSensitivity.RELATIVE)

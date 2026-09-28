@@ -10,15 +10,13 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.kgtech.inventoryapi.cache.AfterCommit;
-import com.kgtech.inventoryapi.cache.StockCache;
 import com.kgtech.inventoryapi.idempotency.Idempotent;
 import com.kgtech.inventoryapi.idempotency.Operation;
 
 /**
  * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2); the
- * Idempotency-Key is handled by the @Idempotent interceptor (Z1). After commit the cached count is refreshed.
- * Reads try the cache, then one row lookup (§3). The v2 details operations (§8) share the transaction template.
+ * Idempotency-Key is handled by the @Idempotent interceptor (Z1). Reads are one row lookup (§9: no cache). The v2
+ * details operations (§8) share the transaction template.
  */
 @Service
 public class InventoryService {
@@ -35,14 +33,11 @@ public class InventoryService {
 
     private final StockRepository stock;
     private final DetailsRepository details;
-    private final StockCache cache;
     private final TransactionTemplate transaction;
 
-    InventoryService(StockRepository stock, DetailsRepository details, StockCache cache,
-            PlatformTransactionManager transactionManager) {
+    InventoryService(StockRepository stock, DetailsRepository details, PlatformTransactionManager transactionManager) {
         this.stock = stock;
         this.details = details;
-        this.cache = cache;
         this.transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
@@ -56,7 +51,7 @@ public class InventoryService {
         }
         requirePositive(quantity);
         return transaction.execute(status -> stock.add(skuId, quantity)
-                .<WriteResult>map(balance -> ok(skuId, balance))
+                .<WriteResult>map(InventoryService::ok)
                 .orElseGet(StockOutcome.Overflow::new));
     }
 
@@ -68,7 +63,7 @@ public class InventoryService {
         }
         requirePositive(quantity);
         return transaction.execute(status -> stock.purchase(skuId, quantity)
-                .<WriteResult>map(balance -> ok(skuId, balance))
+                .<WriteResult>map(InventoryService::ok)
                 .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient() : new StockOutcome.NotFound()));
     }
 
@@ -90,10 +85,9 @@ public class InventoryService {
             long version = details.insert(skuId, request.details());
             long quantity = 0;
             if (request.initialQuantity() > 0) {
-                Balance balance = stock.add(skuId, request.initialQuantity())
-                        .orElseThrow(() -> new IllegalStateException("a new SKU cannot overflow: " + skuId));
-                AfterCommit.run(() -> cache.refresh(skuId, balance.quantity(), balance.version()));
-                quantity = balance.quantity();
+                quantity = stock.add(skuId, request.initialQuantity())
+                        .orElseThrow(() -> new IllegalStateException("a new SKU cannot overflow: " + skuId))
+                        .quantity();
             }
             return new DetailsOutcome.Created(new SkuItem(skuId, quantity, Optional.of(request.details()), version));
         });
@@ -116,7 +110,7 @@ public class InventoryService {
                 }));
     }
 
-    /** DESIGN-V2 §8 "Reads": G11 first, then one join; never the stock cache (A27). */
+    /** DESIGN-V2 §8 "Reads": G11 first, then one join. */
     public Optional<SkuItem> findSku(String skuId) {
         if (!SkuId.isValid(skuId)) {
             return Optional.empty();
@@ -136,19 +130,15 @@ public class InventoryService {
         return new SkuPage(List.copyOf(page), Optional.of(new InventoryPage.Next(n, page.getLast().skuId())));
     }
 
-    /** G11 first (no I/O for a malformed id, C-05), then the cache, then one row (DESIGN-V2 §3). */
+    /**
+     * G11 first (no I/O for a malformed id, C-05), then one primary-key lookup at READ COMMITTED autocommit, which
+     * never waits on a writer (DESIGN-V2 §9).
+     */
     public Optional<InventoryItem> find(String skuId) {
         if (!SkuId.isValid(skuId)) {
             return Optional.empty();
         }
-        Optional<Long> cached = cache.get(skuId);
-        if (cached.isPresent()) {
-            return Optional.of(new InventoryItem(skuId, cached.get()));
-        }
-        return stock.find(skuId).map(balance -> {
-            cache.populate(skuId, balance.quantity(), balance.version());
-            return new InventoryItem(skuId, balance.quantity());
-        });
+        return stock.find(skuId).map(balance -> new InventoryItem(skuId, balance.quantity()));
     }
 
     /** One page of SKUs in sku_id (COLLATE "C") order, at most 250 (G9, R4, C2). */
@@ -163,9 +153,7 @@ public class InventoryService {
         return new InventoryPage(List.copyOf(page), Optional.of(new InventoryPage.Next(n, page.getLast().skuId())));
     }
 
-    /** The success outcome; the cache refresh runs only after the transaction commits (DESIGN-V2 §2 step 4). */
-    private WriteResult ok(String skuId, Balance balance) {
-        AfterCommit.run(() -> cache.refresh(skuId, balance.quantity(), balance.version()));
+    private static WriteResult ok(Balance balance) {
         return new StockOutcome.Ok(balance.quantity());
     }
 

@@ -66,7 +66,7 @@ class StockRepository {
         return jdbc.sql(EXISTS).param("id", skuId).query(Boolean.class).single();
     }
 
-    /** Autocommit read at READ COMMITTED: never waits on a writer (DESIGN-V2 §3). */
+    /** Autocommit read at READ COMMITTED: never waits on a writer (DESIGN-V2 §9). */
     Optional<Balance> find(String skuId) {
         return jdbc.sql(FIND).param("id", skuId).query(Balance.class).optional();
     }

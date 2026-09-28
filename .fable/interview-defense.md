@@ -4,6 +4,8 @@ Questions a senior interviewer would ask about V2, from the self-critique's inte
 
 ## Storage design
 
+Questions 4–12 describe the Redis cache and replay copy as built through PR #74; Redis was then removed (DESIGN-V2 §9, questions 30–33), so they now answer "what did the earlier design do and why was it safe to remove".
+
 1. **Why a balance row instead of `main`'s SUM-ledger?** A SUM grows with history and, under SERIALIZABLE, its predicate makes writers on unrelated SKUs conflict (C-03). One row per SKU updated conditionally costs the same at any history size, needs no retries, and the ledger still records every change. `DESIGN-V2.md` §5 alt. 2, §6. No speed claim is made; the difference is structural.
 2. **Why READ COMMITTED with no retries, and why is it safe?** The `UPDATE ... WHERE quantity >= :q` waits on the row lock and Postgres re-evaluates the WHERE against the new row version after the wait, so the second of two concurrent purchases of the last unit sees 0 and updates nothing. `CHECK (quantity >= 0)` is the backstop. §2 "Why READ COMMITTED is enough".
 3. **Can two writers deadlock?** No: every transaction locks at most one idempotency row, then one `sku` row, then a KEY SHARE on that same row; same order everywhere. §2.
@@ -49,6 +51,6 @@ Questions a senior interviewer would ask about V2, from the self-critique's inte
 
 ## The three weakest points, and how to answer
 
-1. **The Redis idempotency copy adds complexity for a rare case.** Say so: it exists because the brief asked Redis to take part in idempotency; the simpler Postgres-only design is recorded as rejected for that reason, and everything that keeps the copy honest (one `KEY_VALIDITY` constant, `created` field, age check, content validation) is small and tested. If asked what you would remove first, this.
+1. **Redis was added and then removed.** Own the arc: the first V2 put a count cache and a replay copy in Redis to show experience with in-memory stores; the owner's review concluded it was complexity with no correctness benefit for this scenario and had it removed (§9). The removal was cheap precisely because §4 had designed every guarantee to hold with Redis absent. If asked when you would bring it back: a read storm on a few SKUs, with §3's design.
 2. **The hot-SKU story is a TTL, not a popularity mechanism.** Own the correction: the first draft said "stays while read"; the critique caught it; the design now states the hot set is "read within the last TTL" and why renewing on hits would break the staleness bound. LFU is a backstop.
 3. **Two open test gaps from the critique.** No test drives the Redis replay fast path (the verifier saw it work live: `PTTL idem:<key>` 86,399,644 ms) and no test restarts the service context to show durability (true by construction: one Postgres commit before the response). Both are listed as open in `.fable/critique.md` and `FABLE_REPORT.md` rather than claimed.

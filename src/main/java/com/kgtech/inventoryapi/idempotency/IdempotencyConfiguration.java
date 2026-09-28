@@ -16,9 +16,9 @@ class IdempotencyConfiguration {
 
     @Bean
     @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
-    static Advisor idempotentAdvisor(ObjectProvider<IdempotencyStore> store, ObjectProvider<ReplayCache> replayCache,
+    static Advisor idempotentAdvisor(ObjectProvider<IdempotencyStore> store,
             ObjectProvider<PlatformTransactionManager> transactionManager, ListableBeanFactory beanFactory) {
         return new DefaultPointcutAdvisor(new IdempotentMethodPointcut(),
-                new IdempotencyInterceptor(store, replayCache, transactionManager, beanFactory));
+                new IdempotencyInterceptor(store, transactionManager, beanFactory));
     }
 }

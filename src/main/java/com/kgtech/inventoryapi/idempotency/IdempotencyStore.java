@@ -2,7 +2,6 @@ package com.kgtech.inventoryapi.idempotency;
 
 import java.security.MessageDigest;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -29,18 +28,15 @@ class IdempotencyStore {
             RETURNING idempotency_key
             """;
 
-    /** T1: how long a key stays valid; the Redis replay copy (ReplayCache) uses the same constant. */
+    /** T1: how long a key stays valid, by the database clock. */
     public static final Duration KEY_VALIDITY = Duration.ofHours(24);
 
     /** T1: expiry uses the database clock (transaction start time) and KEY_VALIDITY. */
     static final String STORED = """
-            SELECT operation, sku_id, request_hash, status, content_type, body, created_at,
+            SELECT operation, sku_id, request_hash, status, content_type, body,
                    created_at < now() - make_interval(secs => :validitySeconds) AS expired
             FROM idempotency_keys WHERE idempotency_key = :key
             """;
-
-    /** The claim's created_at by the database clock, for the replay copy's remaining TTL. */
-    static final String CREATED = "SELECT created_at FROM idempotency_keys WHERE idempotency_key = :key";
 
     /** Y4: the response columns are set in the claim's transaction. */
     static final String COMPLETE = """
@@ -67,7 +63,7 @@ class IdempotencyStore {
         if (claim(request, hash)) {
             StoredResponse response = action.get();
             complete(request, response);
-            return new KeyedResult.Executed(response, createdAt(request));
+            return new KeyedResult.Executed(response);
         }
         StoredRow row = stored(request).orElseThrow(
                 () -> new IllegalStateException("Idempotency-Key " + request.key() + " neither claimed nor stored"));
@@ -82,7 +78,7 @@ class IdempotencyStore {
             // A committed row without a response is a tombstone (the README's clean-up ran early): the key is used up.
             return new KeyedResult.Rejected();
         }
-        return new KeyedResult.Replayed(response, row.createdAt());
+        return new KeyedResult.Replayed(response);
     }
 
     private boolean claim(IdempotentRequest request, byte[] hash) {
@@ -107,13 +103,8 @@ class IdempotencyStore {
                         rs.getObject("status", Integer.class),
                         rs.getString("content_type"),
                         rs.getString("body"),
-                        rs.getBoolean("expired"),
-                        rs.getObject("created_at", OffsetDateTime.class).toInstant()))
+                        rs.getBoolean("expired")))
                 .optional();
-    }
-
-    private Instant createdAt(IdempotentRequest request) {
-        return jdbc.sql(CREATED).param("key", request.key()).query(OffsetDateTime.class).single().toInstant();
     }
 
     private void complete(IdempotentRequest request, StoredResponse response) {

@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.Tables;
@@ -25,9 +24,6 @@ class InventoryServiceTest {
 
     @Autowired
     JdbcClient jdbc;
-
-    @Autowired
-    RedisConnectionFactory redis;
 
     @BeforeEach
     void clean() {

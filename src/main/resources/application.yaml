@@ -14,13 +14,6 @@ spring:
     formcontent:
       filter:
         enabled: false                    # no form endpoints; a bad form escape must not reach Boot's /error (C1)
-  data:
-    redis:
-      timeout: 250ms                      # DESIGN-V2 §4: a slow Redis costs at most this, then Postgres answers
-      connect-timeout: 250ms
-inventory:
-  cache:
-    stock-ttl: 5s                         # DESIGN-V2 §3: the staleness bound for a cached count
 springdoc:
   override-with-generic-response: false
   writer-with-order-by-keys: true         # byte-stable openapi.yaml export
@@ -33,7 +26,7 @@ management:
     health:
       probes:
         enabled: true                     # D10: /actuator/health/liveness and /readiness
-      show-components: always             # an operator sees which component (db, redis) is DOWN; no details
+      show-components: always             # an operator sees which component (db) is DOWN; no details
       group:
         readiness:
-          include: readinessState,db      # DESIGN-V2 §4: Redis down does not make the service unready
+          include: readinessState,db      # DESIGN-V2 §4

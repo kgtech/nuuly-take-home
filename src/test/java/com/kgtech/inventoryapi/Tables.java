@@ -1,10 +1,9 @@
 package com.kgtech.inventoryapi;
 
-import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-/** The one test cleanup (C-19): TRUNCATE, which the append-only triggers don't block, plus a Redis FLUSHALL. */
+/** The one test cleanup (C-19): TRUNCATE, which the append-only triggers don't block. */
 public final class Tables {
 
     private static final String TRUNCATE = "TRUNCATE inventory_ledger, sku_details, sku, idempotency_keys RESTART IDENTITY CASCADE";
@@ -12,26 +11,12 @@ public final class Tables {
     private Tables() {
     }
 
-    /** Truncates the tables and flushes the shared Redis, so no cached count or replay outlives its rows. */
     public static void reset(JdbcClient jdbc) {
         jdbc.sql(TRUNCATE).update();
-        flushSharedRedis();
     }
 
     public static void reset(JdbcTemplate jdbc) {
         jdbc.update(TRUNCATE);
-        flushSharedRedis();
-    }
-
-    private static void flushSharedRedis() {
-        try {
-            var result = TestcontainersConfiguration.redis().execInContainer("redis-cli", "FLUSHALL");
-            if (result.getExitCode() != 0) {
-                throw new IllegalStateException("FLUSHALL failed: " + result.getStderr());
-            }
-        } catch (java.io.IOException | InterruptedException e) {
-            throw new IllegalStateException("FLUSHALL failed", e);
-        }
     }
 
     /** Seeds stock the way a committed add would leave it: the balance row plus one ledger row (DESIGN-V2 §1). */
@@ -51,10 +36,4 @@ public final class Tables {
             """;
     private static final String SEED_LEDGER =
             "INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, ?, 'add')";
-
-    public static void flush(RedisConnectionFactory redis) {
-        try (var connection = redis.getConnection()) {
-            connection.serverCommands().flushAll();
-        }
-    }
 }

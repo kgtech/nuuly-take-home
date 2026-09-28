@@ -17,7 +17,7 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 /**
- * D8, S4, S10: compose.yaml runs Postgres and Redis (read by bootRun), compose.override.yaml adds the app (read by
+ * D8, S4, S10: compose.yaml runs Postgres (read by bootRun), compose.override.yaml adds the app (read by
  * `docker compose up --build`). Structural checks only; the running stack is verified by the manual smoke.
  */
 class ComposeFilesTest {
@@ -73,11 +73,11 @@ class ComposeFilesTest {
     }
 
     @Test
-    void composeYamlDefinesPostgresAndRedis() throws IOException {
+    void composeYamlDefinesPostgresOnly() throws IOException {
         Map<String, Object> root = map(load(COMPOSE), "compose.yaml root");
 
         assertThat(map(root.get("services"), "compose.yaml services").keySet())
-                .containsExactlyInAnyOrder("postgres", "redis");
+                .containsExactly("postgres"); // DESIGN-V2 §9: no Redis
         assertThat(root).as("no named volume: every run starts from an empty database").doesNotContainKey("volumes");
     }
 
@@ -88,24 +88,6 @@ class ComposeFilesTest {
         assertThat(expected).as(TestcontainersConfiguration.POSTGRES_IMAGE_PROPERTY + " (set by Gradle)").isNotBlank();
 
         assertThat(service(COMPOSE, "postgres").get("image")).isEqualTo(expected);
-    }
-
-    /** S10: the compose tag repeats the catalog's redis version, which the tests also run against. */
-    @Test
-    void redisImageMatchesTestImage() throws IOException {
-        String expected = System.getProperty(TestcontainersConfiguration.REDIS_IMAGE_PROPERTY);
-        assertThat(expected).as(TestcontainersConfiguration.REDIS_IMAGE_PROPERTY + " (set by Gradle)").isNotBlank();
-
-        assertThat(service(COMPOSE, "redis").get("image")).isEqualTo(expected);
-    }
-
-    /** DESIGN-V2 §3–4: Redis is a bounded LFU cache with no persistence. */
-    @Test
-    void redisRunsAsABoundedCacheWithoutPersistence() throws IOException {
-        String command = String.join(" ", strings(service(COMPOSE, "redis").get("command"), "redis command"));
-
-        assertThat(command).contains("--appendonly no").contains("--maxmemory-policy allkeys-lfu")
-                .contains("--maxmemory ");
     }
 
     /** S4: pg_isready over TCP, so the check stays red while the entrypoint's socket-only init server runs. */
@@ -124,7 +106,6 @@ class ComposeFilesTest {
     @Test
     void postgresPublishesContainerPort5432() throws IOException {
         assertThat(strings(service(COMPOSE, "postgres").get("ports"), "postgres ports")).containsExactly("127.0.0.1::5432"); // C-12: loopback only
-        assertThat(strings(service(COMPOSE, "redis").get("ports"), "redis ports")).containsExactly("127.0.0.1::6379");
     }
 
     @Test
@@ -152,7 +133,7 @@ class ComposeFilesTest {
         Map<String, Object> postgres = map(dependsOn.get("postgres"), "app depends_on postgres");
 
         assertThat(postgres.get("condition")).isEqualTo("service_healthy");
-        assertThat(map(dependsOn.get("redis"), "app depends_on redis").get("condition")).isEqualTo("service_healthy");
+        assertThat(dependsOn.keySet()).as("the app depends on Postgres alone (§9)").containsExactly("postgres");
     }
 
     /** C-39: the app container has a readiness healthcheck (bash /dev/tcp; the JRE image has no curl) and a heap policy. */

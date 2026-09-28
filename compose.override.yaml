@@ -9,13 +9,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory
       SPRING_DATASOURCE_USERNAME: inventory
       SPRING_DATASOURCE_PASSWORD: inventory
-      SPRING_DATA_REDIS_HOST: redis
       JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75.0
     healthcheck:
       # The JRE image has no curl or wget; bash's /dev/tcp does the GET (C-39).

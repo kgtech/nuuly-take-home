@@ -18,7 +18,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import com.kgtech.inventoryapi.cache.StockCache;
 
 /**
  * R4, R8, C2: InventoryService.list parses limit and cuts after at NUL before the keyset query. Plain unit test with
@@ -29,8 +28,7 @@ class InventoryServiceReadTest {
     private final StockRepository stock = mock(StockRepository.class);
     private final DetailsRepository details = mock(DetailsRepository.class);
     private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
-    private final InventoryService service = new InventoryService(stock, details, mock(StockCache.class),
-            transactions);
+    private final InventoryService service = new InventoryService(stock, details, transactions);
 
     /** C3 for v2 (review R-06e): a malformed skuId is answered before any repository or transaction access. */
     @org.junit.jupiter.api.Test
