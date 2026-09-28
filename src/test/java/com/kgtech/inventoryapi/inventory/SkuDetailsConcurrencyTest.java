@@ -28,6 +28,9 @@ class SkuDetailsConcurrencyTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    javax.sql.DataSource dataSource;
+
     @BeforeEach
     void clean() {
         Tables.reset(jdbc);
@@ -75,6 +78,73 @@ class SkuDetailsConcurrencyTest {
             assertThat(count("SELECT count(*) FROM sku_details WHERE sku_id = ?", sku)).isZero();
         }
         assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
+    }
+
+    /** #71 AC4, S11 for the create shape: eight concurrent keyed creates with one fresh key change stock once. */
+    @Test
+    void concurrentKeyedCreatesWithOneFreshKeyProduceOneCreate() throws InterruptedException {
+        String sku = "keyed-" + UUID.randomUUID().toString().substring(0, 8);
+        String key = UUID.randomUUID().toString();
+
+        List<WriteResult> results = Concurrently.run(THREADS,
+                () -> service.create(sku, new CreateSku(DETAILS, 3), key));
+
+        assertThat(results).allSatisfy(r -> assertThat(r).isInstanceOf(WriteResult.Stored.class));
+        java.util.Set<String> bodies = new java.util.HashSet<>();
+        for (WriteResult r : results) {
+            com.kgtech.inventoryapi.idempotency.StoredResponse response = ((WriteResult.Stored) r).response();
+            assertThat(response.status()).isEqualTo(201);
+            bodies.add(response.body());
+        }
+        assertThat(bodies).as("every reply is byte-identical").hasSize(1);
+        assertThat(count("SELECT count(*) FROM sku_details WHERE sku_id = ?", sku)).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(1);
+        assertThat(count("SELECT quantity FROM sku WHERE sku_id = ?", sku)).isEqualTo(3);
+        assertThat(jdbc.sql("SELECT count(*) FROM idempotency_keys").query(Long.class).single()).isEqualTo(1);
+        assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
+
+        // The 409 variant: the same fresh key on a SKU that now exists stores and replays one 409.
+        String again = UUID.randomUUID().toString();
+        List<WriteResult> conflicts = Concurrently.run(THREADS,
+                () -> service.create(sku, new CreateSku(DETAILS, 3), again));
+        assertThat(conflicts).allSatisfy(r -> assertThat(((WriteResult.Stored) r).response().status()).isEqualTo(409));
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(1);
+    }
+
+    /** DESIGN-V2 §8 "Edit": a PUT completes while a purchase holds the sku row lock (KEY SHARE vs NO KEY UPDATE). */
+    @Test
+    void aPutCompletesWhileAPurchaseHoldsTheRowLock() throws Exception {
+        assertThat(service.create("locked-1", new CreateSku(DETAILS, 5), null)).isInstanceOf(DetailsOutcome.Created.class);
+        java.util.concurrent.CountDownLatch locked = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        Thread writer = new Thread(() -> {
+            try (java.sql.Connection connection = dataSource.getConnection()) {
+                connection.setAutoCommit(false);
+                try (java.sql.Statement statement = connection.createStatement()) {
+                    statement.executeUpdate("UPDATE sku SET quantity = quantity - 1, version = version + 1 "
+                            + "WHERE sku_id = 'locked-1'");
+                }
+                locked.countDown();
+                release.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                connection.rollback();
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        writer.start();
+        assertThat(locked.await(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        try {
+            long started = System.nanoTime();
+            ReplaceResult result = service.replaceDetails("locked-1",
+                    new SkuDetails("Renamed", "", Optional.empty(), List.of()),
+                    new DetailsPrecondition.Versions(List.of(1L)));
+            assertThat(result).isInstanceOf(ReplaceResult.Replaced.class);
+            assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofSeconds(5));
+        } finally {
+            release.countDown();
+            writer.join(30_000);
+        }
+        assertThat(count("SELECT version FROM sku_details WHERE sku_id = ?", "locked-1")).isEqualTo(2);
     }
 
     @Test

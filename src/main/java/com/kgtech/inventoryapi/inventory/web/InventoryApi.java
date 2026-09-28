@@ -72,6 +72,8 @@ final class InventoryApi {
     static final String V2_PRECONDITION_DESCRIPTION = TextErrors.DETAILS_CHANGED;
     static final String ETAG_DESCRIPTION = "The details version, a strong validator for If-Match; \"0\" before any "
             + "details";
+    static final String CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\" (also on a replayed "
+            + "201, even after a later PUT)";
     static final String IF_MATCH_DESCRIPTION = "Optional strong ETag(s) from a previous response; \"*\" or absent "
             + "means unconditional";
 

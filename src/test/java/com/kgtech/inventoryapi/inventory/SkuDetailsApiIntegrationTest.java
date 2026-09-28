@@ -239,6 +239,13 @@ class SkuDetailsApiIntegrationTest {
                         null)),
                 Arguments.of("null image", createBody("{\"name\":\"n\",\"images\":[null]}", null)),
                 Arguments.of("NUL in name", createBody("{\"name\":\"a\\u0000b\"}", null)),
+                Arguments.of("C1 control in name", createBody("{\"name\":\"a\\u0085b\"}", null)),
+                Arguments.of("C1 control in description", createBody("{\"name\":\"n\",\"description\":\"a\\u009fb\"}", null)),
+                Arguments.of("numeric name", createBody("{\"name\":123}", null)),
+                Arguments.of("boolean name", createBody("{\"name\":true}", null)),
+                Arguments.of("numeric description", createBody("{\"name\":\"n\",\"description\":42}", null)),
+                Arguments.of("numeric image", createBody("{\"name\":\"n\",\"images\":[1]}", null)),
+                Arguments.of("numeric currency", createBody("{\"name\":\"n\",\"cost\":{\"amount\":1,\"currency\":840}}", null)),
                 Arguments.of("NUL in description", createBody("{\"name\":\"n\",\"description\":\"a\\u0000b\"}", null)),
                 Arguments.of("newline in name", createBody("{\"name\":\"a\\nb\"}", null)),
                 Arguments.of("lone surrogate", createBody("{\"name\":\"a\\ud800b\"}", null)),
@@ -534,7 +541,7 @@ class SkuDetailsApiIntegrationTest {
         assertThat(send(get("/v2/inventory/{skuId}", "GD-1").header(ACCEPT, "application/xml")).status())
                 .as("GET ignores Accept").isEqualTo(200);
         assertThat(send(get("/v2/inventory").header(ACCEPT, "text/html")).status()).isEqualTo(200);
-        String big = createBody("{\"name\":\"n\",\"description\":\"" + "d".repeat(33_000) + "\"}", null);
+        String big = createBody("{\"name\":\"n\",\"pad\":\"" + "d".repeat(66_000) + "\"}", null);
         assertText(create("GD-3", big, null), 400, INVALID_REQUEST);
         assertThat(count("SELECT count(*) FROM sku")).isEqualTo(1);
         assertThat(getV2("GD-1").etag()).isEqualTo("\"1\"");
@@ -546,8 +553,30 @@ class SkuDetailsApiIntegrationTest {
                 "\"https://cdn.example.com/" + "i".repeat(2000) + "\""));
         String body = createBody("{\"name\":\"n\",\"description\":\"" + "d".repeat(2000) + "\",\"images\":[" + images
                 + "]}", 1);
-        assertThat(body.length()).isBetween(20_000, 32_768);
+        assertThat(body.length()).isBetween(20_000, 65_536);
         assertThat(create("GD-4", body, null).status()).isEqualTo(201);
+    }
+
+    /**
+     * Critique F-conc-01: the largest contract-valid body with every non-ASCII character escaped as \\uXXXX (about
+     * 33.4 KB on the wire) must be accepted; the byte cap is sized for it.
+     */
+    @Test
+    void theLargestEscapedValidBodyIsAccepted() throws Exception {
+        String name = "\\u00e9".repeat(120);
+        String description = "\\u65e5".repeat(2000);
+        String images = String.join(",", java.util.Collections.nCopies(10,
+                "\"https://cdn.example.com/" + "i".repeat(2048 - 24) + "\""));
+        String body = createBody("{\"name\":\"" + name + "\",\"description\":\"" + description + "\",\"images\":["
+                + images + "]}", 1);
+        assertThat(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isBetween(33_000, 65_536);
+
+        Reply reply = create("GD-5", body, null);
+
+        assertThat(reply.status()).as(reply.body()).isEqualTo(201);
+        assertThat(JsonPath.<String>read(reply.body(), "$.details.name")).hasSize(120);
+        assertThat(JsonPath.<String>read(reply.body(), "$.details.description")).hasSize(2000);
+        assertThat(JsonPath.<List<String>>read(reply.body(), "$.details.images")).hasSize(10);
     }
 
     @Test

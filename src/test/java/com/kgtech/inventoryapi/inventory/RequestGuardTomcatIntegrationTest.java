@@ -86,7 +86,7 @@ class RequestGuardTomcatIntegrationTest {
 
     /** Review R-01: a chunked v2 body (no Content-Length) is capped as it is read; one within the cap is accepted. */
     @ParameterizedTest(name = "chunked v2 body of about {0} bytes → {1}")
-    @org.junit.jupiter.params.provider.CsvSource({"20000, 201", "40000, 400"})
+    @org.junit.jupiter.params.provider.CsvSource({"40000, 201", "70000, 400"})
     void chunkedV2BodyIsCappedWhileRead(int padBytes, int status) throws Exception {
         // The size comes from an ignored property (G13), so only the byte cap can reject the smaller body.
         String body = "{\"details\":{\"name\":\"n\",\"pad\":\"" + "d".repeat(padBytes) + "\"},\"initialQuantity\":1}";
