@@ -34,14 +34,15 @@ test('add stock then purchase', async ({ page }) => {
   });
   const add = addForm(page).getByRole('button', { name: 'Add stock' });
   await expect(add).toHaveAttribute('aria-disabled', 'true');
-  await expect(add).toBeEnabled();
   await expect(addForm(page).getByText('Enter a whole number of at least 1.')).toBeVisible();
-  await add.click();
+  // Playwright's actionability check treats aria-disabled as not enabled, so the click is forced: the point is
+  // that the app itself ignores it.
+  await add.click({ force: true });
   const buy = buyForm(page).getByRole('button', { name: 'Purchase' });
   await expect(buy).toHaveAttribute('aria-disabled', 'true');
   await expect(buyForm(page).getByText('Add stock first to create this SKU.')).toBeVisible();
   await buyForm(page).getByLabel('Quantity').fill('1');
-  await buy.click();
+  await buy.click({ force: true });
   expect(posts).toHaveLength(0);
   await buyForm(page).getByLabel('Quantity').fill('');
 
@@ -54,9 +55,10 @@ test('add stock then purchase', async ({ page }) => {
   await expect(reference.locator('summary')).toHaveText('Request reference');
   await expect(reference).toContainText(/Idempotency-Key [0-9a-f-]{36}/);
   await expect(outcome(page).locator('> div > div').first()).not.toContainText('Idempotency-Key');
-  await expect(buy).not.toHaveAttribute('aria-disabled', 'true');
-
+  // The SKU now exists, so only the empty quantity keeps Purchase unavailable; a quantity releases it.
+  await expect(buyForm(page).getByText('Add stock first to create this SKU.')).toHaveCount(0);
   await buyForm(page).getByLabel('Quantity').fill('2');
+  await expect(buy).not.toHaveAttribute('aria-disabled', 'true');
   await buy.click();
   await expect(outcome(page)).toContainText(`Purchased 2 of ${skuId}: 3 left.`);
   await expect(page.getByTestId('quantity')).toHaveText('3');
@@ -144,7 +146,7 @@ test('Find a SKU: Open is unavailable with a reason until the id is valid', asyn
   const input = page.getByRole('form', { name: 'Find a SKU' }).getByLabel('SKU ID');
   await expect(open).toHaveAttribute('aria-disabled', 'true');
   await expect(page.getByText('Enter a SKU ID to open it.')).toBeVisible();
-  await open.click();
+  await open.click({ force: true });
   await expect(page).toHaveURL(/\/#?\/?$/);
   await input.fill('bad id');
   await expect(page.getByText(/That isn't a valid SKU ID/)).toBeVisible();
