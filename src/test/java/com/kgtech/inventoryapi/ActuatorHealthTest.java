@@ -60,7 +60,7 @@ class ActuatorHealthTest {
         mvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.components.db.status").value("UP"))
-                .andExpect(jsonPath("$.components.redis.status").value("UP"))
+                .andExpect(jsonPath("$.components.redis").doesNotExist()) // DESIGN-V2 §9
                 .andExpect(jsonPath("$.components.db.details").doesNotExist())
                 .andExpect(jsonPath("$.details").doesNotExist());
     }

@@ -2,13 +2,11 @@
 java = "25"
 spring-boot = "4.1.1"
 postgres = "18"
-redis = "8"
 springdoc = "3.1.1"
 
 [libraries]
 spring-boot-starter-webmvc = { module = "org.springframework.boot:spring-boot-starter-webmvc" }
 spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc" }
-spring-boot-starter-data-redis = { module = "org.springframework.boot:spring-boot-starter-data-redis" }
 spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
 spring-boot-starter-actuator = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-docker-compose = { module = "org.springframework.boot:spring-boot-docker-compose" }

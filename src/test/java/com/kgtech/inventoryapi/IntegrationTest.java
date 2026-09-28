@@ -10,8 +10,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.core.annotation.AliasFor;
 
 /**
- * The one Boot test annotation for classes that need Postgres and Redis (C-21, issue #29): a full context sharing the
- * JVM-wide containers from {@link TestcontainersConfiguration}. Classes with the same attributes share one context.
+ * The one Boot test annotation for classes that need Postgres (C-21, issue #29): a full context sharing the JVM-wide
+ * container from {@link TestcontainersConfiguration}. Classes with the same attributes share one context.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)

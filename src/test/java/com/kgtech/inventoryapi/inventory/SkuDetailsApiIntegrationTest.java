@@ -23,7 +23,6 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -36,9 +35,9 @@ import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.Tables;
 
 /**
- * Issue #71, DESIGN-V2 §8: the v2 details API end to end against Postgres and Redis. Create with initial stock,
+ * Issue #71, DESIGN-V2 §8: the v2 details API end to end against Postgres. Create with initial stock,
  * 409 on an existing SKU, the validation matrix, keyed creates (201 and 409 replayed), PUT with If-Match (200, 404,
- * 412), v2 reads without the stock cache, the v2 list, and the request guard on v2 paths. Not @Transactional.
+ * 412), v2 reads, the v2 list, and the request guard on v2 paths. Not @Transactional.
  */
 @IntegrationTest
 @AutoConfigureMockMvc
@@ -63,9 +62,6 @@ class SkuDetailsApiIntegrationTest {
 
     @Autowired
     JdbcClient jdbc;
-
-    @Autowired
-    StringRedisTemplate redis;
 
     @BeforeEach
     void clean() {
@@ -304,16 +300,11 @@ class SkuDetailsApiIntegrationTest {
         assertThat(replay.etag()).isEqualTo("\"1\"");
         assertThat(quantity("K-1")).isEqualTo(4);
         assertThat(ledgerRows("K-1")).isEqualTo(1);
-        assertThat(redis.<String, String>opsForHash().get("idem:" + key, "status")).as("Redis replay copy")
-                .isEqualTo("201");
 
-        // R-06b: tombstone the Postgres row (the README's clean-up); the next replay can only come from Redis.
+        // A18: a tombstoned row (the README's clean-up) answers 400 whatever its age; the key is used up.
         jdbc.sql("UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL "
                 + "WHERE idempotency_key = ?::uuid").param(key).update();
-        Reply fromRedis = create("K-1", createBody(DETAILS, 4), key);
-        assertThat(fromRedis.status()).isEqualTo(201);
-        assertThat(fromRedis.body()).isEqualTo(first.body());
-        assertThat(fromRedis.etag()).isEqualTo("\"1\"");
+        assertText(create("K-1", createBody(DETAILS, 4), key), 400, INVALID_REQUEST);
         assertThat(ledgerRows("K-1")).isEqualTo(1);
     }
 
@@ -328,10 +319,10 @@ class SkuDetailsApiIntegrationTest {
         assertThat(replay.status()).isEqualTo(409);
         assertThat(replay.body()).isEqualTo(first.body());
         assertThat(replay.contentType()).isEqualTo(first.contentType());
-        assertThat(redis.<String, String>opsForHash().get("idem:" + key, "status")).isEqualTo("409");
+        // A18 for a stored 409 too: a tombstoned row answers 400.
         jdbc.sql("UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL "
                 + "WHERE idempotency_key = ?::uuid").param(key).update();
-        assertText(create("K-2", createBody(DETAILS, 2), key), 409, SKU_EXISTS);
+        assertText(create("K-2", createBody(DETAILS, 2), key), 400, INVALID_REQUEST);
     }
 
     static Stream<Arguments> differentRequests() {
@@ -466,17 +457,6 @@ class SkuDetailsApiIntegrationTest {
     void getV2OfAMissingOrMalformedSkuIs404() throws Exception {
         assertText(getV2("NOPE"), 404, "SKU not found");
         assertText(getV2("bad id"), 404, "SKU not found");
-    }
-
-    @Test
-    void getV2NeverPopulatesTheStockCache() throws Exception {
-        assertThat(create("C-1", 3).status()).isEqualTo(201);
-
-        assertThat(getV2("C-1").status()).isEqualTo(200);
-
-        assertThat(redis.hasKey("stock:C-1")).as("v2 reads do not fill the cache").isFalse();
-        assertThat(send(get("/inventory/{skuId}", "C-1").accept(APPLICATION_JSON)).status()).isEqualTo(200);
-        assertThat(redis.hasKey("stock:C-1")).as("the spec's GET does").isTrue();
     }
 
     @Test

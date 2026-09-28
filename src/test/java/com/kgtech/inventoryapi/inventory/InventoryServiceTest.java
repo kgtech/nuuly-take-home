@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.Tables;
@@ -27,7 +26,7 @@ class InventoryServiceTest {
     JdbcClient jdbc;
 
     @Autowired
-    RedisConnectionFactory redis;
+    javax.sql.DataSource dataSource;
 
     @BeforeEach
     void clean() {
@@ -141,5 +140,42 @@ class InventoryServiceTest {
         assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
         assertThat(row("a")).containsEntry("quantity", 0L).containsEntry("version", 4L);
         assertThat(ledgerRows("a")).as("the rejected purchase wrote nothing").isEqualTo(4);
+    }
+
+    /**
+     * DESIGN-V2 §9: a read is one autocommit SELECT that never waits on a writer. A second connection holds the row
+     * lock of an uncommitted purchase; find() on the test thread still answers the committed value within a bound.
+     */
+    @Test
+    void findNeverWaitsOnAWriterHoldingTheRowLock() throws Exception {
+        Tables.seed(jdbc, "locked", 5);
+        java.util.concurrent.CountDownLatch locked = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        javax.sql.DataSource dataSource = this.dataSource;
+        Thread writer = new Thread(() -> {
+            try (java.sql.Connection connection = dataSource.getConnection()) {
+                connection.setAutoCommit(false);
+                try (java.sql.Statement statement = connection.createStatement()) {
+                    statement.executeUpdate("UPDATE sku SET quantity = quantity - 1, version = version + 1 "
+                            + "WHERE sku_id = 'locked'");
+                }
+                locked.countDown();
+                release.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                connection.rollback();
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        writer.start();
+        assertThat(locked.await(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        try {
+            long started = System.nanoTime();
+            assertThat(service.find("locked")).contains(new InventoryItem("locked", 5));
+            assertThat(java.time.Duration.ofNanos(System.nanoTime() - started))
+                    .as("a read must not wait on the writer's lock").isLessThan(java.time.Duration.ofSeconds(5));
+        } finally {
+            release.countDown();
+            writer.join(30_000);
+        }
     }
 }

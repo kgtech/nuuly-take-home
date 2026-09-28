@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.InventoryApplication;
@@ -18,9 +17,8 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
 
 /**
  * Durable (DESIGN-V2 §3 invariants, issue #35, critique V-08): once this instance has acknowledged an add and a
- * purchase, a second, freshly started service instance against the same Postgres reports the same quantity, with the
- * Redis copies gone (as after a Redis restart) and the balance equal to the ledger. Nothing the first instance held
- * in memory is needed.
+ * purchase, a second, freshly started service instance against the same Postgres reports the same quantity and the
+ * balance equals the ledger. Nothing the first instance held in memory is needed (DESIGN-V2 §9: nothing is cached).
  */
 @IntegrationTest
 class DurabilityAcrossServiceInstancesTest {
@@ -30,9 +28,6 @@ class DurabilityAcrossServiceInstancesTest {
 
     @Autowired
     JdbcClient jdbc;
-
-    @Autowired
-    RedisConnectionFactory redis;
 
     @BeforeEach
     void clean() {
@@ -44,7 +39,6 @@ class DurabilityAcrossServiceInstancesTest {
         assertThat(service.add("durable", 10, null)).isEqualTo(new StockOutcome.Ok(10));
         assertThat(service.purchase("durable", 3, null)).isEqualTo(new StockOutcome.Ok(7));
         assertThat(service.find("durable")).contains(new InventoryItem("durable", 7));
-        Tables.flush(redis); // what a persistence-less Redis restart leaves behind
 
         // A real second instance: the full application on its own random port, configured by connection properties
         // only (not the test configuration, whose Testcontainers lifecycle would stop the shared containers on close).

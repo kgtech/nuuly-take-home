@@ -136,7 +136,6 @@ class IdempotencyInterceptorTest {
     }
 
     private IdempotencyStore store;
-    private ReplayCache replayCache;
     private PlatformTransactionManager transactionManager;
     private Results results;
     private Target target;
@@ -145,20 +144,16 @@ class IdempotencyInterceptorTest {
     @BeforeEach
     void setUp() {
         store = mock(IdempotencyStore.class);
-        replayCache = mock(ReplayCache.class);
-        when(replayCache.lookup(any())).thenReturn(Optional.empty());
         transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         results = new Results();
 
         DefaultListableBeanFactory beans = new DefaultListableBeanFactory();
         beans.registerSingleton("idempotencyStore", store);
-        beans.registerSingleton("replayCache", replayCache);
         beans.registerSingleton("transactionManager", transactionManager);
         beans.registerSingleton("results", results);
         Advisor advisor = IdempotencyConfiguration.idempotentAdvisor(beans.getBeanProvider(IdempotencyStore.class),
-                beans.getBeanProvider(ReplayCache.class), beans.getBeanProvider(PlatformTransactionManager.class),
-                beans);
+                beans.getBeanProvider(PlatformTransactionManager.class), beans);
 
         target = new Target();
         ProxyFactory factory = new ProxyFactory(target);
@@ -171,7 +166,7 @@ class IdempotencyInterceptorTest {
     private void storeExecutes() {
         when(store.execute(any(), any())).thenAnswer(invocation -> {
             Supplier<StoredResponse> action = invocation.getArgument(1);
-            return new KeyedResult.Executed(action.get(), java.time.Instant.now());
+            return new KeyedResult.Executed(action.get());
         });
     }
 
@@ -298,7 +293,7 @@ class IdempotencyInterceptorTest {
     @Test
     void replayedMapsToStoredWithoutCallingTarget() {
         StoredResponse response = new StoredResponse(404, "text/plain", "SKU not found");
-        when(store.execute(any(), any())).thenReturn(new KeyedResult.Replayed(response, java.time.Instant.now()));
+        when(store.execute(any(), any())).thenReturn(new KeyedResult.Replayed(response));
 
         Result result = proxy.purchase("widget", 5, KEY);
 

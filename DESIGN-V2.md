@@ -1,4 +1,6 @@
-# DESIGN-V2: stock in Postgres rows, hot counts and replays in Redis
+# DESIGN-V2: stock in Postgres rows
+
+(§1–§6 describe the design as first built, with a Redis count cache and replay copy; §9 records their removal. Where they disagree, §9 wins.)
 
 V2 keeps the API contract of `spec/` and `openapi.yaml` unchanged, including the optional `Idempotency-Key` header, the status codes and the text/plain errors. It replaces the storage design underneath: `main` derives every balance from a SERIALIZABLE `SUM` over an append-only ledger and retries serialization failures; V2 keeps a current balance per SKU as a row, updates it conditionally at READ COMMITTED, still appends every change to the ledger, and uses Redis for two things only: a cache of the most-read stock counts, and a cache of completed idempotent responses.
 
@@ -107,8 +109,8 @@ Everything not listed here still applies. IDs from `DECISIONS.md` / `CLAUDE.md`;
 | D5 (migrations content), D1/D9 (JPA parts) | Migrations declare `sku.quantity`, `sku.version`, the append-only trigger and Redis is not in Postgres; `spring.jpa.*` settings and the JPA starter are gone. Flyway and `validate`-equivalent checks stay (a test asserts the schema). |
 | Z1 (isolation clauses only) | The idempotency advice keeps its structure and REQUIRES_NEW, but at READ COMMITTED; the "not SERIALIZABLE → IllegalStateException" guard is removed. |
 | R2 (40001 clause) | A concurrent claim blocks on the unique index instead of raising 40001; after the first commits, the second replays. |
-| D8, S4 (compose content) | compose.yaml runs Postgres **and Redis**; the app depends on both. |
-| D10 | Package layout gains `cache/` (Redis) beside `inventory/` and `idempotency/`. |
+| D8, S4 (compose content) | compose.yaml runs Postgres **and Redis**; the app depends on both. Reverted by §9: compose runs Postgres alone, as on `main`. |
+| D10 | Package layout gains `cache/` (Redis) beside `inventory/` and `idempotency/`. Reverted by §9: `inventory/` and `idempotency/` only. |
 | Issues #24 AC3, #26 AC1–3, #29, #30 (test-suite items written against `main`'s tests) | Their intent is met by construction in V2 (one shared container per store, no SUM query plan to EXPLAIN, no SSI conflicts); the V2 issues restate them for V2's tests. |
 | L-26 (retry lesson content), L-33 (cross-SKU SSI) | No longer apply without SERIALIZABLE; the cross-SKU concurrency test is kept as a regression guard. |
 
@@ -140,3 +142,25 @@ The four spec operations stay exactly as they are (byte for byte in `openapi.yam
 **Request guard and Accept.** The routed-path checks of C3 apply to v2 the same way (`;` in the SKU segment, POST/PUT Accept q=0 → 400, body cap), with a 32 KB body cap for the two v2 writes (a description of 2,000 characters plus ten 2,048-character ASCII URLs fits), enforced on the Content-Length and, for a chunked body, on the bytes as they are read, since a v2 body is materialised before the record's own limits run. GET on v2 ignores Accept as U2 says.
 
 **Superseded by this section.** Nothing above §8 is superseded; §7 still lists what V2 changed from `main`. G6's list of error texts gains the two v2 texts for the v2 operations only.
+
+## 9. Redis removed: Postgres only
+
+**Owner decision** (review of PR #74, 2026-09-28), recorded as given: "The design choice is because I wanted to horseshoe Redis in to show off and I realized that implementing Redis wasn't worth it. I had concerns with the v1 design because it seemed to add unnecessary complexity because of having to maintain a cache and database. But I also wanted to display my experience with in-memory/cache dbs. Upon reflection the experience would have taught me it isn't necessary for this scenario but could be helpful during intense sell scenarios where every process counts."
+
+**What Redis did, and what replaces it.**
+
+| Use (§1–§3) | Replaced by | What changes for a client |
+|---|---|---|
+| `stock:{skuId}` count cache, TTL 5 s, versioned post-commit refresh, `onlyIfPresent` | `GET /inventory/{skuId}` reads the `sku` row: one primary-key lookup at READ COMMITTED autocommit, which never waits on a writer (a purchase's row lock blocks writers, not readers) | A read is always the last committed count. The staleness bound of §3 (TTL plus a read miss) disappears; there is nothing to tune. |
+| `idem:{key}` replay copy with the row's remaining validity | The Postgres claim and the stored row (§2 step 3), which were the mechanism all along; a repeat with a key reads one row by primary key | Same responses, same 24 h validity (T1), now decided by one clock instead of two (A16 no longer applies). |
+| `RedisGuard`, the 250 ms command timeout, the WARN rate limit, the Lua scripts, the Redis health component | Nothing | One container fewer to run; readiness is unchanged (`readinessState,db`). |
+
+**Why this is safe.** §4 already stated that everything in Redis could be lost at any moment without breaking an invariant, and the fault tests proved it (FLUSHALL, pause, restart, all with every endpoint still correct). Removing Redis is the permanent form of "Redis down": reads miss and go to Postgres, replays go to the claim. No oversell, exactly once, durable and recorded are enforced by the conditional `UPDATE`, the `CHECK`, the claim's unique index and the ledger, all in Postgres, all unchanged. The concurrency, idempotency and durability tests keep running against Postgres alone.
+
+**Cost accepted.** Every read of a SKU now costs Postgres one indexed row lookup instead of a Redis hash read for the SKUs read within the last 5 s. For this scenario, a single inventory service with a handful of SKUs read by people, that is the right trade: a primary-key lookup is microseconds of work on a row that is already in shared buffers, and no cache means no invalidation, no version race, no second store to monitor. The case for a cache returns when a read storm on a few SKUs (a launch, a flash sale) makes the database the bottleneck; §3's design (versioned refresh, TTL as the staleness bound, populate on read only) is the one to bring back then, and its tests are in the history (v2 9afd14a…85bc2e0).
+
+**What is removed.** The `cache` package (`StockCache`, `ReplayCache` in `idempotency`, `RedisGuard`, `AfterCommit`, `CacheConfiguration`, `CacheProperties`), `stock-set.lua` and `replay-put.lua`, `spring-boot-starter-data-redis`, `spring.data.redis.*` and `inventory.cache.*`, the compose `redis` service and the app's dependency on it, `RedisFaultTest`, `StockCacheTest` and the Redis half of the test containers; `InventoryService.find` becomes the row lookup and the `@Idempotent` interceptor claims and replays through `IdempotencyStore` only. The API, `openapi.yaml` and the front end do not change.
+
+**Alternative rejected: keep the cache.** It would have kept a second store to run, monitor and keep consistent, a staleness bound to test and a second clock for key expiry, for a read path that is one primary-key lookup; the owner judged that a wrong trade for this scenario. `sku.version` stays as it is: a change counter bumped by every stock write, read by nothing today, kept because §3's refresh would need it back and it costs one column.
+
+**Superseded by this section.** The title and the introduction as first written, §1 (the Redis column and "Redis is a cache in both roles"), §2 step 2 (the Redis fast path) and step 4 (post-commit refresh), §3 entirely, §4 rows about Redis, §5 alternatives 3–6 (now moot), §6 rows "Reads", "Idempotency", "Moving parts" and the Redis tuning values, A3–A9, A13, A15, A16 the Redis parts of §8 "Reads" (v2 never used the cache; now nothing does), and the §7 rows for D8/S4 and D10 (marked there). Everything else, including the rest of §7 and §8, still applies.

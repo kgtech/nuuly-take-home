@@ -16,26 +16,22 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.kgtech.inventoryapi.cache.AfterCommit;
-
 /**
  * Applies {@link Idempotent} (Z1): no key → proceed; malformed key → invalidRequest; beforeClaim rejection → returned;
- * then the Redis replay cache (DESIGN-V2 §2 step 2); otherwise claim, write and store in one READ COMMITTED
- * REQUIRES_NEW transaction (R2 as superseded), and copy the completed response to Redis after commit.
+ * otherwise claim, write and store in one READ COMMITTED REQUIRES_NEW transaction (R2 as superseded, DESIGN-V2 §9:
+ * Postgres alone decides a replay).
  */
 final class IdempotencyInterceptor implements MethodInterceptor {
 
     private final ObjectProvider<IdempotencyStore> store;
-    private final ObjectProvider<ReplayCache> replayCache;
     private final ObjectProvider<PlatformTransactionManager> transactionManager;
     private final ListableBeanFactory beanFactory;
     private final Map<Method, IdempotentResults<Object>> results = new ConcurrentHashMap<>();
     private volatile TransactionTemplate requiresNew;
 
-    IdempotencyInterceptor(ObjectProvider<IdempotencyStore> store, ObjectProvider<ReplayCache> replayCache,
+    IdempotencyInterceptor(ObjectProvider<IdempotencyStore> store,
             ObjectProvider<PlatformTransactionManager> transactionManager, ListableBeanFactory beanFactory) {
         this.store = store;
-        this.replayCache = replayCache;
         this.transactionManager = transactionManager;
         this.beanFactory = beanFactory;
     }
@@ -61,18 +57,8 @@ final class IdempotencyInterceptor implements MethodInterceptor {
         IdempotentRequest request = arguments[1] instanceof Fingerprinted fingerprinted
                 ? new IdempotentRequest(IdempotencyKey.parse(rawKey), operation, skuId, fingerprinted.fingerprint())
                 : IdempotentRequest.of(IdempotencyKey.parse(rawKey), operation, skuId, (Integer) arguments[1]);
-        ReplayCache cache = replayCache.getObject();
-        KeyedResult result = cache.lookup(request).orElseGet(() -> requiresNew().execute(status -> {
-            KeyedResult keyed = store.getObject().execute(request, () -> results.toStored(skuId, proceed(invocation)));
-            switch (keyed) {
-                case KeyedResult.Executed executed ->
-                        AfterCommit.run(() -> cache.put(request, executed.response(), executed.createdAt()));
-                case KeyedResult.Replayed replayed ->
-                        AfterCommit.run(() -> cache.put(request, replayed.response(), replayed.createdAt()));
-                case KeyedResult.Rejected _ -> { }
-            }
-            return keyed;
-        }));
+        KeyedResult result = requiresNew().execute(status ->
+                store.getObject().execute(request, () -> results.toStored(skuId, proceed(invocation))));
         return switch (result) {
             case KeyedResult.Executed executed -> results.stored(executed.response());
             case KeyedResult.Replayed replayed -> results.stored(replayed.response());
