@@ -4,6 +4,18 @@
 
 Autonomous build of V2 by the Fable model, 2026-09-27, from the warm-start package on `v2` (first commit 7fafbe2). Budget: 4 hours wall-clock from Setup (19:54Z), extended by the owner to 5 hours at 23:35Z; the run ended at 00:01Z with everything merged (see Unfinished for what stays open). The log is `.fable/log.md`; the design is `DESIGN-V2.md`; the study of the first build is `.fable/current-implementation.md`.
 
+## The v2 details run (2026-09-28)
+
+A second run on `v2`, owner-directed after a UI validation review. Everything below this section describes the first run (2026-09-27) as it ended; where the two disagree, this section and DESIGN-V2 §8–§9 win.
+
+| PR | Issue | What | Review |
+|---|---|---|---|
+| #74 | #71 | v2 details API: `POST/PUT/GET /v2/inventory/{skuId}` and `GET /v2/inventory`; V3 `sku_details`; atomic create with initial stock through the spec's stock path; `Idempotency-Key` on create with the whole request as fingerprint; ETag/If-Match; text/plain 409/412; request guard and 32 KB cap on `/v2`; v1 export frozen as a byte-for-byte baseline | 0 BLOCKER, 1 MAJOR (chunked cap), all fixed; 763 tests |
+| #77 | #76 | Redis removed (owner decision): Postgres-only reads and idempotency; DESIGN-V2 §9 | 0 BLOCKER, 1 MAJOR (doc), all fixed; 749 tests |
+| #75 | #72, #73 | Front end: `#/new` create and `#/sku/:id/edit` pages on v2, SKU and list views with details; the 12 UI review fixes (field-specific reasons, aria-disabled buttons with visible helper text, one outcome area, guidance lines, Request reference) | 0 BLOCKER, 1 MAJOR (URL rules), all fixed; Vitest 201, Playwright 26/26 |
+
+Decisions: A21–A32, FE30–FE47 (FE10, FE21, FE28 amended); interview defense Q24–Q33. Self-critique of the tip d4d2681 by four fresh reviewers (spec, concurrency, front end, interview defense; reports in `.fable/critique/v2-details-*.md`); the BLOCKER/MAJOR outcomes are in `.fable/critique.md` under "v2 details run". Known risks now: the design document is two-thirds about a store that was removed (kept as the record of the arc, §9), and v2 adds surface the spec did not ask for (a second representation and list), accepted by the owner.
+
 ## Work plan as executed
 
 `.fable/plan.md` planned four PRs; three landed, the self-critique fixes are the fourth group.

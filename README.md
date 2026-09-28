@@ -55,7 +55,7 @@ export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 ```bash
 cd frontend
 npm ci
-npm run dev          # http://localhost:15173, proxies /inventory to http://localhost:18080 (start the service first; VITE_PORT and API_URL override)
+npm run dev          # http://localhost:15173, proxies /inventory and /v2 to http://localhost:18080 (start the service first; VITE_PORT and API_URL override)
 npm run lint && npm run typecheck && npm test && npm run build
 npm run test:e2e     # Playwright against the real service on :18080 (add then purchase; a double submit changes stock once)
 ```
@@ -118,7 +118,7 @@ curl -i localhost:18080/v2/inventory/ABC-1              # 200 ETag: "0"  {"skuId
 curl -i 'localhost:18080/v2/inventory?limit=2'           # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1",...}]  (Link as v1)
 ```
 
-`POST /v2/inventory/{skuId}` honours `Idempotency-Key` like the spec POSTs: the whole request (details and initial quantity) is the fingerprint, and 201 and 409 are replayed. Field rules: `name` 1–120 characters, `description` up to 2,000, `cost.amount` an integer in minor units with a three-letter uppercase `cost.currency` (both or neither), up to 10 absolute http(s) `images` URLs of up to 2,048 characters, `initialQuantity` 0 to 2,147,483,647; a body above 32 KB is 400. Details are read from Postgres with the count in one join.
+`POST /v2/inventory/{skuId}` honours `Idempotency-Key` like the spec POSTs: the whole request (details and initial quantity) is the fingerprint, and 201 and 409 are replayed. Field rules: `name` 1–120 characters, `description` up to 2,000, `cost.amount` an integer in minor units with a three-letter uppercase `cost.currency` (both or neither), up to 10 absolute http(s) `images` URLs of up to 2,048 characters, `initialQuantity` 0 to 2,147,483,647; a body above 64 KB is 400. Details are read from Postgres with the count in one join.
 
 ## How V2 stores stock
 

@@ -7,6 +7,7 @@ import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATED_ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IF_MATCH_DESCRIPTION;
@@ -122,7 +123,7 @@ class SkuDetailsController {
     @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
     @Operation(operationId = "createSku", summary = V2_CREATE_SUMMARY, description = V2_CREATE_DESCRIPTION)
     @ApiResponse(responseCode = "201", description = V2_CREATED_DESCRIPTION,
-            headers = @Header(name = ETAG, description = ETAG_DESCRIPTION, schema = @Schema(type = "string")),
+            headers = @Header(name = ETAG, description = CREATED_ETAG_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
     @ApiResponse(responseCode = "400", description = CREATE_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
@@ -141,7 +142,9 @@ class SkuDetailsController {
     }
 
     @PutMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
-    @Operation(operationId = "replaceSkuDetails", summary = V2_REPLACE_SUMMARY, description = V2_REPLACE_DESCRIPTION)
+    @Operation(operationId = "replaceSkuDetails", summary = V2_REPLACE_SUMMARY, description = V2_REPLACE_DESCRIPTION,
+            parameters = @Parameter(name = IF_MATCH, in = ParameterIn.HEADER, required = false,
+                    description = IF_MATCH_DESCRIPTION, schema = @Schema(type = "string")))
     @ApiResponse(responseCode = "200", description = V2_REPLACED_DESCRIPTION,
             headers = @Header(name = ETAG, description = ETAG_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
@@ -156,10 +159,8 @@ class SkuDetailsController {
                     schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
             @PathVariable String skuId,
             @RequestBody SkuDetails body,
-            @Parameter(name = IF_MATCH, in = ParameterIn.HEADER, required = false, description = IF_MATCH_DESCRIPTION,
-                    schema = @Schema(type = "string"))
-            @RequestHeader(name = IF_MATCH, required = false) String ifMatchDocumented,
             HttpServletRequest request) {
+        // Every If-Match header line counts (RFC 9110 allows a list across lines), so the raw headers are parsed.
         Optional<DetailsPrecondition> precondition =
                 IfMatch.parse(Collections.list(request.getHeaders(IF_MATCH)));
         if (precondition.isEmpty()) {

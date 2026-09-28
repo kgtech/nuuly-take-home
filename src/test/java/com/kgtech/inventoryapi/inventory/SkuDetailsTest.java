@@ -43,6 +43,7 @@ class SkuDetailsTest {
                         List.of("https://x/\u00fc.jpg"))),
                 Arguments.of("NUL in name", (Runnable) () -> new SkuDetails("a\u0000b", "", Optional.empty(), List.of())),
                 Arguments.of("newline in name", (Runnable) () -> new SkuDetails("a\nb", "", Optional.empty(), List.of())),
+                Arguments.of("NEL in name", (Runnable) () -> new SkuDetails("a\u0085b", "", Optional.empty(), List.of())),
                 Arguments.of("DEL in description", (Runnable) () -> new SkuDetails("n", "a\u007fb", Optional.empty(),
                         List.of())),
                 Arguments.of("lone high surrogate", (Runnable) () -> new SkuDetails("a\ud800", "", Optional.empty(),

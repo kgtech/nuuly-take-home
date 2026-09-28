@@ -45,3 +45,30 @@ See the "Re-check" section at the end of this file (filled after the fix branche
 ## Re-check (integration 3769414 = v2-ops e169745 + v2-fix-critique cb2028b + v2-frontend 4a572d4, 21:50Z)
 
 Service: `./gradlew build --warning-mode=fail` green, 666 tests in 36 classes, 24.8 s. Front end: lint, typecheck, Vitest 65/65, `check:api` clean, Playwright 12/12 (chromium + mobile-375, axe on three views). Against the rebuilt compose stack: `POST /%69nventory/RC-1;lot=7` → 400 (V-04); `Accept: application/json;q=0, */*;q=0.1` → 400 (V-05); `DELETE /inventory/x` with a bad form escape → 405 text/plain (V-06); a 5 KB POST body → 400 (M-07); `/actuator/health` names `db` and `redis` (M-06). V-01/V-02/V-12..V-15 are covered by the front-end suite's new tests and the e2e retry flow (12/12). Still open after PR #67: M-13, M-25, M-26, M-29, M-30, M-34, V-11's de-duplication (#61); M-14 (HEAD unguarded) was fixed and merged in PR #68. PR #67 (670 tests green) adds the V-08, V-10, M-27 and M-28 tests; its first attempt stopped the shared Postgres container mid-suite because the second instance imported the test configuration and Boot's Testcontainers lifecycle stopped the containers on close; the instance is now configured by connection properties.
+
+
+# Self-critique of the v2 details run (v2 @ d4d2681)
+
+Four fresh reviewer subagents (spec, conc, fe, intv; reports in `.fable/critique/v2-details-*.md`), read-only, on the tip after PRs #74, #77 and #75 merged. Same severity scale as above.
+
+## Totals
+
+| Severity | Findings | Fixed | Documented / accepted |
+|---|---|---|---|
+| BLOCKER | 0 | – | – |
+| MAJOR | 4 | 4 | 0 |
+| MINOR | 20 | 16 | 4 |
+| NIT | 14 | 11 | 3 |
+
+## BLOCKER and MAJOR, with outcome
+
+| ID | Finding | Outcome |
+|---|---|---|
+| F-conc-01 (also F-intv-04) | The 32 KB v2 byte cap can refuse a contract-valid body whose JSON encoder escapes non-ASCII as `\uXXXX` (worst valid body ≈ 33.4 KB) | **Fixed** (service critique PR): cap 64 KB, sized in DESIGN §8 from the escaped maximum; `theLargestEscapedValidBodyIsAccepted` sends that body and expects 201 |
+| F-fe-01 | The client's image-URL host rule blocks IPv6-literal hosts the server accepts; a stored one makes the edit page's Save permanently unavailable | **Fixed** (front-end critique PR): bracketed IPv6 hosts allowed in `validation.ts` and the MSW mock; edit-page test with a stored IPv6 URL |
+| F-intv-01 | FABLE_REPORT described the first run only and Redis as current | **Fixed**: a "v2 details run" section at the top with the PRs, decisions, tests and the critique; the rest marked as the first run's record |
+| F-intv-02 | Interview-defense Q22 said local blocks show the server's texts; FE30 and the code say a field-specific reason | **Fixed**: Q22 rewritten |
+
+## MINOR and NIT, by outcome
+
+Fixed (service): F-conc-02 (concurrent keyed v2 creates with one key → one 201 and identical replays, 409 variant; a PUT completing while a purchase holds the row lock), F-conc-03 (`CappedBodyRequest` counts in one field and wraps `getReader`), F-conc-04 (lock modes stated), F-spec-01 (JSON numbers/booleans never stringified into string fields; `StrictStringsConfiguration`, 5 matrix rows), F-spec-02 (C1 controls rejected), F-spec-04 (201 ETag description), F-spec-05 (If-Match documented on the operation, bound once), F-spec-06 (OpenAPI texts say UTF-16 units), F-spec-08 (replayed 201 ETag stated in §8), F-spec-09 (same as F-conc-02), F-intv-03 (If-None-Match reason), F-intv-05 (fingerprint form in §8/A29), F-intv-06 (int64 cost tradeoff in §8), F-intv-08 (PUT 400 on a malformed id reasoned), F-intv-09 (superseded A-entries and interview questions marked), F-intv-10 (`sku.version` reason), F-intv-11 (fixed 409 text reasoned), F-intv-12 (README proxy line). Fixed (front end, PR by the front-end subagent): F-fe-02…F-fe-08. Documented, not changed: F-spec-03 (a chunked spec POST stays uncapped, A19; stated in §8), F-spec-07 (generated TS makes `initialQuantity` required because of `default: 0`; the front end always sends it; changing the schema would churn v1-adjacent docs for a type nuance), F-intv-07 (the retry guidance line on a PUT after a landed first attempt leads to a 412 and a Reload; accepted: the data is safe, and the 412 text tells the user what happened; recorded as a known seam in FABLE_REPORT).

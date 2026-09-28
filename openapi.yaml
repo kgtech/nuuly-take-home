@@ -308,8 +308,8 @@ paths:
           description: The created SKU
           headers:
             ETag:
-              description: "The details version, a strong validator for If-Match;\
-                \ \"0\" before any details"
+              description: "The details version of a new SKU, always \"1\" (also on\
+                \ a replayed 201, even after a later PUT)"
               schema:
                 type: string
               style: simple
@@ -335,6 +335,12 @@ paths:
         \ their current ETag is one of the listed values, else 412."
       operationId: replaceSkuDetails
       parameters:
+      - description: Optional strong ETag(s) from a previous response; "*" or absent
+          means unconditional
+        in: header
+        name: If-Match
+        schema:
+          type: string
       - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
           \ starting with a letter or digit. Case-sensitive."
         in: path
@@ -345,13 +351,6 @@ paths:
           maxLength: 64
           minLength: 1
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-      - description: Optional strong ETag(s) from a previous response; "*" or absent
-          means unconditional
-        in: header
-        name: If-Match
-        required: false
-        schema:
-          type: string
       requestBody:
         content:
           application/json:
@@ -451,7 +450,8 @@ components:
           $ref: "#/components/schemas/SkuCost"
         description:
           type: string
-          description: Up to 2000 characters; default ""
+          description: Up to 2000 characters (UTF-16 units); newlines and tabs allowed;
+            default ""
           maxLength: 2000
         images:
           type: array
@@ -464,7 +464,8 @@ components:
           maxItems: 10
         name:
           type: string
-          description: "1 to 120 characters, not blank"
+          description: "1 to 120 characters (UTF-16 units), not blank, no control\
+            \ characters"
           maxLength: 120
           minLength: 1
       required:
