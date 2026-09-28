@@ -31,15 +31,26 @@ describe('InventoryList', () => {
     expect(screen.getByText('Page 1 · 5 SKUs')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Availability' })).toBeInTheDocument();
     const badge = (name: string) =>
-      within(rows.find((r) => within(r).queryByRole('link', { name }))!).getAllByRole('cell')[1]!.textContent;
+      within(rows.find((r) => within(r).queryByRole('link', { name }))!).getAllByRole('cell')[2]!.textContent;
     expect(badge('gone')).toBe('Rented out');
     expect(badge('low1')).toBe('Almost gone');
     expect(badge('low3')).toBe('Almost gone');
     expect(badge('ok4')).toBe('Available');
     expect(badge('big')).toBe('Available');
-    expect(within(rows.find((r) => within(r).queryByRole('link', { name: 'big' }))!).getAllByRole('cell')[2]).toHaveTextContent(
+    expect(within(rows.find((r) => within(r).queryByRole('link', { name: 'big' }))!).getAllByRole('cell')[3]).toHaveTextContent(
       (12345).toLocaleString(),
     );
+  });
+
+  it('reads GET /v2/inventory and shows a Name column with a dash for a SKU without details', async () => {
+    store.seed({ A: 1 });
+    store.seedDetails('B', 2, { name: 'Linen dress' });
+    render(<InventoryList />);
+    const rows = await screen.findAllByRole('row');
+    expect(new URL(store.requests[0]!.url).pathname).toBe('/v2/inventory');
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument();
+    expect(within(rows[1]!).getAllByRole('cell')[1]).toHaveTextContent('—');
+    expect(within(rows[2]!).getAllByRole('cell')[1]).toHaveTextContent('Linen dress');
   });
 
   it('labels one SKU in the singular', async () => {

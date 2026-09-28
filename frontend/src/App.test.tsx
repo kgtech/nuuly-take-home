@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -55,6 +55,30 @@ describe('App routing', () => {
     render(<App />);
     expect(await screen.findByRole('heading', { name: '50%off' })).toBeInTheDocument();
     expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.notFound);
+  });
+
+  it('routes #/new to the create page and #/sku/:id/edit to the edit page, with a New SKU nav link', async () => {
+    window.location.hash = '#/new';
+    render(<App />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'New SKU' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'New SKU' })).toHaveAttribute('href', '#/new');
+    expect(screen.getByRole('link', { name: 'New SKU' })).toHaveAttribute('aria-current', 'page');
+    cleanup();
+    store.seed({ plain: 1 });
+    window.location.hash = '#/sku/plain/edit';
+    render(<App />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Add details' })).toBeInTheDocument();
+  });
+
+  it('edit saves and the SKU page then shows the new details', async () => {
+    const user = userEvent.setup();
+    store.seed({ plain: 1 });
+    window.location.hash = '#/sku/plain/edit';
+    render(<App />);
+    await user.type(await screen.findByLabelText(/^name$/i), 'Plain tee');
+    await user.click(screen.getByRole('button', { name: 'Save details' }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Plain tee' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/sku/plain');
   });
 
   it('renders an unknown route as not found with a way home', async () => {

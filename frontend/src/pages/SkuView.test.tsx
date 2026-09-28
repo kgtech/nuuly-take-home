@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { fireEvent } from '@testing-library/react';
 import { store, TEXT } from '../test/server';
 import { SkuView } from './SkuView';
+import type { SkuDetails } from '../api/client';
+
+const details: SkuDetails = {
+  name: 'Linen dress',
+  description: 'A midi dress\nin sand.',
+  cost: { amount: 12900, currency: 'USD' },
+  images: ['https://img.example/1.jpg', 'https://img.example/2.jpg'],
+};
 
 const form = (name: string) => within(screen.getByRole('form', { name }));
 
@@ -95,5 +104,55 @@ describe('SkuView', () => {
     expect(form('Purchase').getByLabelText(/quantity/i)).toHaveValue(1); // kept from the blocked attempt
     await user.type(form('Purchase').getByLabelText(/quantity/i), '{Enter}');
     await waitFor(() => expect(screen.getByTestId('quantity')).toHaveTextContent('1'));
+  });
+
+  it('reads GET /v2 and shows the details: name, description, formatted cost, lazy thumbnails, an edit link', async () => {
+    store.seedDetails('D-1', 4, details);
+    render(<SkuView skuId="D-1" />);
+    expect(await screen.findByRole('heading', { level: 2, name: 'Linen dress' })).toBeInTheDocument();
+    expect(new URL(store.requests[0]!.url).pathname).toBe('/v2/inventory/D-1');
+    expect(screen.getByText(/A midi dress/)).toHaveTextContent('A midi dress in sand.');
+    expect(screen.getByTestId('cost')).toHaveTextContent('$129.00');
+    const imgs = screen.getAllByRole('img', { name: 'Linen dress' });
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0]).toHaveAttribute('src', 'https://img.example/1.jpg');
+    expect(imgs[0]).toHaveAttribute('loading', 'lazy');
+    expect(screen.getByRole('link', { name: 'Edit details' })).toHaveAttribute('href', '#/sku/D-1/edit');
+    expect(screen.queryByText('No details yet')).not.toBeInTheDocument();
+    expect(screen.getByTestId('quantity')).toHaveTextContent('4');
+  });
+
+  it('replaces a broken image with a fallback that keeps the name', async () => {
+    store.seedDetails('D-1', 4, details);
+    render(<SkuView skuId="D-1" />);
+    const [first] = await screen.findAllByRole('img', { name: 'Linen dress' });
+    fireEvent.error(first!);
+    expect(screen.getAllByRole('img', { name: 'Linen dress' })).toHaveLength(1);
+    expect(screen.getByText(/image unavailable/i)).toBeInTheDocument();
+  });
+
+  it('a SKU without details says so and links to add them; a SKU without cost or images shows neither', async () => {
+    store.seed({ plain: 1 });
+    render(<SkuView skuId="plain" />);
+    expect(await screen.findByText('No details yet')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Add details' })).toHaveAttribute('href', '#/sku/plain/edit');
+    expect(screen.queryByRole('link', { name: 'Edit details' })).not.toBeInTheDocument();
+    cleanup();
+    store.seedDetails('bare', 1, { name: 'Bare' });
+    render(<SkuView skuId="bare" />);
+    expect(await screen.findByRole('heading', { level: 2, name: 'Bare' })).toBeInTheDocument();
+    expect(screen.queryByTestId('cost')).not.toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('keeps the details on screen after an add and a purchase (v1 responses carry only the quantity)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('D-1', 1, details);
+    render(<SkuView skuId="D-1" />);
+    await screen.findByRole('heading', { level: 2, name: 'Linen dress' });
+    await user.type(form('Add stock').getByLabelText(/quantity/i), '4{Enter}');
+    await waitFor(() => expect(screen.getByTestId('quantity')).toHaveTextContent('5'));
+    expect(screen.getByRole('heading', { level: 2, name: 'Linen dress' })).toBeInTheDocument();
+    expect(screen.getByTestId('cost')).toHaveTextContent('$129.00');
   });
 });

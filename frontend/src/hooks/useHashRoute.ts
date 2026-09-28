@@ -3,13 +3,18 @@ import { useEffect, useState } from 'react';
 export type Route =
   | { name: 'list' }
   | { name: 'add' }
+  | { name: 'new' }
   | { name: 'sku'; skuId: string }
+  | { name: 'edit'; skuId: string }
   | { name: 'notFound'; path: string };
 
 export function parseRoute(hash: string): Route {
   const path = hash.replace(/^#/, '') || '/';
   if (path === '/') return { name: 'list' };
   if (path === '/add') return { name: 'add' };
+  if (path === '/new') return { name: 'new' };
+  const edit = /^\/sku\/(.+)\/edit$/.exec(path);
+  if (edit?.[1]) return { name: 'edit', skuId: safeDecode(edit[1]) };
   const sku = /^\/sku\/(.+)$/.exec(path);
   if (sku?.[1]) return { name: 'sku', skuId: safeDecode(sku[1]) };
   return { name: 'notFound', path };
@@ -27,6 +32,12 @@ function safeDecode(segment: string): string {
 export function skuHref(skuId: string): string {
   return `#/sku/${encodeURIComponent(skuId)}`;
 }
+
+export function editHref(skuId: string): string {
+  return `${skuHref(skuId)}/edit`;
+}
+
+export const NEW_HREF = '#/new';
 
 export function navigate(hash: string): void {
   window.location.hash = hash;
