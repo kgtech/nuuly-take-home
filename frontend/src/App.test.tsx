@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { store, TEXT } from './test/server';
 import { App } from './App';
+import { SKU_ID_EMPTY_TO_OPEN, SKU_ID_INVALID } from './validation';
 
 describe('App routing', () => {
   it('shows the list at #/ and navigates to a SKU', async () => {
@@ -16,18 +17,36 @@ describe('App routing', () => {
     expect(window.location.hash).toBe('#/sku/A');
   });
 
-  it('finds a SKU by id from the list page with the skuId pattern as a hint only', async () => {
+  it('finds a SKU by id: Open is unavailable with a reason until the id is valid, and no alert is shown', async () => {
     const user = userEvent.setup();
     render(<App />);
     const input = await screen.findByRole('textbox', { name: 'SKU ID' });
-    await user.type(input, 'bad id');
-    expect(screen.getByText(/letters, digits/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /open/i }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.notFound);
+    const open = screen.getByRole('button', { name: /open/i });
+    const hint = document.getElementById(input.getAttribute('aria-describedby')!)!;
+
+    expect(hint).toHaveTextContent(SKU_ID_EMPTY_TO_OPEN);
+    expect(open).toHaveAttribute('aria-disabled', 'true');
+    expect(open.getAttribute('aria-describedby')!.split(' ')).toContain(hint.id);
+    await user.click(open);
+    await user.type(input, '{Enter}');
     expect(window.location.hash).toBe('');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await user.type(input, 'bad id');
+    expect(hint).toHaveTextContent(SKU_ID_INVALID);
+    expect(hint).toHaveTextContent(/letters, digits/i);
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(open).toHaveAttribute('aria-disabled', 'true');
+    await user.click(open);
+    expect(window.location.hash).toBe('');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(TEXT.notFound)).not.toBeInTheDocument();
+
     await user.clear(input);
     await user.type(input, 'ok-1');
-    await user.click(screen.getByRole('button', { name: /open/i }));
+    expect(hint).toBeEmptyDOMElement();
+    expect(open).not.toHaveAttribute('aria-disabled');
+    await user.click(open);
     expect(window.location.hash).toBe('#/sku/ok-1');
   });
 
@@ -67,6 +86,8 @@ describe('phone width', () => {
     expect(css).toMatch(/max-width/);
     for (const m of css.matchAll(/min-height:\s*(\d+)px/g)) expect(Number(m[1])).toBeGreaterThanOrEqual(44);
     expect(css).toMatch(/min-height:\s*4[4-9]px/);
+    // Unavailable buttons are aria-disabled, not disabled, so the stylesheet must style that state.
+    expect(css).toMatch(/button\[aria-disabled=['"]true['"]\]/);
     // Light only (FE26): no dark-mode tokens.
     expect(css).not.toMatch(/prefers-color-scheme/);
   });

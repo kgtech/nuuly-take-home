@@ -81,6 +81,39 @@ describe('InventoryList', () => {
     expect(screen.queryByRole('button', { name: /next page/i })).not.toBeInTheDocument();
   });
 
+  it('says no SKUs follow the cursor and offers to clear it', async () => {
+    const user = userEvent.setup();
+    store.seed({ A: 1, B: 2 });
+    render(<InventoryList />);
+    await screen.findAllByRole('row');
+    await user.type(screen.getByLabelText(/after/i), 'Z');
+    await user.click(screen.getByRole('button', { name: /apply/i }));
+    expect(await screen.findByText("No SKUs after 'Z'.")).toBeInTheDocument();
+    expect(screen.queryByText(/no skus yet/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /show from the start/i }));
+    expect(await screen.findByRole('link', { name: 'A' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/after/i)).toHaveValue('');
+    expect(new URL(store.requests.at(-1)!.url).searchParams.has('after')).toBe(false);
+  });
+
+  it.each(['0', '500', '2.5'])('hints that a per-page value of %s is outside 1–250 and still sends it as typed (FE17)', async (value) => {
+    const user = userEvent.setup();
+    store.seed({ A: 1 });
+    render(<InventoryList />);
+    await screen.findAllByRole('row');
+    const limit = screen.getByLabelText(/per page/i);
+    const hint = document.getElementById(limit.getAttribute('aria-describedby')!)!;
+    expect(hint).toBeEmptyDOMElement();
+    await user.type(limit, value);
+    expect(hint).toHaveTextContent('Outside 1–250. The service will use 250.');
+    await user.click(screen.getByRole('button', { name: /apply/i }));
+    await screen.findAllByRole('row');
+    expect(new URL(store.requests.at(-1)!.url).searchParams.get('limit')).toBe(value);
+    await user.clear(limit);
+    await user.type(limit, '25');
+    expect(hint).toBeEmptyDOMElement();
+  });
+
   it('lets the user start after a cursor', async () => {
     const user = userEvent.setup();
     store.seed({ A: 1, B: 2, C: 3 });
