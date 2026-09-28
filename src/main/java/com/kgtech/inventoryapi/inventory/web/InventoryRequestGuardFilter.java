@@ -41,8 +41,12 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
     private static final String PURCHASE_SEGMENT = "purchase";
     /** The largest JSON body a spec request needs, with room for whitespace and ignored fields (G13). */
     static final long MAX_BODY_BYTES = 4096;
-    /** DESIGN-V2 §8: a 2,000-character description plus ten 2,048-character URLs fits with room to spare. */
-    static final long MAX_V2_BODY_BYTES = 32_768;
+    /**
+     * DESIGN-V2 §8: the largest contract-valid v2 body, with every non-ASCII character of the name and description
+     * written as a six-byte \\uXXXX escape (12,720 bytes) plus ten 2,048-byte ASCII URLs and the structure, is about
+     * 33.4 KB; 64 KB leaves room for whitespace and ignored properties (critique F-conc-01).
+     */
+    static final long MAX_V2_BODY_BYTES = 65_536;
 
     /** The routed segments from "inventory" on, and whether they came under /v2. */
     private record Routed(List<PathSegment> segments, boolean v2) {

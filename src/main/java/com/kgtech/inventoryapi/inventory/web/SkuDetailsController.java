@@ -7,6 +7,7 @@ import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATED_ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IF_MATCH_DESCRIPTION;
@@ -33,6 +34,7 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_REPLACED_DES
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_REPLACE_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_REPLACE_SUMMARY;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
+import static org.springframework.http.HttpHeaders.CACHE_CONTROL;
 import static org.springframework.http.HttpHeaders.ETAG;
 import static org.springframework.http.HttpHeaders.IF_MATCH;
 import static org.springframework.http.HttpHeaders.LINK;
@@ -122,7 +124,7 @@ class SkuDetailsController {
     @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
     @Operation(operationId = "createSku", summary = V2_CREATE_SUMMARY, description = V2_CREATE_DESCRIPTION)
     @ApiResponse(responseCode = "201", description = V2_CREATED_DESCRIPTION,
-            headers = @Header(name = ETAG, description = ETAG_DESCRIPTION, schema = @Schema(type = "string")),
+            headers = @Header(name = ETAG, description = CREATED_ETAG_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
     @ApiResponse(responseCode = "400", description = CREATE_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
@@ -141,7 +143,9 @@ class SkuDetailsController {
     }
 
     @PutMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
-    @Operation(operationId = "replaceSkuDetails", summary = V2_REPLACE_SUMMARY, description = V2_REPLACE_DESCRIPTION)
+    @Operation(operationId = "replaceSkuDetails", summary = V2_REPLACE_SUMMARY, description = V2_REPLACE_DESCRIPTION,
+            parameters = @Parameter(name = IF_MATCH, in = ParameterIn.HEADER, required = false,
+                    description = IF_MATCH_DESCRIPTION, schema = @Schema(type = "string")))
     @ApiResponse(responseCode = "200", description = V2_REPLACED_DESCRIPTION,
             headers = @Header(name = ETAG, description = ETAG_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
@@ -156,10 +160,8 @@ class SkuDetailsController {
                     schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
             @PathVariable String skuId,
             @RequestBody SkuDetails body,
-            @Parameter(name = IF_MATCH, in = ParameterIn.HEADER, required = false, description = IF_MATCH_DESCRIPTION,
-                    schema = @Schema(type = "string"))
-            @RequestHeader(name = IF_MATCH, required = false) String ifMatchDocumented,
             HttpServletRequest request) {
+        // Every If-Match header line counts (RFC 9110 allows a list across lines), so the raw headers are parsed.
         Optional<DetailsPrecondition> precondition =
                 IfMatch.parse(Collections.list(request.getHeaders(IF_MATCH)));
         if (precondition.isEmpty()) {
@@ -197,8 +199,9 @@ class SkuDetailsController {
         }
         SkuPage page = service.listSkus(limit, after);
         return page.next()
-                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next)).body(page.items()))
-                .orElseGet(() -> ResponseEntity.ok(page.items()));
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next))
+                        .header(CACHE_CONTROL, NO_STORE).body(page.items()))
+                .orElseGet(() -> ResponseEntity.ok().header(CACHE_CONTROL, NO_STORE).body(page.items()));
     }
 
     /** C2 for v2: the Link is built from the request's origin plus the routed base path. */
@@ -213,8 +216,11 @@ class SkuDetailsController {
         return "<" + url + ">; rel=\"next\"";
     }
 
+    /** The ETag is a details validator for If-Match, not a cache key for the count: no store, no 304 (§8). */
+    private static final String NO_STORE = "no-store";
+
     private static ResponseEntity<SkuItem> withEtag(ResponseEntity.BodyBuilder builder, SkuItem item) {
-        return builder.header(ETAG, IfMatch.etag(item.detailsVersion())).body(item);
+        return builder.header(ETAG, IfMatch.etag(item.detailsVersion())).header(CACHE_CONTROL, NO_STORE).body(item);
     }
 
     /**
@@ -237,6 +243,6 @@ class SkuDetailsController {
             return entity;
         }
         return ResponseEntity.status(HttpStatus.CREATED).headers(entity.getHeaders()).header(ETAG, CREATED_ETAG)
-                .body(response.body());
+                .header(CACHE_CONTROL, NO_STORE).body(response.body());
     }
 }

@@ -16,9 +16,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  */
 @JsonInclude(JsonInclude.Include.NON_ABSENT)
 public record SkuDetails(
-        @Schema(description = "1 to 120 characters, not blank", minLength = 1, maxLength = SkuDetails.MAX_NAME,
+        @Schema(description = "1 to 120 characters (UTF-16 units), not blank, no control characters", minLength = 1, maxLength = SkuDetails.MAX_NAME,
                 requiredMode = Schema.RequiredMode.REQUIRED) String name,
-        @Schema(description = "Up to 2000 characters; default \"\"", maxLength = SkuDetails.MAX_DESCRIPTION)
+        @Schema(description = "Up to 2000 characters (UTF-16 units); newlines and tabs allowed; default \"\"", maxLength = SkuDetails.MAX_DESCRIPTION)
         String description,
         @Schema(implementation = SkuCost.class) Optional<SkuCost> cost,
         @ArraySchema(maxItems = SkuDetails.MAX_IMAGES, arraySchema = @Schema(
@@ -52,14 +52,14 @@ public record SkuDetails(
     }
 
     /**
-     * No control characters (a newline and a tab are allowed in a description) and no unpaired surrogate: Postgres
+     * No C0 or C1 control characters (a newline and a tab are allowed in a description) and no unpaired surrogate: Postgres
      * text cannot hold NUL and a lone surrogate cannot be encoded, and either would answer 500 instead of 400
      * (review R-02). Lengths are UTF-16 units, the same as the JSON string's length in JavaScript.
      */
     private static void requirePrintable(String value, boolean multiline) {
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-            boolean allowed = c >= 0x20 && c != 0x7F || multiline && (c == '\n' || c == '\t');
+            boolean allowed = c >= 0x20 && c != 0x7F && !(c >= 0x80 && c <= 0x9F) || multiline && (c == '\n' || c == '\t');
             if (!allowed) {
                 throw new IllegalArgumentException("control character in text");
             }
@@ -76,7 +76,7 @@ public record SkuDetails(
 
     /**
      * An absolute http or https URL of at most 2048 ASCII characters (percent-encoded; review R-05), so its byte
-     * length is its length and the 32 KB body cap always fits a contract-valid body. URI rejects spaces and controls.
+     * length is its length and the body cap can be sized from the field limits (§8). URI rejects spaces and controls.
      */
     private static void requireAbsoluteHttpUrl(String image) {
         if (image.length() > MAX_URL) {

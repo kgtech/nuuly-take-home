@@ -239,6 +239,13 @@ class SkuDetailsApiIntegrationTest {
                         null)),
                 Arguments.of("null image", createBody("{\"name\":\"n\",\"images\":[null]}", null)),
                 Arguments.of("NUL in name", createBody("{\"name\":\"a\\u0000b\"}", null)),
+                Arguments.of("C1 control in name", createBody("{\"name\":\"a\\u0085b\"}", null)),
+                Arguments.of("C1 control in description", createBody("{\"name\":\"n\",\"description\":\"a\\u009fb\"}", null)),
+                Arguments.of("numeric name", createBody("{\"name\":123}", null)),
+                Arguments.of("boolean name", createBody("{\"name\":true}", null)),
+                Arguments.of("numeric description", createBody("{\"name\":\"n\",\"description\":42}", null)),
+                Arguments.of("numeric image", createBody("{\"name\":\"n\",\"images\":[1]}", null)),
+                Arguments.of("numeric currency", createBody("{\"name\":\"n\",\"cost\":{\"amount\":1,\"currency\":840}}", null)),
                 Arguments.of("NUL in description", createBody("{\"name\":\"n\",\"description\":\"a\\u0000b\"}", null)),
                 Arguments.of("newline in name", createBody("{\"name\":\"a\\nb\"}", null)),
                 Arguments.of("lone surrogate", createBody("{\"name\":\"a\\ud800b\"}", null)),
@@ -453,6 +460,37 @@ class SkuDetailsApiIntegrationTest {
         assertThat(json(reply)).containsEntry("skuId", "V1-3").containsEntry("quantity", 7).doesNotContainKey("details");
     }
 
+    /**
+     * DESIGN-V2 §8: the ETag validates details for If-Match only. A GET with a matching If-None-Match is answered
+     * 200 with the current count, never 304 (Spring's ResponseEntity handling would otherwise send one and a browser
+     * would keep a cached, stale quantity after a purchase); item and list responses are Cache-Control: no-store.
+     */
+    @Test
+    void getV2IgnoresIfNoneMatchAndIsNeverStored() throws Exception {
+        assertThat(create("NM-1", 10).status()).isEqualTo(201);
+        Reply first = getV2("NM-1");
+        assertThat(first.etag()).isEqualTo("\"1\"");
+        assertThat(send(post("/inventory/{skuId}/purchase", "NM-1").accept(APPLICATION_JSON)
+                .contentType(APPLICATION_JSON).content("{\"quantity\":3}")).status()).isEqualTo(200);
+
+        MockHttpServletResponse conditional = mvc.perform(get("/v2/inventory/{skuId}", "NM-1")
+                .accept(APPLICATION_JSON).header(HttpHeaders.IF_NONE_MATCH, "\"1\"")
+                .header(HttpHeaders.IF_MODIFIED_SINCE, "Sun, 06 Nov 2094 08:49:37 GMT")).andReturn().getResponse();
+
+        assertThat(conditional.getStatus()).isEqualTo(200);
+        assertThat(JsonPath.<Integer>read(conditional.getContentAsString(), "$.quantity")).isEqualTo(7);
+        assertThat(conditional.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        assertThat(first.etag()).isEqualTo(conditional.getHeader(ETAG));
+        MockHttpServletResponse list = mvc.perform(get("/v2/inventory").accept(APPLICATION_JSON)
+                .header(HttpHeaders.IF_NONE_MATCH, "*")).andReturn().getResponse();
+        assertThat(list.getStatus()).isEqualTo(200);
+        assertThat(list.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        assertThat(create("NM-2", 1).status()).isEqualTo(201);
+        MockHttpServletResponse created = mvc.perform(post("/v2/inventory/{skuId}", "NM-3").accept(APPLICATION_JSON)
+                .contentType(APPLICATION_JSON).content(createBody(DETAILS, 1))).andReturn().getResponse();
+        assertThat(created.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+    }
+
     @Test
     void getV2OfAMissingOrMalformedSkuIs404() throws Exception {
         assertText(getV2("NOPE"), 404, "SKU not found");
@@ -534,20 +572,42 @@ class SkuDetailsApiIntegrationTest {
         assertThat(send(get("/v2/inventory/{skuId}", "GD-1").header(ACCEPT, "application/xml")).status())
                 .as("GET ignores Accept").isEqualTo(200);
         assertThat(send(get("/v2/inventory").header(ACCEPT, "text/html")).status()).isEqualTo(200);
-        String big = createBody("{\"name\":\"n\",\"description\":\"" + "d".repeat(33_000) + "\"}", null);
+        String big = createBody("{\"name\":\"n\",\"pad\":\"" + "d".repeat(66_000) + "\"}", null);
         assertText(create("GD-3", big, null), 400, INVALID_REQUEST);
         assertThat(count("SELECT count(*) FROM sku")).isEqualTo(1);
         assertThat(getV2("GD-1").etag()).isEqualTo("\"1\"");
     }
 
     @Test
-    void aBodyNearTheV2CapIsAccepted() throws Exception {
+    void aLargeAsciiBodyUnderTheCapIsAccepted() throws Exception {
         String images = String.join(",", java.util.Collections.nCopies(10,
                 "\"https://cdn.example.com/" + "i".repeat(2000) + "\""));
         String body = createBody("{\"name\":\"n\",\"description\":\"" + "d".repeat(2000) + "\",\"images\":[" + images
                 + "]}", 1);
-        assertThat(body.length()).isBetween(20_000, 32_768);
+        assertThat(body.length()).isBetween(20_000, 65_536);
         assertThat(create("GD-4", body, null).status()).isEqualTo(201);
+    }
+
+    /**
+     * Critique F-conc-01: the largest contract-valid body with every non-ASCII character escaped as \\uXXXX (about
+     * 33.4 KB on the wire) must be accepted; the byte cap is sized for it.
+     */
+    @Test
+    void theLargestEscapedValidBodyIsAccepted() throws Exception {
+        String name = "\\u00e9".repeat(120);
+        String description = "\\u65e5".repeat(2000);
+        String images = String.join(",", java.util.Collections.nCopies(10,
+                "\"https://cdn.example.com/" + "i".repeat(2048 - 24) + "\""));
+        String body = createBody("{\"name\":\"" + name + "\",\"description\":\"" + description + "\",\"cost\":"
+                + "{\"amount\":9223372036854775807,\"currency\":\"USD\"},\"images\":[" + images + "]}", Integer.MAX_VALUE);
+        assertThat(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isBetween(33_000, 65_536);
+
+        Reply reply = create("GD-5", body, null);
+
+        assertThat(reply.status()).as(reply.body()).isEqualTo(201);
+        assertThat(JsonPath.<String>read(reply.body(), "$.details.name")).hasSize(120);
+        assertThat(JsonPath.<String>read(reply.body(), "$.details.description")).hasSize(2000);
+        assertThat(JsonPath.<List<String>>read(reply.body(), "$.details.images")).hasSize(10);
     }
 
     @Test
