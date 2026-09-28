@@ -35,7 +35,7 @@ import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.Tables;
 
 /**
- * Issue #71, DESIGN-V2 §8: the v2 details API end to end against Postgres and Redis. Create with initial stock,
+ * Issue #71, DESIGN-V2 §8: the v2 details API end to end against Postgres. Create with initial stock,
  * 409 on an existing SKU, the validation matrix, keyed creates (201 and 409 replayed), PUT with If-Match (200, 404,
  * 412), v2 reads, the v2 list, and the request guard on v2 paths. Not @Transactional.
  */
@@ -319,6 +319,10 @@ class SkuDetailsApiIntegrationTest {
         assertThat(replay.status()).isEqualTo(409);
         assertThat(replay.body()).isEqualTo(first.body());
         assertThat(replay.contentType()).isEqualTo(first.contentType());
+        // A18 for a stored 409 too: a tombstoned row answers 400.
+        jdbc.sql("UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL "
+                + "WHERE idempotency_key = ?::uuid").param(key).update();
+        assertText(create("K-2", createBody(DETAILS, 2), key), 400, INVALID_REQUEST);
     }
 
     static Stream<Arguments> differentRequests() {

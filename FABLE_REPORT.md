@@ -1,5 +1,7 @@
 # FABLE_REPORT: the V2 run
 
+> Written at the end of the first V2 run (2026-09-27). Redis, `RedisFaultTest` and `StockCacheTest` described below were removed on 2026-09-28 (DESIGN-V2 §9, PR #77); durability is now covered by `DurabilityAcrossServiceInstancesTest` and exactly once by `IdempotencyHttpConcurrencyTest` and `IdempotencyApiIntegrationTest`.
+
 Autonomous build of V2 by the Fable model, 2026-09-27, from the warm-start package on `v2` (first commit 7fafbe2). Budget: 4 hours wall-clock from Setup (19:54Z), extended by the owner to 5 hours at 23:35Z; the run ended at 00:01Z with everything merged (see Unfinished for what stays open). The log is `.fable/log.md`; the design is `DESIGN-V2.md`; the study of the first build is `.fable/current-implementation.md`.
 
 ## Work plan as executed

@@ -41,14 +41,14 @@ until curl -sf localhost:18080/actuator/health/readiness >/dev/null; do sleep 2;
 docker compose up -d postgres               # the database alone, e.g. for a debugger-launched app
 ```
 
-An app started outside `bootRun` needs the stores' addresses:
+An app started outside `bootRun` needs the database's address:
 
 ```bash
 export SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:$(docker compose port postgres 5432 | cut -d: -f2)/inventory"
 export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 ```
 
-`compose.yaml` defines Postgres; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: `bootRun` listens on 8080, the compose app on 18080, but both start the stores from compose.yaml.
+`compose.yaml` defines Postgres; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: `bootRun` listens on 8080, the compose app on 18080, but both start the database from compose.yaml.
 
 **Front end** (see [`frontend/README.md`](frontend/README.md) and [`frontend/DECISIONS.md`](frontend/DECISIONS.md)):
 
@@ -68,7 +68,7 @@ Start from an empty database (`docker compose down -v && docker compose up --bui
 curl -i localhost:18080/inventory                     # 200 []
 curl -i -X POST localhost:18080/inventory/ABC-1 -H 'Content-Type: application/json' \
      -d '{"quantity":5}'                             # 200 {"skuId":"ABC-1","quantity":5}
-curl -i localhost:18080/inventory/ABC-1               # 200 {"skuId":"ABC-1","quantity":5}   (cached for later reads)
+curl -i localhost:18080/inventory/ABC-1               # 200 {"skuId":"ABC-1","quantity":5}
 curl -i -X POST localhost:18080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
      -d '{"quantity":2}'                             # 200 {"skuId":"ABC-1","quantity":3}
 curl -i -X POST localhost:18080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
@@ -150,7 +150,7 @@ The spec leaves these open; V2 keeps the first build's answers ([`DECISIONS.md`]
 - `Idempotency-Key` is optional and must be a UUID; a repeated request replays the first response, including 404 and 400 outcomes; a different body, SKU or endpoint, or a key older than 24 h, returns 400 (G8, G14, R1, S3, T1, U1, Y3). Two simultaneous requests with the same key produce one change (R2).
 - The list is sorted by SKU ID with at most 250 per response and a `Link` to the next page built from the request's `Host` (no `X-Forwarded-*` handling); a bad `limit` is ignored, a repeated `after` or an undecodable query is 400 (G9, R4, R8, Z3, C2).
 - No authentication (G10). Requests outside the spec's operations get standard codes with the reason phrase as text; `/actuator/**` and the springdoc paths keep Spring Boot's own responses, except Tomcat-level rejections and undecodable queries, which are text/plain everywhere (S6, T3, C1).
-- A cached count may lag a committed write by up to `inventory.cache.stock-ttl` (5 s, measured from the read that cached it) if the post-commit refresh fails or raced a read miss; otherwise reads are fresh within milliseconds (DESIGN-V2 §3).
+- A read is always the last committed count; there is no cache (DESIGN-V2 §9).
 - The app is published on 0.0.0.0:18080 with no authentication (G10) so reviewers can reach it; Postgres is on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
 
 ## AI use

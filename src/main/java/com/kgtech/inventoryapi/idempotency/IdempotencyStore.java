@@ -2,7 +2,6 @@ package com.kgtech.inventoryapi.idempotency;
 
 import java.security.MessageDigest;
 import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -29,7 +28,7 @@ class IdempotencyStore {
             """;
 
     /** T1: how long a key stays valid, by the database clock. */
-    public static final Duration KEY_VALIDITY = Duration.ofHours(24);
+    static final Duration KEY_VALIDITY = Duration.ofHours(24);
 
     /** T1: expiry uses the database clock (transaction start time) and KEY_VALIDITY. */
     static final String STORED = """
