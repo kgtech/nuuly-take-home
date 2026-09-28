@@ -1,6 +1,6 @@
 # FABLE_REPORT: the V2 run
 
-Autonomous build of V2 by the Fable model, 2026-09-27, from the warm-start package on `v2` (first commit 7fafbe2). Budget: 4 hours wall-clock from Setup (19:54Z); the run reached the re-check at about 1 h 55 min, with the merges pending on the owner (see Unfinished). The log is `.fable/log.md`; the design is `DESIGN-V2.md`; the study of the first build is `.fable/current-implementation.md`.
+Autonomous build of V2 by the Fable model, 2026-09-27, from the warm-start package on `v2` (first commit 7fafbe2). Budget: 4 hours wall-clock from Setup (19:54Z), extended by the owner to 5 hours at 23:35Z; the run ended at 00:01Z with everything merged (see Unfinished for what stays open). The log is `.fable/log.md`; the design is `DESIGN-V2.md`; the study of the first build is `.fable/current-implementation.md`.
 
 ## Work plan as executed
 
@@ -13,7 +13,7 @@ Autonomous build of V2 by the Fable model, 2026-09-27, from the warm-start packa
 | PR3 Ops and remaining review requirements | `v2-ops` | #47, #50, #54, #56, #58, #59, #60 | Planned as docs/ops only; it also took #54 (raw `;` and Accept q=0), #59 (single outcome mapping), #60 (shared test annotation) and #56 (24h boundaries) because they were small once the service existed. |
 | #66 Fixes (service) | `v2-fix-critique` | critique findings V-07, V-09 (record), V-11 part, M-04..M-09, M-31..M-33, M-44 and the record gaps | Stacked on #65; front-end fixes went onto #62's branch (4a572d4) instead of a fourth PR, so PR #62 carries both the build and its critique fixes. |
 
-Not done: #61 (test-suite de-duplication of the copied validation matrices), see "Unfinished".
+Every `[v2]` issue is closed, #61 last (PR #69).
 
 ## What was built
 
@@ -52,9 +52,9 @@ Rebuilt differently: everything under storage (`StockRepository`, `Balance`, mig
 
 ## Unfinished or stuck
 
-- **Merges.** The operator's permission classifier first refused `gh pr merge` on my own PRs; the owner then said "You can merge", and all four were squash-merged in order (#64 → 2 issues per body closed, #62, #65, #66). #65 and #66 needed `origin/v2` merged into them after the squashes (no history rewrite). Final `v2` tip: 38154ce, rebuilt clean: 666 service tests, 65 front-end tests, 12 Playwright runs, stack healthy on port 18080. Every `[v2]` issue is closed except #61.
+- **Merges.** The operator's permission classifier first refused `gh pr merge` on my own PRs; the owner then said "You can merge", and all four were squash-merged in order (#64 → 2 issues per body closed, #62, #65, #66). #65 and #66 needed `origin/v2` merged into them after the squashes (no history rewrite). After the owner added an hour, PRs #67 (V-08/V-10/M-27/M-28 tests), #68 (M-14) and #69 (#61) were reviewed and merged the same way. Final `v2` tip: 3c59af1, rebuilt clean: 612 service tests in 38 classes (27 s), 65 front-end tests, 12 Playwright runs, stack healthy on port 18080. Every `[v2]` issue is closed.
 - **CI.** The workflow is written (`.fable/ci-workflow.yml`) but could not be pushed under `.github/workflows/`: the token lacks the `workflow` scope and no SSH key exists (DEVIATIONS.md). Every "green" in this run is a local `./gradlew build --warning-mode=fail` or `npm` run, recorded in `.fable/log.md`.
-- **Issue #61** (test de-duplication of the copied validation matrices): not attempted; the `@Hidden` test was added. Recorded as a deviation.
+- **Issue #61** (test de-duplication): done in PR #69 after the budget extension: 83 duplicate rows removed, a 24-test `InventoryServiceReadTest` added for limit parsing; the DEVIATIONS.md entry written earlier is superseded by that PR.
 - **Critique items left open** (`.fable/critique.md`): M-13 (guard before @Valid), M-25/M-26/M-29/M-30/M-34 (test organisation), M-20 (service OpenAPI `required` on InventoryItem), N-02..N-06. V-08, V-10, M-27 and M-28 were closed by PR #67 and M-14 by PR #68 after the owner extended the budget by one hour.
 - **Process departures.** Tests were not strictly written before the code for the new storage classes (same pass; first run red then green, logged). One red commit was pushed to `v2-fix-critique` (e8bb70c, a dangling Javadoc under -Werror) and fixed in the next commit; logged. The plan's "second commit is the plan" could not hold because the design must be committed first; the plan is the third commit.
 
@@ -65,7 +65,7 @@ Nine fresh reviewers (spec, concurrency, storage, API, tests, front end, securit
 | Severity | Found | Fixed | Recorded | Won't fix / open |
 |---|---|---|---|---|
 | BLOCKER | 3 | 3 (front-end key dropped on 5xx; no axe/375 px checks; 24h boundary test) | 0 | 0 |
-| MAJOR | 13 | 10 (guard bypass, Accept precedence, form-filter 500, unbounded test waits, UUID fallback, form remount, e2e header check, dark-mode contrast, fresh-instance durability test, replay fast-path test) | 2 (Redis copy rationale; hot-set semantics) | 1 open (#61 de-dup) |
+| MAJOR | 13 | 11 (guard bypass, Accept precedence, form-filter 500, unbounded test waits, UUID fallback, form remount, e2e header check, dark-mode contrast, fresh-instance durability test, replay fast-path test, #61 de-dup) | 2 (Redis copy rationale; hot-set semantics) | 0 |
 | MINOR | 45 | 14 | 15 | 16 |
 | NIT | 12 | 1 | 2 | 8 won't fix, 1 rejected |
 
