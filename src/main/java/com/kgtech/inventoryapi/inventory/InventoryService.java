@@ -18,7 +18,7 @@ import com.kgtech.inventoryapi.idempotency.Operation;
 /**
  * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2); the
  * Idempotency-Key is handled by the @Idempotent interceptor (Z1). After commit the cached count is refreshed.
- * Reads try the cache, then one row lookup (§3).
+ * Reads try the cache, then one row lookup (§3). The v2 details operations (§8) share the transaction template.
  */
 @Service
 public class InventoryService {
@@ -34,11 +34,14 @@ public class InventoryService {
     private static final String FIRST = "";
 
     private final StockRepository stock;
+    private final DetailsRepository details;
     private final StockCache cache;
     private final TransactionTemplate transaction;
 
-    InventoryService(StockRepository stock, StockCache cache, PlatformTransactionManager transactionManager) {
+    InventoryService(StockRepository stock, DetailsRepository details, StockCache cache,
+            PlatformTransactionManager transactionManager) {
         this.stock = stock;
+        this.details = details;
         this.cache = cache;
         this.transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -67,6 +70,70 @@ public class InventoryService {
         return transaction.execute(status -> stock.purchase(skuId, quantity)
                 .<WriteResult>map(balance -> ok(skuId, balance))
                 .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient() : new StockOutcome.NotFound()));
+    }
+
+    /**
+     * DESIGN-V2 §8 "Create": one READ COMMITTED transaction in lock order sku row → details row → ledger. The SKU
+     * row's INSERT decides create (row back) or 409 (no row); initial stock goes through the spec's add path and
+     * ledger row. A new row at 0 cannot overflow an int32 initial quantity.
+     */
+    @Idempotent(Operation.CREATE)
+    public WriteResult create(String skuId, CreateSku request, String idempotencyKey) {
+        Optional<WriteResult> rejected = SkuId.rejection(Operation.CREATE, skuId);
+        if (rejected.isPresent()) {
+            return rejected.get();
+        }
+        return transaction.execute(status -> {
+            if (!details.claimSku(skuId)) {
+                return new DetailsOutcome.AlreadyExists();
+            }
+            long version = details.insert(skuId, request.details());
+            long quantity = 0;
+            if (request.initialQuantity() > 0) {
+                Balance balance = stock.add(skuId, request.initialQuantity())
+                        .orElseThrow(() -> new IllegalStateException("a new SKU cannot overflow: " + skuId));
+                AfterCommit.run(() -> cache.refresh(skuId, balance.quantity(), balance.version()));
+                quantity = balance.quantity();
+            }
+            return new DetailsOutcome.Created(new SkuItem(skuId, quantity, Optional.of(request.details()), version));
+        });
+    }
+
+    /** DESIGN-V2 §8 "Edit": full replacement in one transaction; never touches the balance row or the ledger. */
+    public ReplaceResult replaceDetails(String skuId, SkuDetails replacement, DetailsPrecondition precondition) {
+        if (!SkuId.isValid(skuId)) {
+            return new ReplaceResult.InvalidRequest();
+        }
+        return transaction.execute(status -> details.replace(skuId, replacement, precondition)
+                .<ReplaceResult>map(version -> new ReplaceResult.Replaced(details.find(skuId)
+                        .orElseThrow(() -> new IllegalStateException("replaced details vanished: " + skuId))))
+                .orElseGet(() -> switch (precondition) {
+                    // Unconditional: the only way to get no row is a missing SKU; no probe, so a create that commits
+                    // between the two statements can never turn it into a 412 (review R-03).
+                    case DetailsPrecondition.Any _ -> new ReplaceResult.NotFound();
+                    case DetailsPrecondition.Versions _ -> details.exists(skuId) ? new ReplaceResult.VersionMismatch()
+                            : new ReplaceResult.NotFound();
+                }));
+    }
+
+    /** DESIGN-V2 §8 "Reads": G11 first, then one join; never the stock cache (A27). */
+    public Optional<SkuItem> findSku(String skuId) {
+        if (!SkuId.isValid(skuId)) {
+            return Optional.empty();
+        }
+        return details.find(skuId);
+    }
+
+    /** The v2 list: the same page rules as {@link #list} with the details joined (§8 "Reads"). */
+    public SkuPage listSkus(String limit, String after) {
+        int n = parseLimit(limit);
+        String cursor = truncateAtNul(after);
+        List<SkuItem> items = details.page(cursor == null ? FIRST : cursor, n + 1L);
+        if (items.size() <= n) {
+            return new SkuPage(items, Optional.empty());
+        }
+        List<SkuItem> page = items.subList(0, n);
+        return new SkuPage(List.copyOf(page), Optional.of(new InventoryPage.Next(n, page.getLast().skuId())));
     }
 
     /** G11 first (no I/O for a malformed id, C-05), then the cache, then one row (DESIGN-V2 §3). */

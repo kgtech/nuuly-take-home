@@ -34,10 +34,22 @@ class RequestHashTest {
         assertThat(hex(RequestHash.of(Operation.ADD, "ABC", 6))).as("quantity").isNotEqualTo(base);
     }
 
+    /** A29: the create hash covers the request's own canonical form; the v1 form is the quantity as digits. */
+    @Test
+    void createHashUsesTheCanonicalBodyAndV1KeepsItsBytes() {
+        assertThat(hex(RequestHash.of(Operation.ADD, "widget", "5")))
+                .isEqualTo(hex(RequestHash.of(Operation.ADD, "widget", 5)));
+        assertThat(hex(RequestHash.of(Operation.CREATE, "widget", "5")))
+                .isNotEqualTo(hex(RequestHash.of(Operation.ADD, "widget", "5")));
+        assertThat(hex(RequestHash.of(Operation.CREATE, "widget", "a")))
+                .isNotEqualTo(hex(RequestHash.of(Operation.CREATE, "widget", "b")));
+        assertThat(Operation.CREATE.dbValue()).isEqualTo("create");
+    }
+
     @Test
     void hashIs32Bytes() {
         assertThat(RequestHash.of(Operation.ADD, "widget", Integer.MAX_VALUE)).hasSize(32);
-        assertThat(new IdempotentRequest(UUID.randomUUID(), Operation.PURCHASE, "widget", 1).requestHash())
+        assertThat(IdempotentRequest.of(UUID.randomUUID(), Operation.PURCHASE, "widget", 1).requestHash())
                 .hasSize(32)
                 .isEqualTo(RequestHash.of(Operation.PURCHASE, "widget", 1));
     }

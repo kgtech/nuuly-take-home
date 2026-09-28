@@ -7,7 +7,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 /** The one test cleanup (C-19): TRUNCATE, which the append-only triggers don't block, plus a Redis FLUSHALL. */
 public final class Tables {
 
-    private static final String TRUNCATE = "TRUNCATE inventory_ledger, sku, idempotency_keys RESTART IDENTITY CASCADE";
+    private static final String TRUNCATE = "TRUNCATE inventory_ledger, sku_details, sku, idempotency_keys RESTART IDENTITY CASCADE";
 
     private Tables() {
     }

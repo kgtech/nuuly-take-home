@@ -1,6 +1,7 @@
 package com.kgtech.inventoryapi.inventory.web;
 
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_BASE_PATH;
 import static org.springframework.http.HttpHeaders.ACCEPT;
 
 import java.io.IOException;
@@ -29,49 +30,69 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * SKU ABC-1) is answered as the malformed SKU ID it is (G11: create 400, GET and purchase 404); and a POST whose most
  * specific Accept range matching JSON has q=0 is 400 (U2, Y1, RFC 9110 §12.5.1), which the produces condition alone
  * accepts. The path is the routed one (decoded segments, as Spring matches), so an encoded prefix cannot bypass it.
- * HEAD is guarded like GET (Spring serves HEAD through the GET handler). Nothing is written.
+ * HEAD is guarded like GET (Spring serves HEAD through the GET handler). The v2 paths (DESIGN-V2 §8) get the same
+ * checks, with PUT treated as a write and a larger body cap. Nothing is written.
  */
 @Component
 final class InventoryRequestGuardFilter extends OncePerRequestFilter {
 
     private static final String BASE_SEGMENT = BASE_PATH.substring(1);
+    private static final String V2_SEGMENT = V2_BASE_PATH.substring(1, V2_BASE_PATH.indexOf('/', 1));
     private static final String PURCHASE_SEGMENT = "purchase";
     /** The largest JSON body a spec request needs, with room for whitespace and ignored fields (G13). */
     static final long MAX_BODY_BYTES = 4096;
+    /** DESIGN-V2 §8: a 2,000-character description plus ten 2,048-character URLs fits with room to spare. */
+    static final long MAX_V2_BODY_BYTES = 32_768;
+
+    /** The routed segments from "inventory" on, and whether they came under /v2. */
+    private record Routed(List<PathSegment> segments, boolean v2) {
+    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return segments(request).isEmpty();
+        return routed(request).segments().isEmpty();
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        List<PathSegment> segments = segments(request);
+        Routed routed = routed(request);
+        List<PathSegment> segments = routed.segments();
         boolean get = HttpMethod.GET.matches(request.getMethod()) || HttpMethod.HEAD.matches(request.getMethod());
-        boolean post = HttpMethod.POST.matches(request.getMethod());
+        boolean write = HttpMethod.POST.matches(request.getMethod())
+                || routed.v2() && HttpMethod.PUT.matches(request.getMethod());
         boolean single = segments.size() == 2;
-        boolean purchase = segments.size() == 3 && PURCHASE_SEGMENT.equals(segments.get(2).valueToMatch());
-        if (segments.size() >= 2 && (get && single || post && (single || purchase))) {
+        boolean purchase = !routed.v2() && segments.size() == 3
+                && PURCHASE_SEGMENT.equals(segments.get(2).valueToMatch());
+        if (segments.size() >= 2 && (get && single || write && (single || purchase))) {
             PathSegment sku = segments.get(1);
             if (sku.value().indexOf(';') >= 0 || !sku.parameters().isEmpty()) {
-                write(response, post && single ? TextErrors.invalidRequest() : TextErrors.skuNotFound());
+                write(response, write && single ? TextErrors.invalidRequest() : TextErrors.skuNotFound());
                 return;
             }
-            if (post && !acceptsJson(request)) {
+            if (write && !acceptsJson(request)) {
                 write(response, TextErrors.invalidRequest());
                 return;
             }
-            if (post && request.getContentLengthLong() > MAX_BODY_BYTES) {
-                write(response, TextErrors.invalidRequest()); // the body is {"quantity":n}; anything larger is not ours
+            long cap = routed.v2() ? MAX_V2_BODY_BYTES : MAX_BODY_BYTES;
+            if (write && request.getContentLengthLong() > cap) {
+                write(response, TextErrors.invalidRequest()); // larger than any body the contract describes
+                return;
+            }
+            if (write && routed.v2()) {
+                // A chunked body has no Content-Length: count it as it is read (review R-01).
+                chain.doFilter(new CappedBodyRequest(request, cap), response);
                 return;
             }
         }
         chain.doFilter(request, response);
     }
 
-    /** The routed path's segments (decoded, as Spring matches them) when it lies under /inventory/, else empty. */
-    private static List<PathSegment> segments(HttpServletRequest request) {
+    /**
+     * The routed path's segments (decoded, as Spring matches them) from "inventory" on, when the path lies under
+     * /inventory/ or /v2/inventory/; else empty.
+     */
+    private static Routed routed(HttpServletRequest request) {
         List<PathSegment> segments = new ArrayList<>();
         for (Element element
                 : RequestPath.parse(request.getRequestURI(), request.getContextPath()).pathWithinApplication().elements()) {
@@ -79,10 +100,14 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
                 segments.add(segment);
             }
         }
-        if (segments.size() < 2 || !BASE_SEGMENT.equals(segments.get(0).valueToMatch())) {
-            return List.of();
+        boolean v2 = !segments.isEmpty() && V2_SEGMENT.equals(segments.getFirst().valueToMatch());
+        if (v2) {
+            segments.removeFirst();
         }
-        return segments;
+        if (segments.size() < 2 || !BASE_SEGMENT.equals(segments.getFirst().valueToMatch())) {
+            return new Routed(List.of(), v2);
+        }
+        return new Routed(segments, v2);
     }
 
     /**

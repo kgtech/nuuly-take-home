@@ -1,6 +1,7 @@
 package com.kgtech.inventoryapi.inventory.web;
 
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_BASE_PATH;
 import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
@@ -23,18 +24,22 @@ import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** GET /inventory/** ignores the Accept header: it is presented as application/json (U2). */
+/** GET /inventory/** and GET /v2/inventory/** ignore the Accept header: it is presented as application/json (U2). */
 @Component
 final class JsonAcceptForGetFilter extends OncePerRequestFilter {
 
-    /** Only GET /inventory and GET /inventory/**; springdoc, actuator and every POST are untouched (S6). */
+    /** Only GET under /inventory and /v2/inventory; springdoc, actuator and every write are untouched (S6). */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         if (!HttpMethod.GET.matches(request.getMethod())) {
             return true;
         }
         String path = routedPath(request);
-        return !(path.equals(BASE_PATH) || path.startsWith(BASE_PATH + "/"));
+        return !(under(path, BASE_PATH) || under(path, V2_BASE_PATH));
+    }
+
+    private static boolean under(String path, String base) {
+        return path.equals(base) || path.startsWith(base + "/");
     }
 
     /** requestURI minus contextPath, decoded and without ";" parameters: the path Spring matches handlers on. */

@@ -1,0 +1,203 @@
+openapi: 3.1.0
+info:
+  title: Inventory API
+  version: 1.0.0
+servers:
+- description: Generated server url
+  url: http://localhost:8080
+paths:
+  /inventory:
+    get:
+      description: "Returns SKUs sorted by skuId, at most 250 per response. When more\
+        \ SKUs follow, the Link header holds the next page's URL; follow it until\
+        \ a response has no Link to list all inventory. If no SKUs exist, returns\
+        \ an empty array."
+      operationId: listInventory
+      parameters:
+      - description: "Optional page size, 1 to 250 (default 250). Larger values mean\
+          \ 250; other values are ignored and the default applies."
+        in: query
+        name: limit
+        required: false
+        schema:
+          type: integer
+          default: 250
+          maximum: 250
+          minimum: 1
+      - description: "Optional cursor: return only SKUs whose skuId sorts after this\
+          \ value, up to the page size. It must not be repeated."
+        in: query
+        name: after
+        required: false
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryItem"
+          description: "One page of inventory items, at most 250, sorted by skuId"
+          headers:
+            Link:
+              description: "Next page, when more SKUs follow: <URL>; rel=\"next\""
+              schema:
+                type: string
+              style: simple
+        "400":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: "Invalid request: the query string can't be decoded or repeats\
+            \ after"
+      summary: List all inventory
+      tags:
+      - inventory
+  /inventory/{skuId}:
+    get:
+      operationId: getInventory
+      parameters:
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
+        name: skuId
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+          description: Current inventory state for the sku
+        "404":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: SKU not found
+      summary: Get inventory for a SKU
+      tags:
+      - inventory
+    post:
+      operationId: createInventory
+      parameters:
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
+        name: skuId
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      - description: "Optional UUID. The same key with the same request replays the\
+          \ first response. A different request, or a key older than 24h, returns\
+          \ 400."
+        in: header
+        name: Idempotency-Key
+        required: false
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryQuantity"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+          description: Current state of the item after update
+        "400":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: Invalid request
+      summary: Create or update inventory for a SKU
+      tags:
+      - inventory
+  /inventory/{skuId}/purchase:
+    post:
+      operationId: purchaseItem
+      parameters:
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
+        name: skuId
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      - description: "Optional UUID. The same key with the same request replays the\
+          \ first response. A different request, or a key older than 24h, returns\
+          \ 400."
+        in: header
+        name: Idempotency-Key
+        required: false
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryQuantity"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+          description: Purchase successful; remaining inventory for the item
+        "400":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: Insufficient inventory or invalid request
+        "404":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: SKU not found
+      summary: Purchase a quantity of a SKU
+      tags:
+      - inventory
+components:
+  schemas:
+    InventoryItem:
+      type: object
+      properties:
+        quantity:
+          type: integer
+          format: int64
+          minimum: 0
+        skuId:
+          type: string
+    InventoryQuantity:
+      type: object
+      properties:
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+      required:
+      - quantity

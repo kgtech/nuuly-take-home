@@ -13,6 +13,12 @@ final class TextErrors {
     static final String INSUFFICIENT_INVENTORY = "Insufficient inventory";
     static final String INVALID_REQUEST = "Invalid request";
     static final String INTERNAL_SERVER_ERROR = "Internal server error";
+    /** DESIGN-V2 §8: the v2 create on an existing SKU; the text names what to do instead (A23). */
+    static final String SKU_EXISTS = "SKU already exists. Set its details with PUT /v2/inventory/{skuId}; "
+            + "add stock with POST /inventory/{skuId}.";
+    /** DESIGN-V2 §8: a conditional PUT whose If-Match no longer matches (A24). */
+    static final String DETAILS_CHANGED = "Details changed since you read them. Reload the SKU and retry with its "
+            + "new ETag.";
 
     private TextErrors() {
     }
@@ -39,6 +45,14 @@ final class TextErrors {
 
     static ResponseEntity<String> invalidRequest() {
         return of(HttpStatus.BAD_REQUEST, INVALID_REQUEST);
+    }
+
+    static ResponseEntity<String> skuExists() {
+        return of(HttpStatus.CONFLICT, SKU_EXISTS);
+    }
+
+    static ResponseEntity<String> detailsChanged() {
+        return of(HttpStatus.PRECONDITION_FAILED, DETAILS_CHANGED);
     }
 
     static ResponseEntity<String> internalServerError() {

@@ -63,7 +63,7 @@ class IdempotencyStoreTest {
     }
 
     private static IdempotentRequest add(UUID key, String skuId, int quantity) {
-        return new IdempotentRequest(key, Operation.ADD, skuId, quantity);
+        return IdempotentRequest.of(key, Operation.ADD, skuId, quantity);
     }
 
     private Map<String, Object> row(UUID key) {
@@ -117,7 +117,7 @@ class IdempotencyStoreTest {
     void storedErrorReplaysUnchanged() {
         UUID key = UUID.randomUUID();
         StoredResponse notFound = new StoredResponse(404, "text/plain", "SKU not found");
-        IdempotentRequest request = new IdempotentRequest(key, Operation.PURCHASE, "ghost", 1);
+        IdempotentRequest request = IdempotentRequest.of(key, Operation.PURCHASE, "ghost", 1);
         execute(request, notFound);
 
         assertThat(execute(request, OK)).isInstanceOfSatisfying(KeyedResult.Replayed.class, r -> assertThat(r.response()).isEqualTo(notFound));
@@ -169,7 +169,7 @@ class IdempotencyStoreTest {
         UUID key = UUID.randomUUID();
         execute(add(key, "widget", 5), OK);
 
-        assertRejectedAndUnchanged(key, new IdempotentRequest(key, Operation.PURCHASE, "widget", 5));
+        assertRejectedAndUnchanged(key, IdempotentRequest.of(key, Operation.PURCHASE, "widget", 5));
     }
 
     /** T1: a key older than 24h is rejected even with the same request, and is never reused. */

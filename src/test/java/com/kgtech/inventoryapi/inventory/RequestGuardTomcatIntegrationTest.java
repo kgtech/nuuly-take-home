@@ -43,6 +43,8 @@ class RequestGuardTomcatIntegrationTest {
         Tables.seed(jdbc, "ABC-1", 5);
     }
 
+    private static final String V2_BODY = "{\"details\":{\"name\":\"n\"},\"initialQuantity\":1}";
+
     static Stream<Arguments> requests() {
         return Stream.of(
                 Arguments.of("POST /%69nventory/ABC-1;lot=7", "{\"quantity\":5}", null, 400, "Invalid request"),
@@ -50,7 +52,16 @@ class RequestGuardTomcatIntegrationTest {
                 Arguments.of("POST /inventory;v=1/ABC-1;x/purchase", "{\"quantity\":1}", null, 404, "SKU not found"),
                 Arguments.of("POST /%69nventory/ABC-1", "{\"quantity\":1}", "application/json;q=0", 400, "Invalid request"),
                 Arguments.of("POST /%69nventory/ABC-1", "{\"quantity\":1}", "application/json;q=0, */*;q=0.1", 400,
-                        "Invalid request"));
+                        "Invalid request"),
+                // v2 (DESIGN-V2 §8, review R-06a): the same guard on the routed path
+                Arguments.of("GET /v2/inventory/ABC-1%3Blot=7", "", null, 404, "SKU not found"),
+                Arguments.of("GET /v2/inventory/A%2FB", "", null, 404, "SKU not found"),
+                Arguments.of("POST /v2/inventory/ABC-1%3Blot=7", V2_BODY, null, 400, "Invalid request"),
+                Arguments.of("POST /v2/inventory/A%2FB", V2_BODY, null, 400, "Invalid request"),
+                Arguments.of("PUT /v2/inventory/ABC-1;lot=7", "{\"name\":\"n\"}", null, 400, "Invalid request"),
+                Arguments.of("PUT /v2/%69nventory/A%2FB", "{\"name\":\"n\"}", null, 400, "Invalid request"),
+                Arguments.of("POST /v2/inventory/NEW-9", V2_BODY, "application/json;q=0", 400, "Invalid request"),
+                Arguments.of("PUT /v2/inventory/ABC-1", "{\"name\":\"n\"}", "text/html", 400, "Invalid request"));
     }
 
     @ParameterizedTest(name = "{0} accept={2}")
@@ -70,6 +81,31 @@ class RequestGuardTomcatIntegrationTest {
         assertThat(response.body()).isEqualTo(text);
         assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
         assertThat(jdbc.sql("SELECT count(*) FROM inventory_ledger").query(Long.class).single()).isEqualTo(1);
+        assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isEqualTo(1);
+    }
+
+    /** Review R-01: a chunked v2 body (no Content-Length) is capped as it is read; one within the cap is accepted. */
+    @ParameterizedTest(name = "chunked v2 body of about {0} bytes → {1}")
+    @org.junit.jupiter.params.provider.CsvSource({"20000, 201", "40000, 400"})
+    void chunkedV2BodyIsCappedWhileRead(int padBytes, int status) throws Exception {
+        // The size comes from an ignored property (G13), so only the byte cap can reject the smaller body.
+        String body = "{\"details\":{\"name\":\"n\",\"pad\":\"" + "d".repeat(padBytes) + "\"},\"initialQuantity\":1}";
+        String chunked = Integer.toHexString(body.length()) + "\r\n" + body + "\r\n0\r\n\r\n";
+        String head = "POST /v2/inventory/CH-1 HTTP/1.1\r\n" + header(HOST, "localhost") + header(CONNECTION, "close")
+                + header(CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                + header(org.springframework.http.HttpHeaders.TRANSFER_ENCODING, "chunked");
+
+        RawHttp.Response response = RawHttp.send(port, head, chunked);
+
+        assertThat(response.status()).isEqualTo(status);
+        if (status == 400) {
+            assertThat(response.contentType().isCompatibleWith(MediaType.TEXT_PLAIN)).isTrue();
+            assertThat(response.body()).isEqualTo("Invalid request");
+            assertThat(jdbc.sql("SELECT count(*) FROM sku WHERE sku_id = 'CH-1'").query(Long.class).single()).isZero();
+        } else {
+            assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'CH-1'").query(Long.class).single())
+                    .isEqualTo(1);
+        }
     }
 
     /** HEAD is served through the GET handler, so the guard treats it like GET (critique M-14): 404, no body. */

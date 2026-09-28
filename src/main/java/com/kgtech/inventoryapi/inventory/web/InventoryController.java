@@ -62,6 +62,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+import com.kgtech.inventoryapi.inventory.DetailsOutcome;
 import com.kgtech.inventoryapi.inventory.InventoryItem;
 import com.kgtech.inventoryapi.inventory.InventoryPage;
 import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
@@ -199,6 +200,7 @@ class InventoryController {
             case InvalidRequest _ -> TextErrors.invalidRequest();
             case Ok _, NotFound _, Insufficient _, Overflow _ ->
                     StoredResponses.toResponseEntity(outcomes.toStored(skuId, result));
+            case DetailsOutcome _ -> throw new IllegalStateException("not a stock outcome: " + result);
         };
     }
 }

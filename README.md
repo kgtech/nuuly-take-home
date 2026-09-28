@@ -99,6 +99,28 @@ curl -i 'localhost:18080/inventory?limit=2'
 # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1","quantity":5}]  (Link when more than 2 SKUs exist)
 ```
 
+**v2: a SKU with details.** Three additive operations under `/v2/inventory` ([`DESIGN-V2.md`](DESIGN-V2.md) §8) give a SKU a name, description, cost and image URLs. The four operations above are unchanged; stock still changes only through them. Every `SkuItem` response carries an `ETag` (the details version, `"0"` before any details); `PUT` takes an optional `If-Match`. Errors are text/plain like v1, with two new fixed texts (409, 412) that say what to do next:
+
+```bash
+curl -i -X POST localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
+     -d '{"details":{"name":"Linen shirt","description":"Long sleeve","cost":{"amount":12900,"currency":"USD"},
+          "images":["https://cdn.example.com/a.jpg"]},"initialQuantity":5}'
+# 201 ETag: "1"  {"skuId":"LN-1","quantity":5,"details":{"name":"Linen shirt",...}}   (one ledger row, reason add)
+curl -i -X POST localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
+     -d '{"details":{"name":"Other"}}'
+# 409 SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}.
+curl -i -X PUT localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
+     -d '{"name":"Linen shirt, navy","images":[]}'
+# 200 ETag: "2"  {"skuId":"LN-1","quantity":5,"details":{"name":"Linen shirt, navy","description":"","images":[]}}
+curl -i -X PUT localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
+     -d '{"name":"Stale edit"}'
+# 412 Details changed since you read them. Reload the SKU and retry with its new ETag.
+curl -i localhost:18080/v2/inventory/ABC-1              # 200 ETag: "0"  {"skuId":"ABC-1","quantity":3}   (no details yet)
+curl -i 'localhost:18080/v2/inventory?limit=2'           # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1",...}]  (Link as v1)
+```
+
+`POST /v2/inventory/{skuId}` honours `Idempotency-Key` like the spec POSTs: the whole request (details and initial quantity) is the fingerprint, and 201 and 409 are replayed. Field rules: `name` 1–120 characters, `description` up to 2,000, `cost.amount` an integer in minor units with a three-letter uppercase `cost.currency` (both or neither), up to 10 absolute http(s) `images` URLs of up to 2,048 characters, `initialQuantity` 0 to 2,147,483,647; a body above 32 KB is 400. Details are read from Postgres with the count in one join and are never cached in Redis.
+
 ## How V2 stores stock
 
 Short version of [`DESIGN-V2.md`](DESIGN-V2.md):
@@ -121,10 +143,11 @@ Swagger UI at `/swagger-ui.html`, OpenAPI at `/v3/api-docs` and `/v3/api-docs.ya
 
 The spec leaves these open; V2 keeps the first build's answers ([`DECISIONS.md`](DECISIONS.md), IDs in parentheses) except where [`DESIGN-V2.md`](DESIGN-V2.md) §7 supersedes them:
 
-- SKU IDs are case-sensitive, 1–64 characters, `[A-Za-z0-9][A-Za-z0-9._-]*`; creating another ID is 400, reading or purchasing it is 404 (G1, G11). An encoded slash is part of the ID (`/inventory/A%2FB` → 404) (C1).
+- SKU IDs are case-sensitive, 1–64 characters, `[A-Za-z0-9][A-Za-z0-9._-]*`; creating another ID (spec or v2, and a v2 PUT) is 400, reading or purchasing it is 404 (G1, G11). An encoded slash is part of the ID (`/inventory/A%2FB` → 404) (C1).
 - Stock is a 64-bit integer; an add that would overflow returns 400 and changes nothing (G2, G12). A request adds or purchases at most 2,147,483,647 (V2).
 - Malformed JSON (including trailing tokens), a missing body, a body above 4 KB, a wrong Content-Type, a non-integer `quantity`, a raw `;` in the SKU segment, or an Accept whose most specific range for JSON has q=0 on POST return 400; unknown fields are ignored; GET ignores Accept (G3, G13, U2, C3). An undecodable query string (`?x=%zz`) is 400 only where the query is read (`GET /inventory`, `/actuator/**`, springdoc); the item GET and the POSTs ignore it (C1, Z3).
-- A SKU sold to 0 keeps its row and stays listed (G5). Error bodies are exactly `SKU not found`, `Insufficient inventory`, `Invalid request` or `Internal server error` (G6).
+- A SKU sold to 0 keeps its row and stays listed (G5). Error bodies are exactly `SKU not found`, `Insufficient inventory`, `Invalid request` or `Internal server error` (G6); the v2 operations add the fixed 409 and 412 texts shown above (A23, A24).
+- v2 details are a separate row per SKU; a `POST /v2` on an existing SKU is 409 rather than an upsert, a `PUT` without `If-Match` is last-write-wins, and a `PUT` never changes stock (DESIGN-V2 §8, A21–A29).
 - Concurrent purchases never oversell, however many app instances run: the conditional `UPDATE` and the `CHECK` enforce it in Postgres (G7 as superseded).
 - `Idempotency-Key` is optional and must be a UUID; a repeated request replays the first response, including 404 and 400 outcomes; a different body, SKU or endpoint, or a key older than 24 h, returns 400 (G8, G14, R1, S3, T1, U1, Y3). Two simultaneous requests with the same key produce one change (R2).
 - The list is sorted by SKU ID with at most 250 per response and a `Link` to the next page built from the request's `Host` (no `X-Forwarded-*` handling); a bad `limit` is ignored, a repeated `after` or an undecodable query is 400 (G9, R4, R8, Z3, C2).
