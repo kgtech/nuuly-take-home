@@ -1,8 +1,9 @@
 -- G5, V1 (C4): the ledger and the sku rows are append-only. Statement-level, so an UPDATE, DELETE or TRUNCATE fails
 -- even when no row matches. Tests clean up with TRUNCATE after SET LOCAL session_replication_role = replica, a
--- transaction-scoped bypass that production code never sets. A table owner or superuser can still disable the
--- triggers. A later migration that must change these rows runs its statements after
--- SET LOCAL session_replication_role = replica (or disables and re-enables the triggers) inside its transaction.
+-- transaction-scoped bypass that production code never sets. The replica role is for test cleanup only: it also
+-- skips foreign-key checks. A table owner or superuser can still disable the triggers. A later migration that must
+-- change these rows runs, inside its transaction, ALTER TABLE <table> DISABLE TRIGGER <name>, its statements, then
+-- ALTER TABLE <table> ENABLE TRIGGER <name>, so foreign keys stay enforced.
 -- idempotency_keys has no trigger: R2/Y4 complete a claim with an UPDATE.
 CREATE FUNCTION reject_ledger_change() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
