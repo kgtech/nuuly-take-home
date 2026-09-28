@@ -80,6 +80,7 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => expect(name()).toHaveValue('Renamed elsewhere'));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(name()).toHaveFocus(); // F-07: focus does not fall to body when the Reload button unmounts
     await user.type(name(), ' v3');
     await user.click(save());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/E-1'));
@@ -137,6 +138,16 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     expect(save().getAttribute('aria-describedby')!.split(' ')).toContain(hint.id);
     await user.click(save());
     expect(store.requests.filter((r) => r.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('a stored cost above 2^53 is shown as too large to edit here, with Save unavailable (F-13)', async () => {
+    store.seedDetails('E-1', 2, { name: 'Big', cost: { amount: 9007199254740992, currency: 'USD' } });
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    const amount = screen.getByLabelText(/cost amount/i);
+    const hint = document.getElementById(amount.getAttribute('aria-describedby')!)!;
+    expect(hint).toHaveTextContent("Amounts above 9,007,199,254,740,991 can't be entered or edited here.");
+    expect(save()).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('answers an id that fails G11 with "SKU not found" locally and the create link, sending nothing', async () => {

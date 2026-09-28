@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CONTROL_CHARS,
   COST_AMOUNT,
   COST_CURRENCY,
   COST_PAIR,
+  COST_TOO_LARGE,
+  IMAGE_URL_RULE,
   costAmountReason,
   costCurrencyReason,
   descriptionReason,
@@ -21,13 +24,14 @@ import {
 } from './validation';
 
 describe('quantityReason', () => {
-  it.each(['', 'abc', '0', '-1', '1.5', '1e3'])('rejects %j with the whole-number reason', (v) => {
-    expect(quantityReason(v)).toBe(QUANTITY_REASON);
+  it.each(['', 'abc', '0', '-1', '1.5', '1e-3', '1e10'])('rejects %j with the whole-number reason', (v) => {
+    expect(quantityReason(v)).toBe(v === '1e10' ? `At most ${(2_147_483_647).toLocaleString()}.` : QUANTITY_REASON);
   });
   it('rejects a value over the int32 cap with a formatted number', () => {
     expect(quantityReason('2147483648')).toBe(`At most ${(2_147_483_647).toLocaleString()}.`);
   });
-  it.each(['1', '250', '2147483647'])('accepts %s', (v) => {
+  // A number input reports a typed 1e3 as "1e3"; Number() reads it as 1000, which the server accepts (F-04).
+  it.each(['1', '250', '2147483647', '1e3', '2.147483647e9'])('accepts %s', (v) => {
     expect(quantityReason(v)).toBeNull();
   });
 });
@@ -56,19 +60,31 @@ describe('limitReason', () => {
 });
 
 describe('details reasons (DESIGN-V2 §8 field rules)', () => {
-  it('name: 1–120 characters, not blank', () => {
+  it('name: 1–120 characters, not blank by Java isBlank (NBSP is not blank there), no control characters', () => {
     expect(nameReason('')).toBe('Enter a name.');
     expect(nameReason('   ')).toBe('Enter a name.');
+    expect(nameReason('\t  　')).toBe('Enter a name.');
+    expect(nameReason(' ')).toBeNull();
     expect(nameReason('a'.repeat(121))).toBe('At most 120 characters.');
     expect(nameReason('Linen dress')).toBeNull();
     expect(nameReason('a'.repeat(120))).toBeNull();
+    expect(nameReason('Linen\ndress')).toBe(CONTROL_CHARS);
+    expect(nameReason('Linen\tdress')).toBe(CONTROL_CHARS);
+    expect(nameReason('Linen\u0007')).toBe(CONTROL_CHARS);
+    expect(nameReason('Linen\u007F')).toBe(CONTROL_CHARS);
+    expect(nameReason('Linen \uD83D')).toBe(CONTROL_CHARS); // unpaired surrogate
+    expect(nameReason('Linen 👗')).toBeNull(); // a paired one is a dress emoji
   });
-  it('description: up to 2000 characters', () => {
+  it('description: up to 2000 characters; newline and tab are the only control characters allowed', () => {
     expect(descriptionReason('')).toBeNull();
     expect(descriptionReason('a'.repeat(2000))).toBeNull();
     expect(descriptionReason('a'.repeat(2001))).toBe(`At most ${(2000).toLocaleString()} characters.`);
+    expect(descriptionReason('line\n\tindented')).toBeNull();
+    expect(descriptionReason('bell\u0007')).toBe(CONTROL_CHARS);
+    expect(descriptionReason('cr\r\n')).toBe(CONTROL_CHARS);
+    expect(descriptionReason('del\u007F')).toBe(CONTROL_CHARS);
   });
-  it('cost: both or neither; amount a whole number ≥ 0; currency three uppercase letters', () => {
+  it('cost: both or neither; amount a whole number ≥ 0 (exponent forms read as numbers); currency three uppercase letters', () => {
     expect(costAmountReason('', '')).toBeNull();
     expect(costCurrencyReason('', '')).toBeNull();
     expect(costAmountReason('', 'USD')).toBe(COST_PAIR);
@@ -77,8 +93,11 @@ describe('details reasons (DESIGN-V2 §8 field rules)', () => {
     expect(costAmountReason('1.5', 'USD')).toBe(COST_AMOUNT);
     expect(costAmountReason('abc', 'USD')).toBe(COST_AMOUNT);
     expect(costAmountReason('0', 'USD')).toBeNull();
+    expect(costAmountReason('1e3', 'USD')).toBeNull();
     expect(costAmountReason('9007199254740991', 'USD')).toBeNull();
-    expect(costAmountReason('9007199254740992', 'USD')).toBe(`At most ${Number.MAX_SAFE_INTEGER.toLocaleString()}.`);
+    expect(costAmountReason('9007199254740992', 'USD')).toBe(COST_TOO_LARGE);
+    expect(costAmountReason('1e16', 'USD')).toBe(COST_TOO_LARGE);
+    expect(COST_TOO_LARGE).toBe(`Amounts above ${Number.MAX_SAFE_INTEGER.toLocaleString()} can't be entered or edited here.`);
     expect(costCurrencyReason('100', 'usd')).toBe(COST_CURRENCY);
     expect(costCurrencyReason('100', 'US')).toBe(COST_CURRENCY);
     expect(costCurrencyReason('100', 'USD')).toBeNull();
@@ -90,16 +109,52 @@ describe('details reasons (DESIGN-V2 §8 field rules)', () => {
       'http://b.example/2.png',
     ]);
     expect(imagesReason('https://a.example/1.jpg\nhttp://b.example/2.png')).toBeNull();
-    expect(imagesReason('ftp://a.example/1.jpg')).toBe('Line 1: enter an absolute http or https URL.');
-    expect(imagesReason('https://a.example/ok\n/relative.jpg')).toBe('Line 2: enter an absolute http or https URL.');
-    expect(imagesReason('not a url')).toBe('Line 1: enter an absolute http or https URL.');
+    expect(imagesReason('ftp://a.example/1.jpg')).toBe(`Line 1: ${IMAGE_URL_RULE}`);
+    expect(imagesReason('https://a.example/ok\n/relative.jpg')).toBe(`Line 2: ${IMAGE_URL_RULE}`);
+    expect(imagesReason('not a url')).toBe(`Line 1: ${IMAGE_URL_RULE}`);
     expect(imagesReason(`https://a.example/${'x'.repeat(2048)}`)).toBe(`Line 1: at most ${(2048).toLocaleString()} characters.`);
     expect(imagesReason(Array.from({ length: 11 }, (_, i) => `https://a.example/${i}`).join('\n'))).toBe('At most 10 image URLs.');
     expect(imagesReason(Array.from({ length: 10 }, (_, i) => `https://a.example/${i}`).join('\n'))).toBeNull();
   });
-  it('initial stock: optional, a whole number from 0 to 2,147,483,647', () => {
+  // The server parses with java.net.URI and requires toASCIIString() to round-trip (F-01): ASCII only,
+  // percent-encoded, lowercase scheme, a host of letters, digits, '.' and '-'.
+  it.each([
+    'https://a.example/café.jpg',
+    'https://a.example/a b.jpg',
+    'HTTP://a.example/1.jpg',
+    'Https://a.example/1.jpg',
+    'https://my_host.example/1.jpg',
+    'https://a.example/1|2.jpg',
+    'https://a.example/{id}.jpg',
+    'https://a.example/1.jpg^',
+    'https://a.example/"1".jpg',
+    'https://a.example/<1>.jpg',
+    'https://a.example/1.jpg`',
+    'https://a.example/a\\b.jpg',
+    'https://a.example/1.jpg\u007F',
+    'https://',
+    'https:///path',
+    'https://a.example:80x/1.jpg',
+  ])('rejects %j, which java.net.URI or the ASCII round-trip refuses', (u) => {
+    expect(imagesReason(u)).toBe(`Line 1: ${IMAGE_URL_RULE}`);
+  });
+  it.each([
+    'https://a.example/caf%C3%A9.jpg',
+    'https://a.example/a%20b.jpg?x=1&y=2#frag',
+    'http://user:pw@a.example:8080/p/1.jpg',
+    'https://a-b.example.co.uk/1.jpg',
+    "https://a.example/~u/1.jpg;v=2!$&'()*+,=@:",
+    'https://127.0.0.1/1.jpg',
+  ])('accepts %s', (u) => {
+    expect(imagesReason(u)).toBeNull();
+  });
+  it('does not rewrite what the user typed', () => {
+    expect(parseImages('https://a.example/café.jpg')).toEqual(['https://a.example/café.jpg']);
+  });
+  it('initial stock: optional, a whole number from 0 to 2,147,483,647 (exponent forms read as numbers)', () => {
     expect(initialStockReason('')).toBeNull();
     expect(initialStockReason('0')).toBeNull();
+    expect(initialStockReason('1e3')).toBeNull();
     expect(initialStockReason('2147483647')).toBeNull();
     expect(initialStockReason('-1')).toBe(INITIAL_STOCK);
     expect(initialStockReason('1.5')).toBe(INITIAL_STOCK);

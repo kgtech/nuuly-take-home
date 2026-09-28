@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server, store, TEXT } from '../test/server';
@@ -105,6 +105,7 @@ describe('InventoryList', () => {
     await user.click(screen.getByRole('button', { name: /show from the start/i }));
     expect(await screen.findByRole('link', { name: 'A' })).toBeInTheDocument();
     expect(screen.getByLabelText(/after/i)).toHaveValue('');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveFocus(); // F-07, like Next page
     expect(new URL(store.requests.at(-1)!.url).searchParams.has('after')).toBe(false);
   });
 
@@ -124,6 +125,34 @@ describe('InventoryList', () => {
     await user.clear(limit);
     await user.type(limit, '25');
     expect(hint).toBeEmptyDOMElement();
+  });
+
+  it('marks the paging form busy while a page loads and keeps Apply available for an out-of-range limit (F-11, FE17)', async () => {
+    const user = userEvent.setup();
+    store.seed({ A: 1 });
+    let release: () => void = () => {};
+    server.use(
+      http.get('*/v2/inventory', async ({ request }) => {
+        if (new URL(request.url).searchParams.get('limit') !== '500') return;
+        await new Promise<void>((r) => (release = r));
+        return HttpResponse.json([{ skuId: 'A', quantity: 1 }]);
+      }),
+    );
+    render(<InventoryList />);
+    const paging = screen.getByRole('form', { name: 'Paging' });
+    expect(paging).toHaveAttribute('aria-busy', 'true');
+    await screen.findAllByRole('row');
+    expect(paging).toHaveAttribute('aria-busy', 'false');
+    await user.type(screen.getByLabelText(/per page/i), '500');
+    const apply = screen.getByRole('button', { name: /apply/i });
+    expect(apply).not.toHaveAttribute('aria-disabled');
+    await user.click(apply);
+    await waitFor(() => expect(paging).toHaveAttribute('aria-busy', 'true'));
+    expect(screen.getByRole('button', { name: /loading|apply/i })).toHaveAttribute('aria-disabled', 'true');
+    expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(2);
+    release();
+    await waitFor(() => expect(paging).toHaveAttribute('aria-busy', 'false'));
+    expect(screen.getByRole('button', { name: /apply/i })).not.toHaveAttribute('aria-disabled');
   });
 
   it('lets the user start after a cursor', async () => {

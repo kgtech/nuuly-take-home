@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { fireEvent } from '@testing-library/react';
-import { store, TEXT } from '../test/server';
+import { http, HttpResponse } from 'msw';
+import { server, store, TEXT } from '../test/server';
 import { SkuView } from './SkuView';
 import type { SkuDetails } from '../api/client';
 
@@ -71,6 +72,41 @@ describe('SkuView', () => {
     expect(alert).toHaveTextContent('Only 1 on hand now. Lower the quantity or add stock.');
     expect(screen.getByTestId('quantity')).toHaveTextContent('1');
     expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(2);
+  });
+
+  it('ignores a late "Insufficient inventory" re-fetch that resolves after a newer add (F-08)', async () => {
+    const user = userEvent.setup();
+    store.seed({ A: 1 });
+    let gets = 0;
+    server.use(
+      http.get('*/v2/inventory/:skuId', async () => {
+        gets += 1;
+        if (gets === 1) return; // the page load falls through to the store
+        await new Promise((r) => setTimeout(r, 300)); // the re-fetch after 400 arrives late and stale
+        return HttpResponse.json({ skuId: 'A', quantity: 1 }, { headers: { ETag: '"0"' } });
+      }),
+    );
+    render(<SkuView skuId="A" />);
+    await screen.findByTestId('quantity');
+    await user.type(form('Purchase').getByLabelText(/quantity/i), '3{Enter}');
+    await waitFor(() => expect(store.requests.filter((r) => r.method === 'POST')).toHaveLength(1));
+    await user.type(form('Add stock').getByLabelText(/quantity/i), '2{Enter}');
+    expect(await screen.findByRole('status')).toHaveTextContent('Added 2 to A: now 3.');
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.getByTestId('quantity')).toHaveTextContent('3');
+    expect(screen.getByRole('status')).toHaveTextContent('Added 2 to A: now 3.');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the create-on-add note only for a 404, not for another load error (F-12)', async () => {
+    server.use(http.get('*/v2/inventory/:skuId', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } })));
+    render(<SkuView skuId="A" />);
+    await screen.findByRole('alert');
+    expect(screen.queryByText(/creates the SKU if it does not exist/i)).not.toBeInTheDocument();
+    cleanup();
+    render(<SkuView skuId="nope" />);
+    await screen.findByRole('alert');
+    expect(screen.getByText(/creates the SKU if it does not exist/i)).toBeInTheDocument();
   });
 
   it('a later add replaces a stale "Insufficient inventory" message', async () => {

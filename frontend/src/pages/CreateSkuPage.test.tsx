@@ -5,7 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { server, store, TEXT } from '../test/server';
 import { CreateSkuPage } from './CreateSkuPage';
 import { GUIDANCE } from '../components/Messages';
-import { COST_AMOUNT, COST_PAIR, INITIAL_STOCK, SKU_ID_EMPTY, SKU_ID_INVALID } from '../validation';
+import { CONTROL_CHARS, COST_AMOUNT, COST_PAIR, IMAGE_URL_RULE, INITIAL_STOCK, SKU_ID_EMPTY, SKU_ID_INVALID } from '../validation';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -54,7 +54,9 @@ describe('CreateSkuPage (#/new)', () => {
     ['description', 'description', 'x'.repeat(2001), `At most ${(2000).toLocaleString()} characters.`],
     ['cost amount', 'amount', '-5', COST_AMOUNT],
     ['currency', 'currency', 'usd', 'Enter a three-letter uppercase currency code, e.g. USD.'],
-    ['image URLs', 'images', 'https://ok.example/1\nnot a url', 'Line 2: enter an absolute http or https URL.'],
+    ['image URLs', 'images', 'https://ok.example/1\nnot a url', `Line 2: ${IMAGE_URL_RULE}`],
+    ['image URL with a space (java.net.URI rejects it)', 'images', 'https://ok.example/a b.jpg', `Line 1: ${IMAGE_URL_RULE}`],
+    ['name with a control character', 'name', 'Linen\u0007', CONTROL_CHARS],
     ['initial stock', 'initial', '-1', INITIAL_STOCK],
   ] as const)('a bad %s shows its reason, makes the button unavailable and sends nothing', async (_l, key, value, reason) => {
     const user = userEvent.setup();
@@ -167,6 +169,48 @@ describe('CreateSkuPage (#/new)', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
     expect(store.requests).toHaveLength(2);
     expect(store.requests[1]!.headers.get('Idempotency-Key')).toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+  });
+
+  it.each([
+    ['description', 'description', ' Now longer.'],
+    ['currency', 'currency', '{Backspace}EUR'],
+    ['an image line', 'images', '\nhttps://img.example/3.jpg'],
+  ] as const)('changing %s after a network failure gives the retry a new Idempotency-Key (S8)', async (_l, key, typed) => {
+    const user = userEvent.setup();
+    server.use(http.post('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.click(submit());
+    await screen.findByRole('alert');
+    await user.type(field[key](), typed);
+    await user.click(submit());
+    await waitFor(() => expect(store.requests).toHaveLength(2));
+    expect(store.requests[1]!.headers.get('Idempotency-Key')).not.toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+  });
+
+  it('an unchanged request after a 500 keeps its Idempotency-Key', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('*/v2/inventory/:skuId', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.click(submit());
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(GUIDANCE.retrySafe);
+    await user.click(submit());
+    await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
+    expect(store.requests).toHaveLength(2);
+    expect(store.requests[1]!.headers.get('Idempotency-Key')).toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+  });
+
+  it('a pasted name longer than 120 characters is kept as typed and refused, not truncated (F-09)', async () => {
+    const user = userEvent.setup();
+    render(<CreateSkuPage />);
+    await user.click(field.name());
+    await user.paste('n'.repeat(130));
+    expect(field.name()).toHaveValue('n'.repeat(130));
+    expect(field.name()).not.toHaveAttribute('maxlength');
+    expect(field.description()).not.toHaveAttribute('maxlength');
+    expect(hintOf(field.name())).toHaveTextContent('At most 120 characters.');
   });
 
   it('in flight: aria-busy form, read-only fields, aria-disabled button; a double click sends one request', async () => {
