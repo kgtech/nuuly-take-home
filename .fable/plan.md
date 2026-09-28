@@ -10,3 +10,13 @@ Budget 4 h from 19:54Z; self-critique starts by 22:54Z at the latest. Four PRs, 
 | PR4+ | `v2/fix-...` | Self-critique fixes, grouped by area, finding IDs in the body | Per PROMPT "Self-critique and fix". |
 
 Order: PR1 and PR2 in parallel (PR2 by a subagent), PR1 merges first, then PR2, then PR3, then critique, then fixes. If PR1 is not green by 22:30Z, the remaining service items move to "unfinished" and the critique starts on what is merged.
+
+## v2 details run (2026-09-28, owner-approved after the UI review)
+
+| # | Branch | Covers | Why grouped this way |
+|---|---|---|---|
+| PR5 | `v2-details` | #71 (service: V3 schema, `/v2/inventory` create/replace/read/list, ETag, 409/412, idempotent create, request guard, OpenAPI export, README). Its first commit is the design (DESIGN-V2 §8, A21–A29, openapi.yaml v2 paths, interview defense), committed before any code as the owner asked; the design is not merged on its own because a hand-written openapi.yaml would make ApiDocsTest fail on `v2` until the code lands. | One coherent change to schema, service and web layer; the front end builds from the committed openapi.yaml in parallel. |
+| PR6 | `v2-details-frontend` | #72 (create and edit pages on v2, SKU and list views with details) and #73 (the UI validation review fixes) | Both touch the same forms and validation module; one PR avoids two conflicting edits of StockForm. Built by a subagent from PR5's design commit with MSW; Playwright runs against the merged service. |
+| PR7+ | `v2-details-fix-…` | Focused self-critique fixes (spec and contract, concurrency and idempotency, front end, interview defense) | Per PROMPT "Self-critique and fix". |
+
+Order: PR5 and PR6 in parallel, PR5 merges first, then PR6 (rebased on v2, Playwright run recorded), then the critique and fixes.
