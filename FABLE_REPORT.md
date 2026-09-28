@@ -10,7 +10,7 @@ A second run on `v2`, owner-directed after a UI validation review. Everything be
 
 | PR | Issue | What | Review |
 |---|---|---|---|
-| #74 | #71 | v2 details API: `POST/PUT/GET /v2/inventory/{skuId}` and `GET /v2/inventory`; V3 `sku_details`; atomic create with initial stock through the spec's stock path; `Idempotency-Key` on create with the whole request as fingerprint; ETag/If-Match; text/plain 409/412; request guard and 32 KB cap on `/v2`; v1 export frozen as a byte-for-byte baseline | 0 BLOCKER, 1 MAJOR (chunked cap), all fixed; 763 tests |
+| #74 | #71 | v2 details API: `POST/PUT/GET /v2/inventory/{skuId}` and `GET /v2/inventory`; V3 `sku_details`; atomic create with initial stock through the spec's stock path; `Idempotency-Key` on create with the whole request as fingerprint; ETag/If-Match; text/plain 409/412; request guard and body cap on `/v2` (32 KB, raised to 64 KB by the critique fixes); v1 export frozen as a byte-for-byte baseline | 0 BLOCKER, 1 MAJOR (chunked cap), all fixed; 763 tests |
 | #77 | #76 | Redis removed (owner decision): Postgres-only reads and idempotency; DESIGN-V2 §9 | 0 BLOCKER, 1 MAJOR (doc), all fixed; 749 tests |
 | #75 | #72, #73 | Front end: `#/new` create and `#/sku/:id/edit` pages on v2, SKU and list views with details; the 12 UI review fixes (field-specific reasons, aria-disabled buttons with visible helper text, one outcome area, guidance lines, Request reference) | 0 BLOCKER, 1 MAJOR (URL rules), all fixed; Vitest 201, Playwright 26/26 |
 

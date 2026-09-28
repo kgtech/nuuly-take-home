@@ -31,7 +31,12 @@ final class CappedBodyRequest extends HttpServletRequestWrapper {
     @Override
     public BufferedReader getReader() throws IOException {
         String encoding = getCharacterEncoding();
-        Charset charset = encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding);
+        Charset charset;
+        try {
+            charset = encoding == null ? StandardCharsets.UTF_8 : Charset.forName(encoding);
+        } catch (IllegalArgumentException e) {
+            throw new java.io.UnsupportedEncodingException(encoding);
+        }
         return new BufferedReader(new InputStreamReader(getInputStream(), charset));
     }
 

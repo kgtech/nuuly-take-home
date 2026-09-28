@@ -3,6 +3,8 @@ package com.kgtech.inventoryapi.inventory.web;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_BASE_PATH;
 import static org.springframework.http.HttpHeaders.ACCEPT;
+import static org.springframework.http.HttpHeaders.IF_MODIFIED_SINCE;
+import static org.springframework.http.HttpHeaders.IF_NONE_MATCH;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 import java.io.IOException;
@@ -24,7 +26,12 @@ import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** GET /inventory/** and GET /v2/inventory/** ignore the Accept header: it is presented as application/json (U2). */
+/**
+ * GET /inventory/** and GET /v2/inventory/** ignore the Accept header: it is presented as application/json (U2). The
+ * v2 reads also hide If-None-Match and If-Modified-Since: their ETag tracks the details version only while the body
+ * carries a quantity that changes with every purchase, so Spring's automatic 304 for a matching tag would let a
+ * client keep a stale count (DESIGN-V2 §8; found by the front end's reload after a purchase).
+ */
 @Component
 final class JsonAcceptForGetFilter extends OncePerRequestFilter {
 
@@ -66,19 +73,35 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
 
         @Override
         public String getHeader(String name) {
+            if (isConditional(name)) {
+                return null;
+            }
             return isAccept(name) ? APPLICATION_JSON_VALUE : super.getHeader(name);
         }
 
         @Override
         public Enumeration<String> getHeaders(String name) {
+            if (isConditional(name)) {
+                return Collections.emptyEnumeration();
+            }
             return isAccept(name)
                     ? Collections.enumeration(Set.of(APPLICATION_JSON_VALUE))
                     : super.getHeaders(name);
         }
 
         @Override
+        public long getDateHeader(String name) {
+            return isConditional(name) ? -1 : super.getDateHeader(name);
+        }
+
+        @Override
         public Enumeration<String> getHeaderNames() {
-            Set<String> names = new LinkedHashSet<>(Collections.list(super.getHeaderNames()));
+            Set<String> names = new LinkedHashSet<>();
+            for (String name : Collections.list(super.getHeaderNames())) {
+                if (!isConditional(name)) {
+                    names.add(name);
+                }
+            }
             if (names.stream().noneMatch(JsonAccept::isAccept)) {
                 names.add(ACCEPT);
             }
@@ -87,6 +110,11 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
 
         private static boolean isAccept(String name) {
             return ACCEPT.equalsIgnoreCase(name);
+        }
+
+        /** The validators Spring's ResponseEntity handling would turn into a 304 (§8). */
+        private static boolean isConditional(String name) {
+            return IF_NONE_MATCH.equalsIgnoreCase(name) || IF_MODIFIED_SINCE.equalsIgnoreCase(name);
         }
     }
 }

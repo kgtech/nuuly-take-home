@@ -34,6 +34,7 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_REPLACED_DES
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_REPLACE_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_REPLACE_SUMMARY;
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
+import static org.springframework.http.HttpHeaders.CACHE_CONTROL;
 import static org.springframework.http.HttpHeaders.ETAG;
 import static org.springframework.http.HttpHeaders.IF_MATCH;
 import static org.springframework.http.HttpHeaders.LINK;
@@ -198,8 +199,9 @@ class SkuDetailsController {
         }
         SkuPage page = service.listSkus(limit, after);
         return page.next()
-                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next)).body(page.items()))
-                .orElseGet(() -> ResponseEntity.ok(page.items()));
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next))
+                        .header(CACHE_CONTROL, NO_STORE).body(page.items()))
+                .orElseGet(() -> ResponseEntity.ok().header(CACHE_CONTROL, NO_STORE).body(page.items()));
     }
 
     /** C2 for v2: the Link is built from the request's origin plus the routed base path. */
@@ -214,8 +216,11 @@ class SkuDetailsController {
         return "<" + url + ">; rel=\"next\"";
     }
 
+    /** The ETag is a details validator for If-Match, not a cache key for the count: no store, no 304 (§8). */
+    private static final String NO_STORE = "no-store";
+
     private static ResponseEntity<SkuItem> withEtag(ResponseEntity.BodyBuilder builder, SkuItem item) {
-        return builder.header(ETAG, IfMatch.etag(item.detailsVersion())).body(item);
+        return builder.header(ETAG, IfMatch.etag(item.detailsVersion())).header(CACHE_CONTROL, NO_STORE).body(item);
     }
 
     /**
@@ -238,6 +243,6 @@ class SkuDetailsController {
             return entity;
         }
         return ResponseEntity.status(HttpStatus.CREATED).headers(entity.getHeaders()).header(ETAG, CREATED_ETAG)
-                .body(response.body());
+                .header(CACHE_CONTROL, NO_STORE).body(response.body());
     }
 }
