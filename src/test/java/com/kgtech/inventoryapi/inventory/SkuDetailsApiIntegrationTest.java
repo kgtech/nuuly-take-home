@@ -460,6 +460,37 @@ class SkuDetailsApiIntegrationTest {
         assertThat(json(reply)).containsEntry("skuId", "V1-3").containsEntry("quantity", 7).doesNotContainKey("details");
     }
 
+    /**
+     * DESIGN-V2 §8: the ETag validates details for If-Match only. A GET with a matching If-None-Match is answered
+     * 200 with the current count, never 304 (Spring's ResponseEntity handling would otherwise send one and a browser
+     * would keep a cached, stale quantity after a purchase); item and list responses are Cache-Control: no-store.
+     */
+    @Test
+    void getV2IgnoresIfNoneMatchAndIsNeverStored() throws Exception {
+        assertThat(create("NM-1", 10).status()).isEqualTo(201);
+        Reply first = getV2("NM-1");
+        assertThat(first.etag()).isEqualTo("\"1\"");
+        assertThat(send(post("/inventory/{skuId}/purchase", "NM-1").accept(APPLICATION_JSON)
+                .contentType(APPLICATION_JSON).content("{\"quantity\":3}")).status()).isEqualTo(200);
+
+        MockHttpServletResponse conditional = mvc.perform(get("/v2/inventory/{skuId}", "NM-1")
+                .accept(APPLICATION_JSON).header(HttpHeaders.IF_NONE_MATCH, "\"1\"")
+                .header(HttpHeaders.IF_MODIFIED_SINCE, "Sun, 06 Nov 2094 08:49:37 GMT")).andReturn().getResponse();
+
+        assertThat(conditional.getStatus()).isEqualTo(200);
+        assertThat(JsonPath.<Integer>read(conditional.getContentAsString(), "$.quantity")).isEqualTo(7);
+        assertThat(conditional.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        assertThat(first.etag()).isEqualTo(conditional.getHeader(ETAG));
+        MockHttpServletResponse list = mvc.perform(get("/v2/inventory").accept(APPLICATION_JSON)
+                .header(HttpHeaders.IF_NONE_MATCH, "*")).andReturn().getResponse();
+        assertThat(list.getStatus()).isEqualTo(200);
+        assertThat(list.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        assertThat(create("NM-2", 1).status()).isEqualTo(201);
+        MockHttpServletResponse created = mvc.perform(post("/v2/inventory/{skuId}", "NM-3").accept(APPLICATION_JSON)
+                .contentType(APPLICATION_JSON).content(createBody(DETAILS, 1))).andReturn().getResponse();
+        assertThat(created.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+    }
+
     @Test
     void getV2OfAMissingOrMalformedSkuIs404() throws Exception {
         assertText(getV2("NOPE"), 404, "SKU not found");
@@ -548,7 +579,7 @@ class SkuDetailsApiIntegrationTest {
     }
 
     @Test
-    void aBodyNearTheV2CapIsAccepted() throws Exception {
+    void aLargeAsciiBodyUnderTheCapIsAccepted() throws Exception {
         String images = String.join(",", java.util.Collections.nCopies(10,
                 "\"https://cdn.example.com/" + "i".repeat(2000) + "\""));
         String body = createBody("{\"name\":\"n\",\"description\":\"" + "d".repeat(2000) + "\",\"images\":[" + images
@@ -567,8 +598,8 @@ class SkuDetailsApiIntegrationTest {
         String description = "\\u65e5".repeat(2000);
         String images = String.join(",", java.util.Collections.nCopies(10,
                 "\"https://cdn.example.com/" + "i".repeat(2048 - 24) + "\""));
-        String body = createBody("{\"name\":\"" + name + "\",\"description\":\"" + description + "\",\"images\":["
-                + images + "]}", 1);
+        String body = createBody("{\"name\":\"" + name + "\",\"description\":\"" + description + "\",\"cost\":"
+                + "{\"amount\":9223372036854775807,\"currency\":\"USD\"},\"images\":[" + images + "]}", Integer.MAX_VALUE);
         assertThat(body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isBetween(33_000, 65_536);
 
         Reply reply = create("GD-5", body, null);
