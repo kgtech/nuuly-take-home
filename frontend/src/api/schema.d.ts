@@ -112,7 +112,7 @@ export interface components {
             details: components["schemas"]["SkuDetails"];
             /**
              * Format: int32
-             * @description Stock to record at creation (default 0), through the same ledger as an add
+             * @description Stock to record at creation (absent or null means 0), through the same ledger as an add
              * @default 0
              */
             initialQuantity: number;
@@ -140,7 +140,7 @@ export interface components {
             cost?: components["schemas"]["SkuCost"];
             /** @description Up to 2000 characters; default "" */
             description?: string;
-            /** @description Up to 10 absolute http or https URLs; default [] */
+            /** @description Up to 10 absolute http or https URLs in ASCII (percent-encoded); default [] */
             images?: string[];
             /** @description 1 to 120 characters, not blank */
             name: string;
