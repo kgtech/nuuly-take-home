@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { api, type SkuDetails, type SkuItem } from '../api/client';
 import { StockForm, StockOutcomeView, type StockOutcome } from '../components/StockForm';
 import { ErrorText, Loading } from '../components/Messages';
@@ -27,6 +27,9 @@ export function SkuView({ skuId }: { skuId: string }) {
   const [attempt, setAttempt] = useState(0);
   // One outcome area for both forms (FE32); `extra` is the on-hand line after "Insufficient inventory".
   const [outcome, setOutcome] = useState<{ outcome: StockOutcome; extra?: string } | null>(null);
+  // Sequence of outcomes: the re-fetch after "Insufficient inventory" is ignored when a newer outcome
+  // (e.g. an add) has landed meanwhile, so a late GET never overwrites a fresher quantity (F-08).
+  const seq = useRef(0);
 
   useEffect(() => {
     let live = true;
@@ -51,6 +54,7 @@ export function SkuView({ skuId }: { skuId: string }) {
 
   const onOutcome = useCallback(
     (o: StockOutcome) => {
+      const mine = ++seq.current;
       if (o.kind === 'done') {
         // The v1 response carries only the quantity; the details stay as read (FE38).
         setState((cur) => ({
@@ -63,6 +67,7 @@ export function SkuView({ skuId }: { skuId: string }) {
       if (o.status === 400 && o.errorText === INSUFFICIENT_INVENTORY) {
         // Another client may have bought meanwhile: show what is on hand now, then the message.
         void api.getSku(skuId).then((r) => {
+          if (seq.current !== mine) return;
           if (r.ok) {
             setState({ phase: 'ready', item: r.data });
             setOutcome({ outcome: o, extra: onHandLine(r.data.quantity) });
@@ -130,9 +135,7 @@ export function SkuView({ skuId }: { skuId: string }) {
                 <PlusCircle />
                 Add stock
               </h2>
-              {state.phase === 'error' && (
-                <p className="note">Adding stock creates the SKU if it does not exist.</p>
-              )}
+              {missing && <p className="note">Adding stock creates the SKU if it does not exist.</p>}
               <StockForm operation="add" skuId={skuId} onOutcome={onOutcome} />
             </section>
             <section className="card" aria-labelledby={`${id}-buy`}>

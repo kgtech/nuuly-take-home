@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api, type ApiResult, type ListParams, type SkuItem } from '../api/client';
 import { skuHref } from '../hooks/useHashRoute';
-import { ErrorText, Hint, Loading } from '../components/Messages';
+import { ErrorText, Hint, Loading, SubmitButton } from '../components/Messages';
 import { FindSku } from '../components/FindSku';
 import { ArrowRight } from '../components/Icons';
 import { BRAND } from '../brand';
@@ -58,6 +58,7 @@ export function InventoryList() {
       if (r.params.limit !== undefined) params.limit = r.params.limit;
       return firstPage(params, r.n + 1);
     });
+    headingRef.current?.focus();
   };
 
   const nextPage = (url: string) => {
@@ -82,7 +83,7 @@ export function InventoryList() {
         <FindSku />
         <section className="card" aria-labelledby={`${id}-paging`}>
           <h2 id={`${id}-paging`}>Page size + start</h2>
-          <form onSubmit={apply} className="paging-form" aria-label="Paging" noValidate>
+          <form onSubmit={apply} className="paging-form" aria-label="Paging" aria-busy={loading} noValidate>
             <div className="field">
               <label htmlFor={`${id}-limit`}>Per page (1–250)</label>
               <input
@@ -108,9 +109,9 @@ export function InventoryList() {
                 autoComplete="off"
               />
             </div>
-            <button type="submit" className="secondary">
-              Apply
-            </button>
+            {/* Always available for an out-of-range limit (FE17); unavailable only while a page loads (F-11). */}
+            <SubmitButton label="Apply" busyLabel="Loading…" className="secondary" unavailable={false} inFlight={loading} />
+
           </form>
         </section>
       </div>

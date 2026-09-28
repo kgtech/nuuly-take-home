@@ -103,15 +103,16 @@ export function StockForm({ operation, skuId, onOutcome, skuReasonId, unavailabl
  * "Insufficient inventory").
  */
 export function StockOutcomeView({ outcome, extra }: { outcome: StockOutcome | null; extra?: ReactNode }) {
-  const ref = useRef<HTMLElement>(null);
+  const statusRef = useRef<HTMLDivElement>(null);
+  const alertRef = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
-    if (outcome !== null) ref.current?.focus();
+    if (outcome !== null) (statusRef.current ?? alertRef.current)?.focus();
   }, [outcome]);
   if (outcome === null) return null;
   if (outcome.kind === 'done') {
     const { item, sent, operation, key } = outcome;
     return (
-      <Success idempotencyKey={key} ref={ref as React.Ref<HTMLDivElement>}>
+      <Success idempotencyKey={key} ref={statusRef}>
         {operation === 'add'
           ? `Added ${sent} to ${item.skuId}: now ${item.quantity}.`
           : `Purchased ${sent} of ${item.skuId}: ${item.quantity} left.`}
@@ -119,7 +120,7 @@ export function StockOutcomeView({ outcome, extra }: { outcome: StockOutcome | n
     );
   }
   return (
-    <ErrorText text={outcome.errorText} ref={ref as React.Ref<HTMLParagraphElement>}>
+    <ErrorText text={outcome.errorText} ref={alertRef}>
       {extra ?? writeGuidance(outcome.status)}
     </ErrorText>
   );

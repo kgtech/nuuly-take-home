@@ -99,14 +99,14 @@ describe('SkuView', () => {
   });
 
   it('shows the create-on-add note only for a 404, not for another load error (F-12)', async () => {
-    server.use(http.get('*/v2/inventory/:skuId', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } })));
-    render(<SkuView skuId="A" />);
-    await screen.findByRole('alert');
-    expect(screen.queryByText(/creates the SKU if it does not exist/i)).not.toBeInTheDocument();
-    cleanup();
     render(<SkuView skuId="nope" />);
     await screen.findByRole('alert');
     expect(screen.getByText(/creates the SKU if it does not exist/i)).toBeInTheDocument();
+    cleanup();
+    server.use(http.get('*/v2/inventory/:skuId', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } })));
+    render(<SkuView skuId="A" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Internal server error');
+    expect(screen.queryByText(/creates the SKU if it does not exist/i)).not.toBeInTheDocument();
   });
 
   it('a later add replaces a stale "Insufficient inventory" message', async () => {

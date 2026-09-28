@@ -25,7 +25,7 @@ export function EditSkuPage({ skuId }: { skuId: string }) {
   const busy = useRef(false);
   const alertRef = useRef<HTMLParagraphElement>(null);
   const details = useDetailsForm();
-  const { reset } = details;
+  const { reset, nameRef } = details;
 
   useEffect(() => {
     if (invalid) return;
@@ -47,6 +47,11 @@ export function EditSkuPage({ skuId }: { skuId: string }) {
   useEffect(() => {
     if (failure !== null || loaded.phase === 'error') alertRef.current?.focus();
   }, [failure, loaded]);
+
+  // After Reload (F-07) the button that had focus is gone; land on the Name field once the form is back.
+  useEffect(() => {
+    if (attempt > 0 && loaded.phase === 'ready') nameRef.current?.focus();
+  }, [attempt, loaded, nameRef]);
 
   const reload = () => {
     setFailure(null);

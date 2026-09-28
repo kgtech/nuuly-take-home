@@ -1,13 +1,11 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { SkuDetails } from '../api/client';
 import {
   costAmountReason,
   costCurrencyReason,
-  DESCRIPTION_MAX,
   descriptionReason,
   IMAGES_MAX,
   imagesReason,
-  NAME_MAX,
   nameReason,
   parseImages,
 } from '../validation';
@@ -36,6 +34,7 @@ export type DetailsField = keyof DetailsValues;
 /** Field state, per-field reasons and the request body for the SkuDetails schema (shared by create and edit, FE35). */
 export function useDetailsForm(initial: DetailsValues = valuesFrom(undefined)) {
   const id = useId();
+  const nameRef = useRef<HTMLInputElement>(null);
   const [values, setValues] = useState<DetailsValues>(initial);
   const reasons: Record<DetailsField, string | null> = {
     name: nameReason(values.name),
@@ -52,25 +51,26 @@ export function useDetailsForm(initial: DetailsValues = valuesFrom(undefined)) {
     if (values.amount !== '' && values.currency !== '') d.cost = { amount: Number(values.amount), currency: values.currency };
     return d;
   };
-  return { id, values, set, reset: setValues, reasons, hintId, blockingHintIds, valid: blockingHintIds.length === 0, body };
+  return { id, nameRef, values, set, reset: setValues, reasons, hintId, blockingHintIds, valid: blockingHintIds.length === 0, body };
 }
 
 export type DetailsForm = ReturnType<typeof useDetailsForm>;
 
 /** The five details fields with their labels and always-present hints. */
 export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly: boolean }) {
-  const { id, values, set, reasons, hintId } = form;
+  const { id, nameRef, values, set, reasons, hintId } = form;
   const invalid = (f: DetailsField) => (values[f] !== '' && reasons[f] !== null) || undefined;
+  // No maxLength on the text fields: it would truncate a paste silently, and the reason already blocks (F-09).
   return (
     <>
       <div className="field">
         <label htmlFor={`${id}-name`}>Name</label>
         <input
           id={`${id}-name`}
+          ref={nameRef}
           type="text"
           value={values.name}
           onChange={(e) => set('name', e.target.value)}
-          maxLength={NAME_MAX + 1}
           autoComplete="off"
           aria-invalid={invalid('name')}
           aria-describedby={hintId('name')}
@@ -85,7 +85,6 @@ export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly:
           value={values.description}
           onChange={(e) => set('description', e.target.value)}
           rows={4}
-          maxLength={DESCRIPTION_MAX + 1}
           aria-invalid={invalid('description')}
           aria-describedby={hintId('description')}
           readOnly={readOnly}

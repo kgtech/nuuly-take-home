@@ -155,26 +155,36 @@ function replayFor(key: string, hash: string): Response | null {
   return new HttpResponse(stored.body, { status: stored.status, headers });
 }
 
+// The service's SkuDetails record (F-01, F-03): Java isBlank (NBSP is not blank), no control characters
+// (a description may hold \n and \t), no unpaired surrogate, and an image URL that java.net.URI parses
+// with a lowercase http/https scheme, a non-null host and an ASCII round-trip.
+// eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
+const JAVA_BLANK = /^[\t\n\v\f\r\x1C-\x1F \u1680\u2000-\u2006\u2008-\u200A\u2028\u2029\u205F\u3000]*$/;
+// eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
+const NAME_CONTROL = /[\x00-\x1F\x7F\p{Cs}]/u;
+// eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
+const DESCRIPTION_CONTROL = /[\x00-\x08\x0B-\x1F\x7F\p{Cs}]/u;
+const URI_REJECTS = /[^\x21-\x7E]|["<>\\^`{|}]/;
+const IMAGE_URL = /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?[A-Za-z0-9.-]+(?::\d*)?(?:[/?#][!-~]*)?$/;
+
 /** The server's field rules (DESIGN-V2 §8); returns the normalised details or null when invalid. */
 function validDetails(input: unknown): SkuDetails | null {
   if (typeof input !== 'object' || input === null) return null;
   const d = input as Record<string, unknown>;
-  if (typeof d.name !== 'string' || d.name.trim() === '' || d.name.length > 120) return null;
+  if (typeof d.name !== 'string' || JAVA_BLANK.test(d.name) || d.name.length > 120 || NAME_CONTROL.test(d.name)) {
+    return null;
+  }
   const out: SkuDetails = { name: d.name, description: '', images: [] };
   if (d.description !== undefined) {
-    if (typeof d.description !== 'string' || d.description.length > 2000) return null;
+    if (typeof d.description !== 'string' || d.description.length > 2000 || DESCRIPTION_CONTROL.test(d.description)) {
+      return null;
+    }
     out.description = d.description;
   }
   if (d.images !== undefined) {
     if (!Array.isArray(d.images) || d.images.length > 10) return null;
     for (const u of d.images) {
-      if (typeof u !== 'string' || u.length > 2048) return null;
-      try {
-        const url = new URL(u);
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-      } catch {
-        return null;
-      }
+      if (typeof u !== 'string' || u.length > 2048 || URI_REJECTS.test(u) || !IMAGE_URL.test(u)) return null;
     }
     out.images = d.images as string[];
   }
