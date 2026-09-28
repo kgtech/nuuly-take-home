@@ -6,18 +6,19 @@ import { ArrowLeft } from '../components/Icons';
 import { ErrorText, Hint, SubmitButton, writeGuidance } from '../components/Messages';
 import { navigate, skuHref } from '../hooks/useHashRoute';
 import { useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
-import { initialStockReason, skuIdReason } from '../validation';
+import { initialStockReason, NOT_A_NUMBER, skuIdReason } from '../validation';
 
 /** #/new: one POST /v2/inventory/{skuId} with details and optional initial stock (FE34). */
 export function CreateSkuPage() {
   const id = useId();
   const [skuId, setSkuId] = useState('');
   const [initial, setInitial] = useState('');
+  const [initialBadInput, setInitialBadInput] = useState(false);
   const details = useDetailsForm();
   const alertRef = useRef<HTMLParagraphElement>(null);
 
   const skuReason = skuIdReason(skuId);
-  const initialReason = initialStockReason(initial);
+  const initialReason = initialBadInput ? NOT_A_NUMBER : initialStockReason(initial);
   const request = (): CreateSkuRequest => ({ details: details.body(), initialQuantity: initial === '' ? 0 : Number(initial) });
 
   const send = useCallback((key: string) => api.createSku(skuId, request(), key), [skuId, initial, details.values]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -81,7 +82,8 @@ export function CreateSkuPage() {
             step={1}
             value={initial}
             onChange={(e) => setInitial(e.target.value)}
-            aria-invalid={(initial !== '' && initialReason !== null) || undefined}
+            onInput={(e) => setInitialBadInput(e.currentTarget.validity?.badInput ?? false)}
+            aria-invalid={initialReason !== null || undefined}
             aria-describedby={`${id}-initial-hint`}
             readOnly={inFlight}
           />

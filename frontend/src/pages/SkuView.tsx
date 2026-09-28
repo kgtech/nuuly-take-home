@@ -11,7 +11,7 @@ import { availability } from './InventoryList';
 type State =
   | { phase: 'loading' }
   | { phase: 'error'; status: number; errorText: string }
-  | { phase: 'ready'; item: SkuItem };
+  | { phase: 'ready'; item: SkuItem; detailsError?: { status: number; errorText: string } };
 
 export const ADD_FIRST = 'Add stock first to create this SKU.';
 const onHandLine = (n: number) => `Only ${n.toLocaleString()} on hand now. Lower the quantity or add stock.`;
@@ -30,6 +30,12 @@ export function SkuView({ skuId }: { skuId: string }) {
   // Sequence of outcomes: the re-fetch after "Insufficient inventory" is ignored when a newer outcome
   // (e.g. an add) has landed meanwhile, so a late GET never overwrites a fresher quantity (F-08).
   const seq = useRef(0);
+  // The latest loaded state, for the outcome callback (a functional setState updater runs lazily, so it
+  // cannot be used to read the current state there).
+  const loadedRef = useRef<State>(loaded);
+  useEffect(() => {
+    loadedRef.current = loaded;
+  }, [loaded]);
 
   useEffect(() => {
     let live = true;
@@ -56,12 +62,30 @@ export function SkuView({ skuId }: { skuId: string }) {
     (o: StockOutcome) => {
       const mine = ++seq.current;
       if (o.kind === 'done') {
-        // The v1 response carries only the quantity; the details stay as read (FE38).
-        setState((cur) => ({
-          phase: 'ready',
-          item: { ...(cur.phase === 'ready' ? cur.item : {}), skuId: o.item.skuId ?? skuId, quantity: o.item.quantity ?? 0 },
-        }));
         setOutcome({ outcome: o });
+        // The v1 response carries only the quantity: merge it into the item read (FE38). When nothing was
+        // read (404, or a failed load), re-fetch GET /v2 so a SKU that has details never shows "No details yet"
+        // (F-fe-05); a 404 SKU that the add just created has none, and the re-fetch says so.
+        void (async () => {
+          const cur = loadedRef.current;
+          if (cur.phase === 'ready') {
+            setState({ phase: 'ready', item: { ...cur.item, quantity: o.item.quantity ?? 0 } });
+            return;
+          }
+          const r = await api.getSku(skuId);
+          if (seq.current !== mine) return;
+          // A second failure keeps the quantity the add returned and shows a details error with Retry, never
+          // "No details yet" for a SKU that may have details (R-04).
+          setState(
+            r.ok
+              ? { phase: 'ready', item: r.data }
+              : {
+                  phase: 'ready',
+                  item: { skuId: o.item.skuId ?? skuId, quantity: o.item.quantity ?? 0 },
+                  detailsError: { status: r.status, errorText: r.errorText },
+                },
+          );
+        })();
         return;
       }
       if (o.status === 400 && o.errorText === INSUFFICIENT_INVENTORY) {
@@ -83,6 +107,20 @@ export function SkuView({ skuId }: { skuId: string }) {
   );
 
   const missing = state.phase === 'error' && state.status === 404;
+
+  /** Re-fetches GET /v2 after a failed details load, keeping the quantity on screen meanwhile. */
+  const retryDetails = () => {
+    const mine = ++seq.current;
+    void api.getSku(skuId).then((r) => {
+      if (seq.current !== mine) return;
+      setState((cur) => {
+        if (cur.phase !== 'ready') return cur;
+        return r.ok
+          ? { phase: 'ready', item: r.data }
+          : { phase: 'ready', item: cur.item, detailsError: { status: r.status, errorText: r.errorText } };
+      });
+    });
+  };
 
   return (
     <section className="page">
@@ -114,7 +152,7 @@ export function SkuView({ skuId }: { skuId: string }) {
               <span className="label">On hand</span>
               <div className="row">
                 <span className="big" data-testid="quantity">
-                  {state.item.quantity}
+                  {state.item.quantity.toLocaleString()}
                 </span>
                 {(() => {
                   const badge = availability(state.item.quantity);
@@ -125,7 +163,15 @@ export function SkuView({ skuId }: { skuId: string }) {
           )}
         </div>
       </div>
-      {state.phase === 'ready' && <Details skuId={skuId} details={state.item.details} />}
+      {state.phase === 'ready' && state.detailsError !== undefined && (
+        <section className="card details stack" aria-label="Details">
+          <ErrorText text={state.detailsError.errorText}>Could not load the details; the count above is current.</ErrorText>
+          <button type="button" className="secondary" onClick={retryDetails}>
+            Retry details
+          </button>
+        </section>
+      )}
+      {state.phase === 'ready' && state.detailsError === undefined && <Details skuId={skuId} details={state.item.details} />}
       {state.phase !== 'loading' && (
         <>
           <StockOutcomeView outcome={outcome?.outcome ?? null} extra={outcome?.extra} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server, store, TEXT } from '../test/server';
@@ -173,7 +173,7 @@ describe('CreateSkuPage (#/new)', () => {
 
   it.each([
     ['description', 'description', ' Now longer.'],
-    ['currency', 'currency', '{Backspace}EUR'],
+    ['currency', 'currency', '{Backspace}{Backspace}{Backspace}EUR'],
     ['an image line', 'images', '\nhttps://img.example/3.jpg'],
   ] as const)('changing %s after a network failure gives the retry a new Idempotency-Key (S8)', async (_l, key, typed) => {
     const user = userEvent.setup();
@@ -200,6 +200,47 @@ describe('CreateSkuPage (#/new)', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
     expect(store.requests).toHaveLength(2);
     expect(store.requests[1]!.headers.get('Idempotency-Key')).toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+  });
+
+  it('initial stock: text a number input cannot parse gets a "not a number" reason instead of sending 0 (F-fe-03)', async () => {
+    const user = userEvent.setup();
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    const initial = field.initial() as HTMLInputElement;
+    await user.type(initial, '1');
+    Object.defineProperty(initial, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(initial, { target: { value: '' } });
+    expect(hintOf(initial)).toHaveTextContent('Enter a number.');
+    expect(initial).toHaveAttribute('aria-invalid', 'true');
+    expect(submit()).toHaveAttribute('aria-disabled', 'true');
+    expect(submit().getAttribute('aria-describedby')!.split(' ')).toContain(hintOf(initial).id);
+    await user.click(submit());
+    expect(store.requests).toHaveLength(0);
+    Object.defineProperty(initial, 'validity', { value: { badInput: false }, configurable: true });
+    await user.type(initial, '3');
+    expect(hintOf(initial)).toBeEmptyDOMElement();
+    expect(submit()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it.each([
+    ['initial stock', 'initial'],
+    ['cost amount', 'amount'],
+  ] as const)('%s: badInput is read on input from an empty field, where React fires no change (R-01)', async (_l, key) => {
+    const user = userEvent.setup();
+    render(<CreateSkuPage />);
+    await user.type(field.skuId(), 'A');
+    await user.type(field.name(), 'A');
+    if (key === 'amount') await user.type(field.currency(), 'USD');
+    const input = field[key]() as HTMLInputElement;
+    expect(input).toHaveValue(null);
+    Object.defineProperty(input, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(input, { target: { value: '' } });
+    expect(hintOf(input)).toHaveTextContent('Enter a number.');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(submit()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(submit());
+    await user.keyboard('{Enter}');
+    expect(store.requests).toHaveLength(0);
   });
 
   it('a pasted name longer than 120 characters is kept as typed and refused, not truncated (F-09)', async () => {

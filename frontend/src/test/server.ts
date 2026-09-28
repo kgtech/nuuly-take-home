@@ -165,7 +165,8 @@ const NAME_CONTROL = /[\x00-\x1F\x7F\p{Cs}]/u;
 // eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
 const DESCRIPTION_CONTROL = /[\x00-\x08\x0B-\x1F\x7F\p{Cs}]/u;
 const URI_REJECTS = /[^\x21-\x7E]|["<>\\^`{|}]/;
-const IMAGE_URL = /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?[A-Za-z0-9.-]+(?::\d*)?(?:[/?#][!-~]*)?$/;
+const IMAGE_URL =
+  /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+(?:%[A-Za-z0-9]+)?\])(?::\d*)?(?:[/?#][!-~]*)?$/;
 
 /** The server's field rules (DESIGN-V2 §8); returns the normalised details or null when invalid. */
 function validDetails(input: unknown): SkuDetails | null {
@@ -240,14 +241,19 @@ async function replace(request: Request, skuId: string): Promise<Response> {
   } catch {
     return text(400, TEXT.invalid);
   }
-  if (!SKU.test(skuId) || !store.items.has(skuId)) return text(404, TEXT.notFound);
+  // As the service: the body is validated before the SKU lookup; an empty or malformed If-Match (not "*" and
+  // not a list of strong ETags) and a G11-invalid skuId are 400 (F-fe-06, R-05).
   const details = validDetails(body);
   if (details === null) return text(400, TEXT.invalid);
   const ifMatch = request.headers.get('If-Match');
+  let tags: string[] | null = null;
   if (ifMatch !== null && ifMatch.trim() !== '*') {
-    const tags = ifMatch.split(',').map((t) => t.trim());
-    if (!tags.includes(store.etag(skuId))) return text(412, TEXT.changed);
+    tags = ifMatch.split(',').map((t) => t.trim());
+    if (tags.some((t) => !/^"[^"]*"$/.test(t))) return text(400, TEXT.invalid);
   }
+  if (!SKU.test(skuId)) return text(400, TEXT.invalid);
+  if (!store.items.has(skuId)) return text(404, TEXT.notFound);
+  if (tags !== null && !tags.includes(store.etag(skuId))) return text(412, TEXT.changed);
   const current = store.details.get(skuId);
   store.details.set(skuId, { details, version: (current?.version ?? 0) + 1 });
   return withEtag(skuId, skuItem(skuId));

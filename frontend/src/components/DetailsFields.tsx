@@ -1,12 +1,14 @@
-import { useId, useRef, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import type { SkuDetails } from '../api/client';
 import {
+  COST_PAIR,
   costAmountReason,
   costCurrencyReason,
   descriptionReason,
   IMAGES_MAX,
   imagesReason,
   nameReason,
+  NOT_A_NUMBER,
   parseImages,
 } from '../validation';
 import { Hint } from './Messages';
@@ -36,30 +38,56 @@ export function useDetailsForm(initial: DetailsValues = valuesFrom(undefined)) {
   const id = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const [values, setValues] = useState<DetailsValues>(initial);
+  // A number input reports "" for text it cannot parse while still showing it (F-fe-03).
+  const [amountBadInput, setAmountBadInput] = useState(false);
   const reasons: Record<DetailsField, string | null> = {
     name: nameReason(values.name),
     description: descriptionReason(values.description),
-    amount: costAmountReason(values.amount, values.currency),
+    amount: amountBadInput ? NOT_A_NUMBER : costAmountReason(values.amount, values.currency),
     currency: costCurrencyReason(values.amount, values.currency),
     images: imagesReason(values.images),
   };
   const hintId = (f: DetailsField) => `${id}-${f}-hint`;
   const blockingHintIds = (Object.keys(reasons) as DetailsField[]).filter((f) => reasons[f] !== null).map(hintId);
   const set = (f: DetailsField, v: string) => setValues((cur) => ({ ...cur, [f]: v }));
+  /** Read on `input`, which React fires even when the value stays "" (typing "e5" from empty; R-01). */
+  const noteAmountValidity = (el: HTMLInputElement) => setAmountBadInput(el.validity?.badInput ?? false);
+  /** A reload replaces every value, so a stale "not a number" flag must go with them (R-02). */
+  const reset = useCallback((v: DetailsValues) => {
+    setAmountBadInput(false);
+    setValues(v);
+  }, []);
   const body = (): SkuDetails => {
     const d: SkuDetails = { name: values.name, description: values.description, images: parseImages(values.images) };
     if (values.amount !== '' && values.currency !== '') d.cost = { amount: Number(values.amount), currency: values.currency };
     return d;
   };
-  return { id, nameRef, values, set, reset: setValues, reasons, hintId, blockingHintIds, valid: blockingHintIds.length === 0, body };
+  return {
+    id,
+    nameRef,
+    values,
+    set,
+    noteAmountValidity,
+    amountBadInput,
+    reset,
+    reasons,
+    hintId,
+    blockingHintIds,
+    valid: blockingHintIds.length === 0,
+    body,
+  };
 }
 
 export type DetailsForm = ReturnType<typeof useDetailsForm>;
 
 /** The five details fields with their labels and always-present hints. */
 export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly: boolean }) {
-  const { id, nameRef, values, set, reasons, hintId } = form;
-  const invalid = (f: DetailsField) => (values[f] !== '' && reasons[f] !== null) || undefined;
+  const { id, nameRef, values, set, noteAmountValidity, amountBadInput, reasons, hintId } = form;
+  // An empty field is not flagged, except when its emptiness is the problem: unparsable text in the amount
+  // (badInput) or a cost pair with only the other half filled (R-06, symmetric).
+  const invalid = (f: DetailsField) =>
+    (reasons[f] !== null && (values[f] !== '' || reasons[f] === COST_PAIR || (f === 'amount' && amountBadInput))) ||
+    undefined;
   // No maxLength on the text fields: it would truncate a paste silently, and the reason already blocks (F-09).
   return (
     <>
@@ -102,6 +130,7 @@ export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly:
             step={1}
             value={values.amount}
             onChange={(e) => set('amount', e.target.value)}
+            onInput={(e) => noteAmountValidity(e.currentTarget)}
             aria-invalid={invalid('amount')}
             aria-describedby={hintId('amount')}
             readOnly={readOnly}
@@ -115,7 +144,6 @@ export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly:
             type="text"
             value={values.currency}
             onChange={(e) => set('currency', e.target.value)}
-            maxLength={3}
             autoComplete="off"
             autoCapitalize="characters"
             aria-invalid={invalid('currency')}

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server, store, TEXT } from '../test/server';
 import { EditSkuPage } from './EditSkuPage';
 import { GUIDANCE } from '../components/Messages';
-import type { SkuDetails } from '../api/client';
+import { createClient, type SkuDetails } from '../api/client';
+import { NO_VERSION } from './EditSkuPage';
 
 const details: SkuDetails = {
   name: 'Linen dress',
@@ -68,13 +69,15 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     store.seedDetails('E-1', 2, details, 1);
     render(<EditSkuPage skuId="E-1" />);
     await screen.findByRole('heading', { level: 1, name: 'Edit details' });
-    // Someone else saves meanwhile.
-    store.details.set('E-1', { details: { ...details, name: 'Renamed elsewhere' }, version: 2 });
+    // Someone else saves meanwhile, through a real PUT (F-fe-06).
+    const other = await createClient('http://localhost:3000').replaceSkuDetails('E-1', { ...details, name: 'Renamed elsewhere' }, '*');
+    expect(other.ok && other.etag).toBe('"2"');
     await user.type(name(), ' v2');
     await user.click(save());
     const alert = await screen.findByRole('alert');
     expect(alert.textContent!.startsWith(TEXT.changed)).toBe(true);
-    expect(store.requests.filter((r) => r.method === 'PUT')[0]!.headers.get('If-Match')).toBe('"1"');
+    const pagePuts = () => store.requests.filter((r) => r.method === 'PUT' && r.headers.get('If-Match') !== '*');
+    expect(pagePuts()[0]!.headers.get('If-Match')).toBe('"1"');
     expect(window.location.hash).toBe('');
 
     await user.click(screen.getByRole('button', { name: 'Reload' }));
@@ -84,7 +87,7 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     await user.type(name(), ' v3');
     await user.click(save());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/E-1'));
-    expect(store.requests.filter((r) => r.method === 'PUT')[1]!.headers.get('If-Match')).toBe('"2"');
+    expect(pagePuts()[1]!.headers.get('If-Match')).toBe('"2"');
     expect(store.details.get('E-1')?.details.name).toBe('Renamed elsewhere v3');
   });
 
@@ -148,6 +151,105 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     const hint = document.getElementById(amount.getAttribute('aria-describedby')!)!;
     expect(hint).toHaveTextContent("Amounts above 9,007,199,254,740,991 can't be entered or edited here.");
     expect(save()).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('a stored IPv6 image URL loads with Save available (F-fe-01)', async () => {
+    store.seedDetails('E-1', 2, { name: 'Six', images: ['https://[2001:db8::1]:8443/x.jpg', 'http://[::1]/a.png'] });
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    expect(screen.getByLabelText(/image urls/i)).toHaveValue('https://[2001:db8::1]:8443/x.jpg\nhttp://[::1]/a.png');
+    expect(save()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('without an ETag on the read, Save is unavailable with a reason and no unconditional PUT is sent (F-fe-04)', async () => {
+    const user = userEvent.setup();
+    server.use(http.get('*/v2/inventory/:skuId', () => HttpResponse.json({ skuId: 'E-1', quantity: 2, details })));
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    expect(name()).toHaveValue('Linen dress');
+    const reason = screen.getByText(NO_VERSION);
+    expect(save()).toHaveAttribute('aria-disabled', 'true');
+    expect(save().getAttribute('aria-describedby')!.split(' ')).toContain(reason.id);
+    await user.click(save());
+    await user.keyboard('{Enter}');
+    expect(store.requests.filter((r) => r.method === 'PUT')).toHaveLength(0);
+    expect(NO_VERSION).toBe('The service did not return a version; reload and try again.');
+  });
+
+  it('cost amount: text a number input cannot parse gets a "not a number" reason instead of silently omitting the cost (F-fe-03)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, details);
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    const amount = screen.getByLabelText(/cost amount/i) as HTMLInputElement;
+    const hint = document.getElementById(amount.getAttribute('aria-describedby')!)!;
+    // jsdom never reports badInput; a browser does for "12-3" while showing it and reporting value "".
+    Object.defineProperty(amount, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(amount, { target: { value: '' } });
+    expect(hint).toHaveTextContent('Enter a number.');
+    expect(amount).toHaveAttribute('aria-invalid', 'true');
+    expect(save()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(save());
+    expect(store.requests.filter((r) => r.method === 'PUT')).toHaveLength(0);
+    Object.defineProperty(amount, 'validity', { value: { badInput: false }, configurable: true });
+    await user.type(amount, '500');
+    expect(hint).toBeEmptyDOMElement();
+    expect(save()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('cost amount: badInput is read on input, which React fires even when the value stays "" (R-01)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, { name: 'Plain' });
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    const amount = screen.getByLabelText(/cost amount/i) as HTMLInputElement;
+    expect(amount).toHaveValue(null);
+    const hint = document.getElementById(amount.getAttribute('aria-describedby')!)!;
+    Object.defineProperty(amount, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(amount, { target: { value: '' } }); // "e5" typed from empty: the value stays ""
+    expect(hint).toHaveTextContent('Enter a number.');
+    expect(amount).toHaveAttribute('aria-invalid', 'true');
+    expect(save()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(save());
+    await user.keyboard('{Enter}');
+    expect(store.requests.filter((r) => r.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('Reload clears a stale "not a number" state so a valid reloaded amount is not flagged (R-02)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, details, 1);
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    await createClient('http://localhost:3000').replaceSkuDetails('E-1', { ...details, cost: { amount: 777, currency: 'EUR' } }, '*');
+    await user.click(save());
+    await screen.findByRole('alert'); // 412
+    // Before reloading, the amount field holds text a number input cannot parse.
+    const amount = screen.getByLabelText(/cost amount/i) as HTMLInputElement;
+    Object.defineProperty(amount, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(amount, { target: { value: '' } });
+    expect(save()).toHaveAttribute('aria-disabled', 'true');
+    Object.defineProperty(amount, 'validity', { value: { badInput: false }, configurable: true });
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(screen.getByLabelText(/cost amount/i)).toHaveValue(777));
+    const hint = document.getElementById(screen.getByLabelText(/cost amount/i).getAttribute('aria-describedby')!)!;
+    expect(hint).toBeEmptyDOMElement();
+    expect(save()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('flags both cost fields when only one is filled (R-06)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, { name: 'Plain' });
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    const amount = screen.getByLabelText(/cost amount/i);
+    const currency = screen.getByLabelText(/^currency/i);
+    await user.type(currency, 'USD');
+    expect(amount).toHaveAttribute('aria-invalid', 'true');
+    expect(currency).not.toHaveAttribute('aria-invalid');
+    await user.clear(currency);
+    await user.type(amount, '100');
+    expect(currency).toHaveAttribute('aria-invalid', 'true');
+    expect(amount).not.toHaveAttribute('aria-invalid');
   });
 
   it('answers an id that fails G11 with "SKU not found" locally and the create link, sending nothing', async () => {

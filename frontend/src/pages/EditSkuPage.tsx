@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type SkuItem } from '../api/client';
 import { DetailsFields, useDetailsForm, valuesFrom } from '../components/DetailsFields';
 import { ArrowLeft } from '../components/Icons';
-import { ErrorText, Loading, SubmitButton, writeGuidance } from '../components/Messages';
+import { ErrorText, Hint, Loading, SubmitButton, writeGuidance } from '../components/Messages';
 import { navigate, NEW_HREF, skuHref } from '../hooks/useHashRoute';
 import { SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
 
@@ -12,6 +12,9 @@ type Loaded =
   | { phase: 'ready'; item: SkuItem; etag: string | null };
 
 type Saved = { status: number; errorText: string } | null;
+
+/** Shown when the read carried no ETag (a proxy stripped it): FE37 never sends an unconditional PUT (F-fe-04). */
+export const NO_VERSION = 'The service did not return a version; reload and try again.';
 
 /** #/sku/:id/edit: GET /v2 then PUT with If-Match from the ETag (FE37). Rendered with key={skuId}. */
 export function EditSkuPage({ skuId }: { skuId: string }) {
@@ -61,7 +64,7 @@ export function EditSkuPage({ skuId }: { skuId: string }) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (loaded.phase !== 'ready' || !details.valid || busy.current) return;
+    if (loaded.phase !== 'ready' || loaded.etag === null || !details.valid || busy.current) return;
     busy.current = true;
     setInFlight(true);
     try {
@@ -113,10 +116,11 @@ export function EditSkuPage({ skuId }: { skuId: string }) {
           <SubmitButton
             label="Save details"
             className="wide"
-            unavailable={!details.valid}
+            unavailable={!details.valid || loaded.etag === null}
             inFlight={inFlight}
-            describedBy={details.blockingHintIds}
+            describedBy={[...details.blockingHintIds, ...(loaded.etag === null ? [`${details.id}-version`] : [])]}
           />
+          {loaded.etag === null && <Hint id={`${details.id}-version`}>{NO_VERSION}</Hint>}
           {failure !== null && (
             <ErrorText text={failure.errorText} ref={alertRef}>
               {failure.status === 412 ? (

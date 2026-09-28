@@ -59,6 +59,8 @@ export const COST_AMOUNT = 'Enter a whole number of minor units (e.g. cents), 0 
 export const COST_CURRENCY = 'Enter a three-letter uppercase currency code, e.g. USD.';
 export const INITIAL_STOCK = `Enter a whole number from 0 to ${MAX_INT32.toLocaleString()}.`;
 export const CONTROL_CHARS = 'Remove control characters.';
+/** A number input's validity.badInput: it shows text it cannot parse but reports "" (F-fe-03). */
+export const NOT_A_NUMBER = 'Enter a number.';
 export const COST_TOO_LARGE = `Amounts above ${Number.MAX_SAFE_INTEGER.toLocaleString()} can't be entered or edited here.`;
 export const IMAGE_URL_RULE =
   'use the URL as a browser shows it: ASCII, percent-encoded, starting with http:// or https://';
@@ -108,9 +110,11 @@ export function costCurrencyReason(amount: string, currency: string): string | n
 
 /** One URL per line; surrounding spaces and blank lines are ignored. */
 export function parseImages(text: string): string[] {
+  // Only \r, space and tab are stripped (F-fe-02): trim() would also drop NBSP and U+FEFF, and the request
+  // must be what the user sees; such a line then fails the URL rule with its reason, as it would on the server.
   return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
+    .split('\n')
+    .map((l) => l.replace(/^[ \t\r]+|[ \t\r]+$/g, ''))
     .filter((l) => l !== '');
 }
 
@@ -120,7 +124,10 @@ export function parseImages(text: string): string[] {
  * http/https scheme, and a host of letters, digits, '.' and '-' (an underscore host makes
  * getHost() null), so that toASCIIString() round-trips. The value is checked as typed, never rewritten.
  */
-const IMAGE_URL = /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?[A-Za-z0-9.-]+(?::\d*)?(?:[/?#][!-~]*)?$/;
+// The host is a name of letters, digits, '.' and '-', or an IPv6 literal in brackets with an optional zone id
+// (`[fe80::1%eth0]`), which java.net.URI also accepts (F-fe-01, R-03); both may carry a port.
+const IMAGE_URL =
+  /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+(?:%[A-Za-z0-9]+)?\])(?::\d*)?(?:[/?#][!-~]*)?$/;
 const URI_REJECTS = /[^\x21-\x7E]|["<>\\^`{|}]/;
 
 export function isServerImageUrl(u: string): boolean {

@@ -151,6 +151,25 @@ describe('details reasons (DESIGN-V2 §8 field rules)', () => {
   it('does not rewrite what the user typed', () => {
     expect(parseImages('https://a.example/café.jpg')).toEqual(['https://a.example/café.jpg']);
   });
+  // java.net.URI accepts an IPv6 literal host (F-fe-01); an underscore host, a space or non-ASCII stay rejected.
+  it.each(['http://[::1]/a.png', 'https://[2001:db8::1]:8443/x.jpg', 'https://[fe80::1]/', 'http://[fe80::1%eth0]/a.png', 'http://[fe80::1%25]:80/'])('accepts the IPv6 host in %s', (u) => {
+    expect(imagesReason(u)).toBeNull();
+  });
+  it.each(['https://my_host.example/1.jpg', 'https://a.example/a b.jpg', 'https://a.example/café.jpg', 'https://[::1/x', 'https://[zz::1]/x', 'http://[fe80::1%]/x', 'http://[fe80::1%eth-0]/x'])(
+    'still rejects %j',
+    (u) => {
+      expect(imagesReason(u)).toBe(`Line 1: ${IMAGE_URL_RULE}`);
+    },
+  );
+  // Only \r, space and tab are stripped from a line (F-fe-02): an NBSP or U+FEFF stays and fails the rule, as it
+  // would on the server, instead of a request that differs from the visible input.
+  it('strips only carriage returns, spaces and tabs from image lines', () => {
+    expect(parseImages(' \thttps://a.example/x \r\n\r\n\t https://b.example/y\t')).toEqual(['https://a.example/x', 'https://b.example/y']);
+    expect(parseImages(' https://a.example/x')).toEqual([' https://a.example/x']);
+    expect(parseImages('﻿https://a.example/x')).toEqual(['﻿https://a.example/x']);
+    expect(imagesReason('https://a.example/x ')).toBe(`Line 1: ${IMAGE_URL_RULE}`);
+    expect(imagesReason(' ')).toBe(`Line 1: ${IMAGE_URL_RULE}`);
+  });
   it('initial stock: optional, a whole number from 0 to 2,147,483,647 (exponent forms read as numbers)', () => {
     expect(initialStockReason('')).toBeNull();
     expect(initialStockReason('0')).toBeNull();
