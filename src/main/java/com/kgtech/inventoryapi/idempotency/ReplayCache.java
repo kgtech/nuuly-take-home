@@ -29,7 +29,7 @@ class ReplayCache {
 
     static final String PREFIX = "idem:";
     /** What the Postgres row's CHECK allows; anything else in Redis is treated as a miss, never replayed. */
-    private static final Set<Integer> ALLOWED_STATUS = Set.of(200, 400, 404);
+    private static final Set<Integer> ALLOWED_STATUS = Set.of(200, 201, 400, 404, 409);
     private static final Set<String> ALLOWED_TYPES = Set.of("application/json", "text/plain");
 
     private final StringRedisTemplate redis;

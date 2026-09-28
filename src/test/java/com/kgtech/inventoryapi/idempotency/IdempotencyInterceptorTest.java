@@ -82,11 +82,25 @@ class IdempotencyInterceptorTest {
         }
     }
 
-    /** The advised target: two @Idempotent methods in the required (String, int, String) shape. */
+    /** A Fingerprinted request for the A29 shape: its canonical form is the value as given. */
+    record Req(String value) implements Fingerprinted {
+
+        @Override
+        public String fingerprint() {
+            return value;
+        }
+    }
+
+    /** The advised target: @Idempotent methods in the two allowed shapes (String, int | Fingerprinted, String). */
     static class Target {
 
         final List<String> calls = new ArrayList<>();
         RuntimeException failure;
+
+        @Idempotent(Operation.CREATE)
+        public Result create(String skuId, Req request, String idempotencyKey) {
+            return call("create", skuId, Integer.parseInt(request.value()));
+        }
 
         @Idempotent(Operation.ADD)
         public Result add(String skuId, int quantity, String idempotencyKey) {
@@ -218,9 +232,11 @@ class IdempotencyInterceptorTest {
     @ParameterizedTest
     @EnumSource(Operation.class)
     void beforeClaimRejectionIsReturnedWithoutTransactionOrStore(Operation operation) {
-        Result result = operation == Operation.ADD
-                ? proxy.add("-bad", 5, KEY)
-                : proxy.purchase("-bad", 5, KEY);
+        Result result = switch (operation) {
+            case ADD -> proxy.add("-bad", 5, KEY);
+            case PURCHASE -> proxy.purchase("-bad", 5, KEY);
+            case CREATE -> proxy.create("-bad", new Req("5"), KEY);
+        };
 
         assertThat(result).isEqualTo(new Result("rejected " + operation));
         assertThat(results.calls).containsExactly("beforeClaim " + operation + " -bad");
@@ -254,16 +270,16 @@ class IdempotencyInterceptorTest {
     void requestCarriesParsedKeyOperationSkuIdQuantity(Operation operation) {
         storeExecutes();
 
-        if (operation == Operation.ADD) {
-            proxy.add("AbC-1", 7, KEY.toUpperCase());
-        } else {
-            proxy.purchase("AbC-1", 7, KEY.toUpperCase());
+        switch (operation) {
+            case ADD -> proxy.add("AbC-1", 7, KEY.toUpperCase());
+            case PURCHASE -> proxy.purchase("AbC-1", 7, KEY.toUpperCase());
+            case CREATE -> proxy.create("AbC-1", new Req("7"), KEY.toUpperCase());
         }
 
         ArgumentCaptor<IdempotentRequest> request = ArgumentCaptor.forClass(IdempotentRequest.class);
         verify(store).execute(request.capture(), any());
         assertThat(request.getValue())
-                .isEqualTo(new IdempotentRequest(UUID.fromString(KEY), operation, "AbC-1", 7));
+                .isEqualTo(new IdempotentRequest(UUID.fromString(KEY), operation, "AbC-1", "7"));
     }
 
     /** Y4: the first response is rendered with the raw skuId inside the claim's action and returned via stored. */

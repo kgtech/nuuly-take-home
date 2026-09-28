@@ -58,8 +58,9 @@ final class IdempotencyInterceptor implements MethodInterceptor {
         if (rejected.isPresent()) {
             return rejected.get();
         }
-        IdempotentRequest request =
-                new IdempotentRequest(IdempotencyKey.parse(rawKey), operation, skuId, (Integer) arguments[1]);
+        IdempotentRequest request = arguments[1] instanceof Fingerprinted fingerprinted
+                ? new IdempotentRequest(IdempotencyKey.parse(rawKey), operation, skuId, fingerprinted.fingerprint())
+                : IdempotentRequest.of(IdempotencyKey.parse(rawKey), operation, skuId, (Integer) arguments[1]);
         ReplayCache cache = replayCache.getObject();
         KeyedResult result = cache.lookup(request).orElseGet(() -> requiresNew().execute(status -> {
             KeyedResult keyed = store.getObject().execute(request, () -> results.toStored(skuId, proceed(invocation)));

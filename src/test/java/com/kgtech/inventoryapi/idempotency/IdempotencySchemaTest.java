@@ -96,8 +96,8 @@ class IdempotencySchemaTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"201", "409", "500", "0"})
-    void status201ViolatesCheck(int status) {
+    @CsvSource({"202", "412", "500", "0"})
+    void unstorableStatusViolatesCheck(int status) {
         assertSqlState(() -> insert(UUID.randomUUID(), "add", "widget", hash(32), status, "text/plain", "x"),
                 CHECK_VIOLATION, "idempotency_keys_status_check");
     }

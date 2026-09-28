@@ -61,12 +61,12 @@ class InventoryErrorAdvice {
         return TextErrors.invalidRequest();
     }
 
-    /** A POST whose Accept excludes JSON is a client error on the spec's operations (U2, Y1). */
+    /** A POST or PUT whose Accept excludes JSON is a client error on the spec's and v2's write operations (U2, Y1). */
     @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
     ResponseEntity<String> notAcceptable(HttpMediaTypeNotAcceptableException ex, HttpServletRequest request)
             throws Exception {
         leaveLibraryPathsToSpring(ex, request);
-        if (HttpMethod.POST.matches(request.getMethod())) {
+        if (HttpMethod.POST.matches(request.getMethod()) || HttpMethod.PUT.matches(request.getMethod())) {
             return TextErrors.invalidRequest();
         }
         return TextErrors.of(HttpStatus.NOT_ACCEPTABLE, TextErrors.textFor(HttpStatus.NOT_ACCEPTABLE));

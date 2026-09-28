@@ -23,13 +23,13 @@ public final class SkuId {
         return skuId != null && PATTERN.matcher(skuId).matches();
     }
 
-    /** Malformed skuId: create → InvalidRequest, purchase → NotFound; valid → empty. No I/O (S2). */
+    /** Malformed skuId: add and create → InvalidRequest, purchase → NotFound; valid → empty. No I/O (S2). */
     public static Optional<WriteResult> rejection(Operation operation, String skuId) {
         if (isValid(skuId)) {
             return Optional.empty();
         }
         return Optional.of(switch (operation) {
-            case ADD -> new WriteResult.InvalidRequest();
+            case ADD, CREATE -> new WriteResult.InvalidRequest();
             case PURCHASE -> new StockOutcome.NotFound();
         });
     }

@@ -11,6 +11,10 @@ final class InventoryApi {
     static final String SKU_PATH = "/{skuId}";
     static final String PURCHASE_PATH = SKU_PATH + "/purchase";
 
+    /** DESIGN-V2 §8, A21: the additive v2 paths. */
+    static final String V2_BASE_PATH = "/v2/inventory";
+    static final String TAG_V2 = "inventory-v2";
+
     static final String LIMIT = "limit";
     static final String AFTER = "after";
 
@@ -44,6 +48,32 @@ final class InventoryApi {
             + "). Larger values mean " + MAX_LIMIT + "; other values are ignored and the default applies.";
     static final String AFTER_DESCRIPTION = "Optional cursor: return only SKUs whose skuId sorts after this value, "
             + "up to the page size. It must not be repeated.";
+
+    static final String V2_LIST_SUMMARY = "List all SKUs with details";
+    static final String V2_LIST_DESCRIPTION = "Returns SKUs sorted by skuId with their quantity and details (absent "
+            + "for a SKU that has none), at most " + MAX_LIMIT + " per response; the same limit, after and Link rules "
+            + "as GET /inventory.";
+    static final String V2_LIST_OK_DESCRIPTION = "One page of SKUs with details, at most " + MAX_LIMIT
+            + ", sorted by skuId";
+    static final String V2_GET_SUMMARY = "Get a SKU with its details";
+    static final String V2_GET_OK_DESCRIPTION = "The SKU with its quantity and details";
+    static final String V2_CREATE_SUMMARY = "Create a SKU with details";
+    static final String V2_CREATE_DESCRIPTION = "Creates the SKU with its details and optional initial stock in one "
+            + "transaction; initial stock is recorded in the ledger like an add. A SKU that already exists (including "
+            + "one created by POST /inventory/{skuId}) is 409; set its details with PUT and add stock with "
+            + "POST /inventory/{skuId}.";
+    static final String V2_CREATED_DESCRIPTION = "The created SKU";
+    static final String V2_CONFLICT_DESCRIPTION = TextErrors.SKU_EXISTS;
+    static final String V2_REPLACE_SUMMARY = "Replace a SKU's details";
+    static final String V2_REPLACE_DESCRIPTION = "Replaces the SKU's details (creates them for a SKU that has none). "
+            + "Stock is not changed. With If-Match, the details are replaced only when their current ETag is one of "
+            + "the listed values, else 412.";
+    static final String V2_REPLACED_DESCRIPTION = "The SKU after the update";
+    static final String V2_PRECONDITION_DESCRIPTION = TextErrors.DETAILS_CHANGED;
+    static final String ETAG_DESCRIPTION = "The details version, a strong validator for If-Match; \"0\" before any "
+            + "details";
+    static final String IF_MATCH_DESCRIPTION = "Optional strong ETag(s) from a previous response; \"*\" or absent "
+            + "means unconditional";
 
     private InventoryApi() {
     }

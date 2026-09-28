@@ -253,8 +253,8 @@ paths:
           description: The SKU with its quantity and details
           headers:
             ETag:
-              description: "The details version, a strong validator for If-Match; \"0\"\
-                \ before any details"
+              description: "The details version, a strong validator for If-Match;\
+                \ \"0\" before any details"
               schema:
                 type: string
               style: simple
@@ -268,10 +268,10 @@ paths:
       tags:
       - inventory-v2
     post:
-      description: "Creates the SKU with its details and optional initial stock in one\
-        \ transaction; initial stock is recorded in the ledger like an add. A SKU that\
-        \ already exists (including one created by POST /inventory/{skuId}) is 409;\
-        \ set its details with PUT and add stock with POST /inventory/{skuId}."
+      description: "Creates the SKU with its details and optional initial stock in\
+        \ one transaction; initial stock is recorded in the ledger like an add. A\
+        \ SKU that already exists (including one created by POST /inventory/{skuId})\
+        \ is 409; set its details with PUT and add stock with POST /inventory/{skuId}."
       operationId: createSku
       parameters:
       - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
@@ -308,8 +308,8 @@ paths:
           description: The created SKU
           headers:
             ETag:
-              description: "The details version, a strong validator for If-Match; \"0\"\
-                \ before any details"
+              description: "The details version, a strong validator for If-Match;\
+                \ \"0\" before any details"
               schema:
                 type: string
               style: simple
@@ -345,8 +345,8 @@ paths:
           maxLength: 64
           minLength: 1
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-      - description: "Optional strong ETag(s) from a previous response; \"*\" or absent\
-          \ means unconditional"
+      - description: Optional strong ETag(s) from a previous response; "*" or absent
+          means unconditional
         in: header
         name: If-Match
         required: false
@@ -367,8 +367,8 @@ paths:
           description: The SKU after the update
           headers:
             ETag:
-              description: "The details version, a strong validator for If-Match; \"0\"\
-                \ before any details"
+              description: "The details version, a strong validator for If-Match;\
+                \ \"0\" before any details"
               schema:
                 type: string
               style: simple
@@ -389,8 +389,8 @@ paths:
             text/plain:
               schema:
                 type: string
-          description: "Details changed since you read them. Reload the SKU and retry with its\
-            \ new ETag."
+          description: Details changed since you read them. Reload the SKU and retry
+            with its new ETag.
       summary: Replace a SKU's details
       tags:
       - inventory-v2
@@ -404,9 +404,9 @@ components:
         initialQuantity:
           type: integer
           format: int32
-          description: "Stock to record at creation (default 0), through the same ledger\
-            \ as an add"
           default: 0
+          description: "Stock to record at creation (default 0), through the same\
+            \ ledger as an add"
           minimum: 0
       required:
       - details
@@ -451,7 +451,7 @@ components:
           $ref: "#/components/schemas/SkuCost"
         description:
           type: string
-          description: "Up to 2000 characters; default \"\""
+          description: Up to 2000 characters; default ""
           maxLength: 2000
         images:
           type: array

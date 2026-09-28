@@ -27,8 +27,8 @@ import com.kgtech.inventoryapi.cache.StockCache;
 class InventoryServiceReadTest {
 
     private final StockRepository stock = mock(StockRepository.class);
-    private final InventoryService service = new InventoryService(stock, mock(StockCache.class),
-            mock(PlatformTransactionManager.class));
+    private final InventoryService service = new InventoryService(stock, mock(DetailsRepository.class),
+            mock(StockCache.class), mock(PlatformTransactionManager.class));
 
     private InventoryPage list(String limit, String after) {
         when(stock.page(anyString(), anyLong())).thenReturn(List.of());

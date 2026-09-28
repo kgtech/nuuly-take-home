@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 import com.kgtech.inventoryapi.idempotency.IdempotentResults;
 import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
+import com.kgtech.inventoryapi.inventory.DetailsOutcome.AlreadyExists;
+import com.kgtech.inventoryapi.inventory.DetailsOutcome.Created;
 import com.kgtech.inventoryapi.inventory.InventoryItem;
 import com.kgtech.inventoryapi.inventory.SkuId;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
@@ -22,7 +24,7 @@ import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
 import tools.jackson.databind.json.JsonMapper;
 
-/** How stock-write results are checked, stored against an Idempotency-Key and rebuilt (R1, U1, Y4, Z1). */
+/** How keyed write results are checked, stored against an Idempotency-Key and rebuilt (R1, U1, Y4, Z1, A28). */
 @Component
 final class OutcomeResponses implements IdempotentResults<WriteResult> {
 
@@ -47,6 +49,9 @@ final class OutcomeResponses implements IdempotentResults<WriteResult> {
             case NotFound _ -> text(TextErrors.skuNotFound());
             case Insufficient _ -> text(TextErrors.insufficientInventory());
             case Overflow _ -> text(TextErrors.invalidRequest());
+            case Created created -> new StoredResponse(201, APPLICATION_JSON_VALUE,
+                    json.writeValueAsString(created.item()));
+            case AlreadyExists _ -> text(TextErrors.skuExists());
             case Stored _, InvalidRequest _ ->
                     throw new IllegalStateException("not a stock outcome: " + result);
         };
