@@ -4,7 +4,7 @@ import type { ApiResult } from '../api/client';
 export type SubmitState<T> =
   | { phase: 'idle' }
   | { phase: 'inFlight' }
-  | { phase: 'done'; data: T }
+  | { phase: 'done'; data: T; key: string }
   | { phase: 'failed'; status: number; errorText: string };
 
 /** True when the server may not have applied the request: retry with the same key. */
@@ -45,11 +45,12 @@ export function useIdempotentSubmit<T>(send: (key: string) => Promise<ApiResult<
           keyRef.current = { key: uuidV4(), fingerprint };
         }
         setState({ phase: 'inFlight' });
-        const result = await send(keyRef.current.key);
+        const key = keyRef.current.key;
+        const result = await send(key);
         let next: SubmitState<T>;
         if (result.ok) {
           keyRef.current = null;
-          next = { phase: 'done', data: result.data };
+          next = { phase: 'done', data: result.data, key };
         } else {
           if (!isRetryable(result.status)) keyRef.current = null;
           next = { phase: 'failed', status: result.status, errorText: result.errorText };

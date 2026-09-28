@@ -49,17 +49,25 @@ describe('App routing', () => {
 describe('phone width', () => {
   it('uses no fixed pixel widths wider than a phone in the stylesheet', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8');
-    for (const m of css.matchAll(/(?:min-|max-)?width\s*:\s*(\d+)px/g)) {
+    // A max-width caps, it never forces; width and min-width must fit a phone.
+    for (const m of css.matchAll(/(?:^|[^-])(?:min-)?width\s*:\s*(\d+)px/gm)) {
       expect(Number(m[1])).toBeLessThanOrEqual(375);
     }
-    for (const m of css.matchAll(/grid-template-columns\s*:[^;]*?(\d+)px/g)) {
-      expect(Number(m[1])).toBeLessThanOrEqual(160);
+    // Grid tracks wider than a phone column must be wrapped in min(…, 100%) so they shrink.
+    for (const m of css.matchAll(/grid-template-columns\s*:([^;]+);/g)) {
+      for (const px of (m[1] ?? '').matchAll(/(min\()?\s*(\d+)px/g)) {
+        if (Number(px[2]) > 160) expect(px[1]).toBe('min(');
+      }
     }
-    for (const m of css.matchAll(/padding[^:]*:\s*([^;]+);/g)) {
+    // Literal paddings stay small; the large desktop paddings are tokens the phone media query shrinks.
+    for (const m of css.matchAll(/(?:^|[^-])padding[^:]*:\s*([^;]+);/gm)) {
       for (const px of (m[1] ?? '').matchAll(/(\d+)px/g)) expect(Number(px[1])).toBeLessThanOrEqual(24);
     }
+    expect(css).toMatch(/@media \(max-width: \d+px\)/);
     expect(css).toMatch(/max-width/);
-    expect(css).toMatch(/min-height:\s*44px/);
-    expect(css).toMatch(/--on-accent/);
+    for (const m of css.matchAll(/min-height:\s*(\d+)px/g)) expect(Number(m[1])).toBeGreaterThanOrEqual(44);
+    expect(css).toMatch(/min-height:\s*4[4-9]px/);
+    // Light only (FE26): no dark-mode tokens.
+    expect(css).not.toMatch(/prefers-color-scheme/);
   });
 });

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import { api, type InventoryItem } from '../api/client';
 import { useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
 import { certainRejection, quantityHint } from '../validation';
-import { ErrorText } from './Messages';
+import { ErrorText, Success } from './Messages';
 
 export type Operation = 'add' | 'purchase';
 
@@ -19,7 +19,7 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
   const [quantity, setQuantity] = useState('');
   const [sent, setSent] = useState(0);
   const [rejected, setRejected] = useState<string | null>(null);
-  const statusRef = useRef<HTMLParagraphElement>(null);
+  const statusRef = useRef<HTMLDivElement>(null);
   const alertRef = useRef<HTMLParagraphElement>(null);
 
   const send = useCallback(
@@ -55,7 +55,7 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
   };
 
   const hint = quantityHint(quantity);
-  const done = state.phase === 'done' ? state.data : null;
+  const done = state.phase === 'done' ? state : null;
   const errorText = rejected ?? (state.phase === 'failed' ? state.errorText : null);
 
   return (
@@ -88,15 +88,15 @@ export function StockForm({ operation, skuId, onSuccess }: Props) {
           {hint}
         </p>
       </div>
-      <button type="submit" disabled={inFlight}>
+      <button type="submit" className="wide" disabled={inFlight}>
         {inFlight ? 'Sending…' : LABEL[operation]}
       </button>
       {done && rejected === null && (
-        <p role="status" className="success" tabIndex={-1} ref={statusRef}>
+        <Success idempotencyKey={done.key} ref={statusRef}>
           {operation === 'add'
-            ? `Added ${sent} to ${done.skuId}: now ${done.quantity}.`
-            : `Purchased ${sent} of ${done.skuId}: ${done.quantity} left.`}
-        </p>
+            ? `Added ${sent} to ${done.data.skuId}: now ${done.data.quantity}.`
+            : `Purchased ${sent} of ${done.data.skuId}: ${done.data.quantity} left.`}
+        </Success>
       )}
       {errorText !== null && <ErrorText text={errorText} ref={alertRef} />}
     </form>
