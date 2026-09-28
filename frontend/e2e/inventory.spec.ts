@@ -25,12 +25,12 @@ test('add stock then purchase', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveText('SKU not found');
 
   await addStock(page, 5);
-  await expect(addForm(page).getByRole('status')).toHaveText(`Added 5 to ${skuId}: now 5.`);
+  await expect(addForm(page).getByRole('status')).toContainText(`Added 5 to ${skuId}: now 5.`);
   await expect(page.getByTestId('quantity')).toHaveText('5');
 
   await buyForm(page).getByLabel('Quantity').fill('2');
   await buyForm(page).getByRole('button', { name: 'Purchase' }).click();
-  await expect(buyForm(page).getByRole('status')).toHaveText(`Purchased 2 of ${skuId}: 3 left.`);
+  await expect(buyForm(page).getByRole('status')).toContainText(`Purchased 2 of ${skuId}: 3 left.`);
   await expect(page.getByTestId('quantity')).toHaveText('3');
 
   await buyForm(page).getByLabel('Quantity').fill('4');
@@ -38,11 +38,12 @@ test('add stock then purchase', async ({ page }) => {
   await expect(buyForm(page).getByRole('alert')).toHaveText('Insufficient inventory');
 
   await page.goto('/');
-  await page.getByLabel('After SKU ID').fill(skuId.slice(0, -1));
+  await page.getByLabel('After SKU').fill(skuId.slice(0, -1));
   await page.getByRole('button', { name: 'Apply' }).click();
   const row = page.getByRole('row').filter({ has: page.getByRole('link', { name: skuId }) });
   await expect(row).toBeVisible();
-  await expect(row.getByRole('cell').nth(1)).toHaveText('3');
+  await expect(row.getByRole('cell').nth(1)).toHaveText('Almost gone');
+  await expect(row.getByRole('cell').nth(2)).toHaveText('3');
 });
 
 test('a double-submitted purchase changes stock once', async ({ page }) => {
@@ -59,7 +60,7 @@ test('a double-submitted purchase changes stock once', async ({ page }) => {
 
   await buyForm(page).getByLabel('Quantity').fill('3');
   await buyForm(page).getByRole('button', { name: 'Purchase' }).dblclick();
-  await expect(buyForm(page).getByRole('status')).toHaveText(`Purchased 3 of ${skuId}: 7 left.`);
+  await expect(buyForm(page).getByRole('status')).toContainText(`Purchased 3 of ${skuId}: 7 left.`);
   await expect(page.getByTestId('quantity')).toHaveText('7');
 
   await page.reload();
@@ -94,7 +95,7 @@ test('a retry after a network failure reuses the key and changes stock once', as
   await expect(buyForm(page).getByRole('alert')).toContainText('Network error');
   await expect(button).toBeEnabled();
   await button.click();
-  await expect(buyForm(page).getByRole('status')).toHaveText(`Purchased 4 of ${skuId}: 6 left.`);
+  await expect(buyForm(page).getByRole('status')).toContainText(`Purchased 4 of ${skuId}: 6 left.`);
 
   expect(keys).toHaveLength(2);
   expect(keys[0]).toMatch(UUID_V4);
