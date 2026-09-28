@@ -96,20 +96,23 @@ public class InventoryService {
 
     /**
      * U3 after the controller's body validation: the Idempotency-Key format (S3), then the skuId (G11, S2), each once,
-     * before any I/O and never stored. Then the write runs in one READ COMMITTED transaction: the service's own without
-     * a key (G8), the store's with one, claimed against the key and stored with its response (A33).
+     * before any I/O and never stored. Without a key (G8) the write runs in the service's own READ COMMITTED
+     * transaction. With one, IdempotencyStore.run claims the key, runs the write and stores its response in one
+     * transaction: run opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's transaction
+     * and refuses any other isolation (IllegalStateException); when joined, the caller's now() (T1) and rollback scope
+     * apply (A33).
      */
     private WriteResult write(Operation operation, String skuId, String idempotencyKey, String canonicalRequest,
             WriteResult malformedSkuId, Supplier<WriteResult> action) {
-        Optional<UUID> key = idempotencyKey == null ? Optional.empty() : IdempotencyKey.parse(idempotencyKey);
-        if (idempotencyKey != null && key.isEmpty()) {
+        if (idempotencyKey == null) {
+            return SkuId.isValid(skuId) ? transaction.execute(status -> action.get()) : malformedSkuId;
+        }
+        Optional<UUID> key = IdempotencyKey.parse(idempotencyKey);
+        if (key.isEmpty()) {
             return new WriteResult.InvalidRequest();
         }
         if (!SkuId.isValid(skuId)) {
             return malformedSkuId;
-        }
-        if (key.isEmpty()) {
-            return transaction.execute(status -> action.get());
         }
         return switch (idempotency.run(key.get(), operation, skuId, canonicalRequest,
                 () -> responses.toStored(skuId, action.get()))) {

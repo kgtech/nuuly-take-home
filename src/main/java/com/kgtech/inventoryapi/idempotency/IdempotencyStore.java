@@ -9,11 +9,14 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Runs a keyed write once (R2, G14, DESIGN-V2 §2, A33): claims the Idempotency-Key, runs the write and stores its
- * response in one READ COMMITTED transaction, joining the caller's when there is one. A concurrent claim of the same
+ * Runs a keyed write once (R2, G14, DESIGN-V2 §2, §10, A33): claims the Idempotency-Key, runs the write and stores its
+ * response in one transaction. run opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's
+ * transaction and refuses any other isolation (IllegalStateException); when joined, the caller's now() (T1) and
+ * rollback scope apply, so a write failure marks the caller's transaction rollback-only. A concurrent claim of the same
  * key blocks on the primary key until the first transaction ends, then finds the committed row and replays it. A
  * {@code @Component}, not a {@code @Repository}: persistence exception translation would turn the write's own
  * exceptions into InvalidDataAccessApiUsageException.
@@ -68,11 +71,20 @@ public class IdempotencyStore {
 
     /**
      * Claimed → write → store → Response. Not claimed → the stored Response, or Invalid (see
-     * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3). A
-     * runtime exception from the write escapes unchanged and rolls the claim back.
+     * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3). Opens a
+     * READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's transaction and refuses any other
+     * isolation (IllegalStateException, before any I/O); when joined, the caller's now() (T1) and rollback scope apply.
+     * A runtime exception from the write escapes unchanged and rolls the claim back; when joined, it marks the caller's
+     * transaction rollback-only.
      */
     public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
             Supplier<StoredResponse> write) {
+        // null: no transaction, or a caller at ISOLATION_DEFAULT, which is Postgres's READ COMMITTED here.
+        Integer joined = TransactionSynchronizationManager.isActualTransactionActive()
+                ? TransactionSynchronizationManager.getCurrentTransactionIsolationLevel() : null;
+        if (joined != null && joined != TransactionDefinition.ISOLATION_READ_COMMITTED) {
+            throw new IllegalStateException("IdempotencyStore.run joins only a READ COMMITTED transaction");
+        }
         byte[] hash = RequestHash.of(operation, skuId, canonicalRequest);
         return transaction.execute(status -> {
             if (!claim(key, operation, skuId, hash)) {

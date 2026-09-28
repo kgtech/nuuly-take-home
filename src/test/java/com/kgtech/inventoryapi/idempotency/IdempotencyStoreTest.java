@@ -14,6 +14,8 @@ import java.util.function.Supplier;
 import com.kgtech.inventoryapi.Tables;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -26,7 +28,8 @@ import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
 
 /**
  * R2, G14, S8, T1, Y4, A33: claim, replay, mismatch and expiry against Postgres through {@code run}, which opens its
- * own READ COMMITTED transaction or joins the caller's (DESIGN-V2 §2). Not @Transactional: each call commits.
+ * own READ COMMITTED transaction or joins a READ COMMITTED or DEFAULT caller's, and refuses a stricter one (DESIGN-V2
+ * §2, §10). Not @Transactional: each call commits.
  */
 @IntegrationTest
 class IdempotencyStoreTest {
@@ -283,6 +286,45 @@ class IdempotencyStoreTest {
 
         assertThat(writeTransaction).hasValue(outerTransaction);
         assertThat(rows()).as("rolled back with the caller").isZero();
+    }
+
+    /** A caller at ISOLATION_DEFAULT (Postgres's READ COMMITTED) is joined like a READ COMMITTED one (A33). */
+    @Test
+    void runJoinsADefaultIsolationOuterTransaction() {
+        UUID key = UUID.randomUUID();
+        AtomicLong writeTransaction = new AtomicLong();
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+
+        long outerTransaction = outer.execute(status -> {
+            long id = currentTransactionId();
+            assertResponse(execute(add(key, "widget", 5), () -> {
+                writeTransaction.set(currentTransactionId());
+                return OK;
+            }), OK);
+            return id;
+        });
+
+        assertThat(writeTransaction).hasValue(outerTransaction);
+        assertThat(rows()).isEqualTo(1);
+    }
+
+    /**
+     * A33: joining a stricter caller would run the claim at its isolation, where a concurrent claim of the same key
+     * fails with 40001 instead of replaying, so run refuses it before any I/O.
+     */
+    @ParameterizedTest
+    @ValueSource(ints = {TransactionDefinition.ISOLATION_REPEATABLE_READ, TransactionDefinition.ISOLATION_SERIALIZABLE})
+    void runRefusesAStricterOuterTransaction(int isolation) {
+        UUID key = UUID.randomUUID();
+        TransactionTemplate outer = new TransactionTemplate(transactionManager);
+        outer.setIsolationLevel(isolation);
+
+        assertThatThrownBy(() -> outer.executeWithoutResult(status -> execute(add(key, "widget", 5), OK)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("IdempotencyStore.run joins only a READ COMMITTED transaction");
+
+        assertThat(actionRuns).hasValue(0);
+        assertThat(rows()).isZero();
     }
 
     private long currentTransactionId() {

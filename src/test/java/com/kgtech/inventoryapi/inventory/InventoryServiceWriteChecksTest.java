@@ -44,20 +44,26 @@ class InventoryServiceWriteChecksTest {
     private static final CreateSku CREATE_REQUEST =
             new CreateSku(new SkuDetails("Shirt", "", Optional.empty(), List.of()), 7);
 
-    /** The three keyed writes, each with the answer a malformed skuId gets (G11: only purchase is 404). */
+    /**
+     * The three keyed writes, each with the answer a malformed skuId gets (G11: only purchase is 404) and its unkeyed
+     * result from the stubs in setUp (create adds its 7 through the stubbed add, so its quantity is 12 too).
+     */
     enum Write {
-        ADD(Operation.ADD, new WriteResult.InvalidRequest(), "7"),
-        PURCHASE(Operation.PURCHASE, new StockOutcome.NotFound(), "7"),
-        CREATE(Operation.CREATE, new WriteResult.InvalidRequest(), CREATE_REQUEST.fingerprint());
+        ADD(Operation.ADD, new WriteResult.InvalidRequest(), "7", new StockOutcome.Ok(12)),
+        PURCHASE(Operation.PURCHASE, new StockOutcome.NotFound(), "7", new StockOutcome.Ok(3)),
+        CREATE(Operation.CREATE, new WriteResult.InvalidRequest(), CREATE_REQUEST.fingerprint(),
+                new DetailsOutcome.Created(new SkuItem("widget", 12, Optional.of(CREATE_REQUEST.details()), 0)));
 
         final Operation operation;
         final WriteResult malformedSkuId;
         final String canonicalRequest;
+        final WriteResult unkeyed;
 
-        Write(Operation operation, WriteResult malformedSkuId, String canonicalRequest) {
+        Write(Operation operation, WriteResult malformedSkuId, String canonicalRequest, WriteResult unkeyed) {
             this.operation = operation;
             this.malformedSkuId = malformedSkuId;
             this.canonicalRequest = canonicalRequest;
+            this.unkeyed = unkeyed;
         }
 
         WriteResult call(InventoryService service, String skuId, String key) {
@@ -106,7 +112,7 @@ class InventoryServiceWriteChecksTest {
     void absentKeyRunsTheWriteInTheServicesTransaction(Write write) {
         WriteResult result = write.call(service, "widget", null);
 
-        assertThat(result).isInstanceOfAny(StockOutcome.Ok.class, DetailsOutcome.Created.class);
+        assertThat(result).isEqualTo(write.unkeyed);
         ArgumentCaptor<TransactionDefinition> definition = ArgumentCaptor.forClass(TransactionDefinition.class);
         verify(transactions).getTransaction(definition.capture());
         assertThat(definition.getValue().getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -117,13 +123,12 @@ class InventoryServiceWriteChecksTest {
 
     // ---- S3: malformed key, never stored ----
 
+    /** A present empty key and one non-UUID per write; the full format matrix is IdempotencyKeyTest's. */
     static Stream<Arguments> malformedKeys() {
-        return Stream.of(Write.values()).flatMap(write -> Stream.of("", "nope", "1-1-1-1-1",
-                        KEY + "," + UUID.randomUUID(), KEY.replace("-", ""), "{" + KEY + "}", KEY + " ")
-                .map(key -> Arguments.of(write, key)));
+        return Stream.of(Write.values()).flatMap(write -> Stream.of("", "nope").map(key -> Arguments.of(write, key)));
     }
 
-    @ParameterizedTest(name = "{0} \"{1}\"")
+    @ParameterizedTest(name = "{0} {1}")
     @MethodSource("malformedKeys")
     void malformedKeyIsInvalidRequestBeforeAnything(Write write, String key) {
         assertThat(write.call(service, "widget", key)).isEqualTo(new WriteResult.InvalidRequest());
@@ -141,10 +146,13 @@ class InventoryServiceWriteChecksTest {
 
     // ---- G11, S2: malformed skuId, with or without a key, never stored ----
 
+    /**
+     * Per write and key state: null, one pattern failure and the raw segment with ";" content (C3); the full pattern
+     * matrix is SkuIdTest's.
+     */
     static Stream<Arguments> malformedSkuIds() {
         return Stream.of(Write.values()).flatMap(write -> Stream.of(null, KEY)
-                .flatMap(key -> Stream.of(null, "", "-a", ".a", "_a", "a".repeat(65), "a b", "a/b", "abc\n", "é",
-                                "a!", "ABC-1;lot=7")
+                .flatMap(key -> Stream.of(null, "-a", "ABC-1;lot=7")
                         .map(skuId -> Arguments.of(write, key, skuId))));
     }
 
