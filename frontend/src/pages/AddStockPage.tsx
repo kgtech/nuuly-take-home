@@ -1,18 +1,18 @@
-import { useCallback, useId, useState } from 'react';
-import type { InventoryItem } from '../api/client';
-import { StockForm } from '../components/StockForm';
+import { useId, useState } from 'react';
+import { StockForm, StockOutcomeView, type StockOutcome } from '../components/StockForm';
 import { SKU_PLACEHOLDER } from '../components/FindSku';
 import { ArrowLeft, ArrowRight } from '../components/Icons';
+import { Hint } from '../components/Messages';
 import { skuHref } from '../hooks/useHashRoute';
-import { skuIdHint } from '../validation';
+import { skuIdReason } from '../validation';
 
 /** Add stock to any SKU by id, creating it when it does not exist. */
 export function AddStockPage() {
   const id = useId();
   const [skuId, setSkuId] = useState('');
-  const [result, setResult] = useState<InventoryItem | null>(null);
-  const onSuccess = useCallback((item: InventoryItem) => setResult(item), []);
-  const hint = skuIdHint(skuId);
+  const [outcome, setOutcome] = useState<StockOutcome | null>(null);
+  const reason = skuIdReason(skuId);
+  const created = outcome?.kind === 'done' ? outcome.item : null;
 
   return (
     <section className="page">
@@ -37,18 +37,17 @@ export function AddStockPage() {
             onChange={(e) => setSkuId(e.target.value)}
             autoComplete="off"
             placeholder={SKU_PLACEHOLDER}
-            aria-invalid={hint !== null || undefined}
-            aria-describedby={hint ? `${id}-hint` : undefined}
+            aria-invalid={(skuId !== '' && reason !== null) || undefined}
+            aria-describedby={`${id}-hint`}
           />
-          <p id={`${id}-hint`} className="hint" aria-live="polite">
-            {hint}
-          </p>
+          <Hint id={`${id}-hint`}>{reason}</Hint>
         </div>
-        <StockForm operation="add" skuId={skuId} onSuccess={onSuccess} />
-        {result && (
+        <StockForm operation="add" skuId={skuId} onOutcome={setOutcome} skuReasonId={`${id}-hint`} />
+        <StockOutcomeView outcome={outcome} />
+        {created && (
           <p style={{ margin: 0 }}>
-            <a href={skuHref(result.skuId ?? skuId)} className="back">
-              View {result.skuId}
+            <a href={skuHref(created.skuId ?? skuId)} className="back">
+              View {created.skuId}
               <ArrowRight />
             </a>
           </p>

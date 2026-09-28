@@ -28,7 +28,7 @@ function Harness({
       <StockForm
         operation={operation}
         skuId={skuId}
-        unavailable={unavailable}
+        unavailable={unavailable ?? null}
         onOutcome={(o) => {
           setOutcome(o);
           onOutcome?.(o);
@@ -139,8 +139,10 @@ describe('StockForm unavailable button (review items 1, 2, 4)', () => {
     release();
     await screen.findByRole('status');
     expect(store.requests).toHaveLength(1);
-    expect(submit).not.toHaveAttribute('aria-disabled');
+    expect(screen.getByRole('form', { name: 'Add stock' })).toHaveAttribute('aria-busy', 'false');
     expect(qty()).not.toHaveAttribute('readonly');
+    await user.type(qty(), '1');
+    expect(submit).not.toHaveAttribute('aria-disabled');
   });
 });
 

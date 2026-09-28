@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api, type ApiResult, type InventoryItem, type ListParams } from '../api/client';
 import { skuHref } from '../hooks/useHashRoute';
-import { ErrorText, Loading } from '../components/Messages';
+import { ErrorText, Hint, Loading } from '../components/Messages';
 import { FindSku } from '../components/FindSku';
 import { ArrowRight } from '../components/Icons';
 import { BRAND } from '../brand';
+import { limitReason } from '../validation';
 
 type PageRequest = { n: number; pageNo: number; params: ListParams; run: () => Promise<ApiResult<InventoryItem[]>> };
 type PageResult = { n: number; result: ApiResult<InventoryItem[]> };
@@ -49,6 +50,16 @@ export function InventoryList() {
 
   const retry = () => setRequest((r) => ({ ...r, n: r.n + 1 }));
 
+  /** Clears the cursor and lists from the start with the same page size. */
+  const clearCursor = () => {
+    setAfterInput('');
+    setRequest((r) => {
+      const params: ListParams = {};
+      if (r.params.limit !== undefined) params.limit = r.params.limit;
+      return firstPage(params, r.n + 1);
+    });
+  };
+
   const nextPage = (url: string) => {
     setRequest((r) => ({ n: r.n + 1, pageNo: r.pageNo + 1, params: r.params, run: () => api.listInventoryAt(url) }));
     headingRef.current?.focus();
@@ -56,6 +67,7 @@ export function InventoryList() {
 
   const loading = response === null || response.n !== request.n;
   const result = loading ? null : response.result;
+  const limitHint = limitReason(limitInput);
 
   return (
     <section aria-labelledby={`${id}-h`} className="page">
@@ -82,7 +94,9 @@ export function InventoryList() {
                 value={limitInput}
                 onChange={(e) => setLimitInput(e.target.value)}
                 placeholder="250"
+                aria-describedby={`${id}-limit-hint`}
               />
+              <Hint id={`${id}-limit-hint`}>{limitHint}</Hint>
             </div>
             <div className="field">
               <label htmlFor={`${id}-after`}>After SKU</label>
@@ -110,12 +124,21 @@ export function InventoryList() {
           </button>
         </div>
       )}
-      {result?.ok && result.data.length === 0 && (
+      {result?.ok && result.data.length === 0 && request.params.after === undefined && (
         <div className="empty">
           <h3>The closet is empty</h3>
           <p>
             No SKUs yet. <a href="#/add">Add stock</a> to create one.
           </p>
+        </div>
+      )}
+      {result?.ok && result.data.length === 0 && request.params.after !== undefined && (
+        <div className="empty">
+          <h3>Nothing after that</h3>
+          <p>No SKUs after '{request.params.after}'.</p>
+          <button type="button" className="secondary" onClick={clearCursor}>
+            Show from the start
+          </button>
         </div>
       )}
       {result?.ok && result.data.length > 0 && (

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import { api, type InventoryItem } from '../api/client';
-import { StockForm } from '../components/StockForm';
+import { StockForm, StockOutcomeView, type StockOutcome } from '../components/StockForm';
 import { ErrorText, Loading } from '../components/Messages';
 import { ArrowLeft, PlusCircle, ShoppingBag } from '../components/Icons';
-import { SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
+import { INSUFFICIENT_INVENTORY, SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
+import { availability } from './InventoryList';
 
 type State =
   | { phase: 'loading' }
   | { phase: 'error'; status: number; errorText: string }
   | { phase: 'ready'; item: InventoryItem };
+
+export const ADD_FIRST = 'Add stock first to create this SKU.';
+const onHandLine = (n: number) => `Only ${n.toLocaleString()} on hand now. Lower the quantity or add stock.`;
 
 /** Rendered with key={skuId} by the router, so a new SKU remounts it and starts loading. */
 export function SkuView({ skuId }: { skuId: string }) {
@@ -19,6 +23,8 @@ export function SkuView({ skuId }: { skuId: string }) {
   const invalid = !SKU_ID_PATTERN.test(skuId);
   const state: State = invalid ? { phase: 'error', status: 404, errorText: SKU_NOT_FOUND } : loaded;
   const [attempt, setAttempt] = useState(0);
+  // One outcome area for both forms (FE32); `extra` is the on-hand line after "Insufficient inventory".
+  const [outcome, setOutcome] = useState<{ outcome: StockOutcome; extra?: string } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -41,7 +47,31 @@ export function SkuView({ skuId }: { skuId: string }) {
     setAttempt((n) => n + 1);
   };
 
-  const onChange = useCallback((item: InventoryItem) => setState({ phase: 'ready', item }), []);
+  const onOutcome = useCallback(
+    (o: StockOutcome) => {
+      if (o.kind === 'done') {
+        setState({ phase: 'ready', item: o.item });
+        setOutcome({ outcome: o });
+        return;
+      }
+      if (o.status === 400 && o.errorText === INSUFFICIENT_INVENTORY) {
+        // Another client may have bought meanwhile: show what is on hand now, then the message.
+        void api.getInventory(skuId).then((r) => {
+          if (r.ok) {
+            setState({ phase: 'ready', item: r.data });
+            setOutcome({ outcome: o, extra: onHandLine(r.data.quantity ?? 0) });
+          } else {
+            setOutcome({ outcome: o });
+          }
+        });
+        return;
+      }
+      setOutcome({ outcome: o });
+    },
+    [skuId],
+  );
+
+  const missing = state.phase === 'error' && state.status === 404;
 
   return (
     <section className="page">
@@ -75,32 +105,43 @@ export function SkuView({ skuId }: { skuId: string }) {
                 <span className="big" data-testid="quantity">
                   {state.item.quantity}
                 </span>
-                {(state.item.quantity ?? 0) === 0 && <span className="badge out">Rented out</span>}
+                {(() => {
+                  const badge = availability(state.item.quantity ?? 0);
+                  return <span className={`badge ${badge.tone}`}>{badge.text}</span>;
+                })()}
               </div>
             </>
           )}
         </div>
       </div>
       {state.phase !== 'loading' && (
-        <div className="cards forms">
-          <section className="card" aria-labelledby={`${id}-add`}>
-            <h2 id={`${id}-add`}>
-              <PlusCircle />
-              Add stock
-            </h2>
-            {state.phase === 'error' && (
-              <p className="note">Adding stock creates the SKU if it does not exist.</p>
-            )}
-            <StockForm operation="add" skuId={skuId} onSuccess={onChange} />
-          </section>
-          <section className="card" aria-labelledby={`${id}-buy`}>
-            <h2 id={`${id}-buy`}>
-              <ShoppingBag />
-              Purchase
-            </h2>
-            <StockForm operation="purchase" skuId={skuId} onSuccess={onChange} />
-          </section>
-        </div>
+        <>
+          <StockOutcomeView outcome={outcome?.outcome ?? null} extra={outcome?.extra} />
+          <div className="cards forms">
+            <section className="card" aria-labelledby={`${id}-add`}>
+              <h2 id={`${id}-add`}>
+                <PlusCircle />
+                Add stock
+              </h2>
+              {state.phase === 'error' && (
+                <p className="note">Adding stock creates the SKU if it does not exist.</p>
+              )}
+              <StockForm operation="add" skuId={skuId} onOutcome={onOutcome} />
+            </section>
+            <section className="card" aria-labelledby={`${id}-buy`}>
+              <h2 id={`${id}-buy`}>
+                <ShoppingBag />
+                Purchase
+              </h2>
+              <StockForm
+                operation="purchase"
+                skuId={skuId}
+                onOutcome={onOutcome}
+                unavailable={missing ? ADD_FIRST : null}
+              />
+            </section>
+          </div>
+        </>
       )}
     </section>
   );

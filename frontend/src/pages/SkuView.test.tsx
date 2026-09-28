@@ -92,7 +92,8 @@ describe('SkuView', () => {
     await screen.findByRole('status');
     expect(screen.getByTestId('quantity')).toHaveTextContent('2');
     expect(screen.queryByText('Add stock first to create this SKU.')).not.toBeInTheDocument();
-    await user.type(form('Purchase').getByLabelText(/quantity/i), '1{Enter}');
+    expect(form('Purchase').getByLabelText(/quantity/i)).toHaveValue(1); // kept from the blocked attempt
+    await user.type(form('Purchase').getByLabelText(/quantity/i), '{Enter}');
     await waitFor(() => expect(screen.getByTestId('quantity')).toHaveTextContent('1'));
   });
 });
