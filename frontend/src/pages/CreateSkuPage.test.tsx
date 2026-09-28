@@ -173,7 +173,7 @@ describe('CreateSkuPage (#/new)', () => {
 
   it.each([
     ['description', 'description', ' Now longer.'],
-    ['currency', 'currency', '{Backspace}EUR'],
+    ['currency', 'currency', '{Backspace}{Backspace}{Backspace}EUR'],
     ['an image line', 'images', '\nhttps://img.example/3.jpg'],
   ] as const)('changing %s after a network failure gives the retry a new Idempotency-Key (S8)', async (_l, key, typed) => {
     const user = userEvent.setup();

@@ -165,7 +165,8 @@ const NAME_CONTROL = /[\x00-\x1F\x7F\p{Cs}]/u;
 // eslint-disable-next-line no-control-regex -- mirrors the server (F-03)
 const DESCRIPTION_CONTROL = /[\x00-\x08\x0B-\x1F\x7F\p{Cs}]/u;
 const URI_REJECTS = /[^\x21-\x7E]|["<>\\^`{|}]/;
-const IMAGE_URL = /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?[A-Za-z0-9.-]+(?::\d*)?(?:[/?#][!-~]*)?$/;
+const IMAGE_URL =
+  /^https?:\/\/(?:[!$&'()*+,;=A-Za-z0-9._~%:-]*@)?(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d*)?(?:[/?#][!-~]*)?$/;
 
 /** The server's field rules (DESIGN-V2 §8); returns the normalised details or null when invalid. */
 function validDetails(input: unknown): SkuDetails | null {
@@ -240,10 +241,12 @@ async function replace(request: Request, skuId: string): Promise<Response> {
   } catch {
     return text(400, TEXT.invalid);
   }
-  if (!SKU.test(skuId) || !store.items.has(skuId)) return text(404, TEXT.notFound);
+  // As the service: the body is validated before the SKU lookup, and an empty If-Match is 400 (F-fe-06).
   const details = validDetails(body);
   if (details === null) return text(400, TEXT.invalid);
   const ifMatch = request.headers.get('If-Match');
+  if (ifMatch !== null && ifMatch.trim() === '') return text(400, TEXT.invalid);
+  if (!SKU.test(skuId) || !store.items.has(skuId)) return text(404, TEXT.notFound);
   if (ifMatch !== null && ifMatch.trim() !== '*') {
     const tags = ifMatch.split(',').map((t) => t.trim());
     if (!tags.includes(store.etag(skuId))) return text(412, TEXT.changed);

@@ -76,7 +76,8 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     await user.click(save());
     const alert = await screen.findByRole('alert');
     expect(alert.textContent!.startsWith(TEXT.changed)).toBe(true);
-    expect(store.requests.filter((r) => r.method === 'PUT')[0]!.headers.get('If-Match')).toBe('"1"');
+    const pagePuts = () => store.requests.filter((r) => r.method === 'PUT' && r.headers.get('If-Match') !== '*');
+    expect(pagePuts()[0]!.headers.get('If-Match')).toBe('"1"');
     expect(window.location.hash).toBe('');
 
     await user.click(screen.getByRole('button', { name: 'Reload' }));
@@ -86,7 +87,7 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     await user.type(name(), ' v3');
     await user.click(save());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/E-1'));
-    expect(store.requests.filter((r) => r.method === 'PUT')[1]!.headers.get('If-Match')).toBe('"2"');
+    expect(pagePuts()[1]!.headers.get('If-Match')).toBe('"2"');
     expect(store.details.get('E-1')?.details.name).toBe('Renamed elsewhere v3');
   });
 

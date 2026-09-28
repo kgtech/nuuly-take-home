@@ -7,6 +7,7 @@ import {
   IMAGES_MAX,
   imagesReason,
   nameReason,
+  NOT_A_NUMBER,
   parseImages,
 } from '../validation';
 import { Hint } from './Messages';
@@ -36,16 +37,21 @@ export function useDetailsForm(initial: DetailsValues = valuesFrom(undefined)) {
   const id = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const [values, setValues] = useState<DetailsValues>(initial);
+  // A number input reports "" for text it cannot parse while still showing it (F-fe-03).
+  const [amountBadInput, setAmountBadInput] = useState(false);
   const reasons: Record<DetailsField, string | null> = {
     name: nameReason(values.name),
     description: descriptionReason(values.description),
-    amount: costAmountReason(values.amount, values.currency),
+    amount: amountBadInput ? NOT_A_NUMBER : costAmountReason(values.amount, values.currency),
     currency: costCurrencyReason(values.amount, values.currency),
     images: imagesReason(values.images),
   };
   const hintId = (f: DetailsField) => `${id}-${f}-hint`;
   const blockingHintIds = (Object.keys(reasons) as DetailsField[]).filter((f) => reasons[f] !== null).map(hintId);
-  const set = (f: DetailsField, v: string) => setValues((cur) => ({ ...cur, [f]: v }));
+  const set = (f: DetailsField, v: string, badInput = false) => {
+    if (f === 'amount') setAmountBadInput(badInput);
+    setValues((cur) => ({ ...cur, [f]: v }));
+  };
   const body = (): SkuDetails => {
     const d: SkuDetails = { name: values.name, description: values.description, images: parseImages(values.images) };
     if (values.amount !== '' && values.currency !== '') d.cost = { amount: Number(values.amount), currency: values.currency };
@@ -59,7 +65,7 @@ export type DetailsForm = ReturnType<typeof useDetailsForm>;
 /** The five details fields with their labels and always-present hints. */
 export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly: boolean }) {
   const { id, nameRef, values, set, reasons, hintId } = form;
-  const invalid = (f: DetailsField) => (values[f] !== '' && reasons[f] !== null) || undefined;
+  const invalid = (f: DetailsField) => ((values[f] !== '' || f === 'amount') && reasons[f] !== null) || undefined;
   // No maxLength on the text fields: it would truncate a paste silently, and the reason already blocks (F-09).
   return (
     <>
@@ -101,7 +107,7 @@ export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly:
             min={0}
             step={1}
             value={values.amount}
-            onChange={(e) => set('amount', e.target.value)}
+            onChange={(e) => set('amount', e.target.value, e.target.validity?.badInput ?? false)}
             aria-invalid={invalid('amount')}
             aria-describedby={hintId('amount')}
             readOnly={readOnly}
@@ -115,7 +121,6 @@ export function DetailsFields({ form, readOnly }: { form: DetailsForm; readOnly:
             type="text"
             value={values.currency}
             onChange={(e) => set('currency', e.target.value)}
-            maxLength={3}
             autoComplete="off"
             autoCapitalize="characters"
             aria-invalid={invalid('currency')}

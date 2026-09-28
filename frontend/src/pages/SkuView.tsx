@@ -30,6 +30,12 @@ export function SkuView({ skuId }: { skuId: string }) {
   // Sequence of outcomes: the re-fetch after "Insufficient inventory" is ignored when a newer outcome
   // (e.g. an add) has landed meanwhile, so a late GET never overwrites a fresher quantity (F-08).
   const seq = useRef(0);
+  // The latest loaded state, for the outcome callback (a functional setState updater runs lazily, so it
+  // cannot be used to read the current state there).
+  const loadedRef = useRef<State>(loaded);
+  useEffect(() => {
+    loadedRef.current = loaded;
+  }, [loaded]);
 
   useEffect(() => {
     let live = true;
@@ -56,12 +62,24 @@ export function SkuView({ skuId }: { skuId: string }) {
     (o: StockOutcome) => {
       const mine = ++seq.current;
       if (o.kind === 'done') {
-        // The v1 response carries only the quantity; the details stay as read (FE38).
-        setState((cur) => ({
-          phase: 'ready',
-          item: { ...(cur.phase === 'ready' ? cur.item : {}), skuId: o.item.skuId ?? skuId, quantity: o.item.quantity ?? 0 },
-        }));
         setOutcome({ outcome: o });
+        // The v1 response carries only the quantity: merge it into the item read (FE38). When nothing was
+        // read (404, or a failed load), re-fetch GET /v2 so a SKU that has details never shows "No details yet"
+        // (F-fe-05); a 404 SKU that the add just created has none, and the re-fetch says so.
+        void (async () => {
+          const cur = loadedRef.current;
+          if (cur.phase === 'ready') {
+            setState({ phase: 'ready', item: { ...cur.item, quantity: o.item.quantity ?? 0 } });
+            return;
+          }
+          const r = await api.getSku(skuId);
+          if (seq.current !== mine) return;
+          setState(
+            r.ok
+              ? { phase: 'ready', item: r.data }
+              : { phase: 'ready', item: { skuId: o.item.skuId ?? skuId, quantity: o.item.quantity ?? 0 } },
+          );
+        })();
         return;
       }
       if (o.status === 400 && o.errorText === INSUFFICIENT_INVENTORY) {
@@ -114,7 +132,7 @@ export function SkuView({ skuId }: { skuId: string }) {
               <span className="label">On hand</span>
               <div className="row">
                 <span className="big" data-testid="quantity">
-                  {state.item.quantity}
+                  {state.item.quantity.toLocaleString()}
                 </span>
                 {(() => {
                   const badge = availability(state.item.quantity);

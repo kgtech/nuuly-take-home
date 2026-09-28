@@ -370,7 +370,7 @@ form[aria-busy='true'] button[aria-disabled='true'] {
 .error .guidance button {
   min-height: 44px;
   padding: 0 16px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .empty {
   background: var(--tint);
