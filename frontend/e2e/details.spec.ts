@@ -93,6 +93,62 @@ test('create with details, edit them, then purchase', async ({ page }) => {
   await expect(row.getByRole('cell').nth(3)).toHaveText('3');
 });
 
+test('a double-clicked Create sends one POST with one key and creates one SKU', async ({ page }) => {
+  const skuId = sku('e2e-dblcreate');
+  const createUrl = `/v2/inventory/${encodeURIComponent(skuId)}`;
+  const keys: (string | undefined)[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && r.url().endsWith(createUrl)) keys.push(r.headers()['idempotency-key']);
+  });
+  await page.goto('/#/new');
+  await page.getByLabel('SKU ID').fill(skuId);
+  await fillDetails(page, 'Double');
+  await page.getByLabel(/^Initial stock/).fill('2');
+  await page.getByRole('button', { name: 'Create SKU' }).dblclick();
+  await expect(page).toHaveURL(new RegExp(`#/sku/${encodeURIComponent(skuId)}$`));
+  await expect(page.getByTestId('quantity')).toHaveText('2');
+  expect(keys).toHaveLength(1);
+  expect(keys[0]).toMatch(UUID_V4);
+  const read = await page.request.get(createUrl);
+  expect(read.status()).toBe(200);
+  expect((await read.json()).quantity).toBe(2);
+});
+
+test('a create retried after a network failure reuses the key and creates one SKU with its stock once', async ({ page }) => {
+  const skuId = sku('e2e-retrycreate');
+  const createUrl = `/v2/inventory/${encodeURIComponent(skuId)}`;
+  const keys: (string | undefined)[] = [];
+  let failed = false;
+  // The server processes the first create, but the browser sees a network error.
+  await page.route(`**${createUrl}`, async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    keys.push(route.request().headers()['idempotency-key']);
+    if (!failed) {
+      failed = true;
+      await route.fetch();
+      await route.abort('connectionreset');
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto('/#/new');
+  await page.getByLabel('SKU ID').fill(skuId);
+  await fillDetails(page, 'Retry');
+  await page.getByLabel(/^Initial stock/).fill('3');
+  const create = page.getByRole('button', { name: 'Create SKU' });
+  await create.click();
+  await expect(page.getByRole('alert')).toContainText('Network error');
+  await expect(page.getByRole('alert')).toContainText('Sending again is safe');
+  await create.click();
+  await expect(page).toHaveURL(new RegExp(`#/sku/${encodeURIComponent(skuId)}$`));
+  await expect(page.getByTestId('quantity')).toHaveText('3');
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toMatch(UUID_V4);
+  expect(keys[1]).toBe(keys[0]);
+  const read = await page.request.get(createUrl);
+  expect((await read.json()).quantity).toBe(3);
+});
+
 test('creating an existing SKU shows the 409 text and a link to it', async ({ page }) => {
   const skuId = sku('e2e-409');
   await createSku(page, skuId, 'First', 0);

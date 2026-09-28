@@ -107,6 +107,15 @@ describe('client v2 writes', () => {
     expect(store.requests.at(-1)!.headers.has('If-Match')).toBe(false);
   });
 
+  it('mock PUT validates the body before the SKU lookup and refuses an empty If-Match, as the service does (F-fe-06)', async () => {
+    store.seedDetails('E', 2, details);
+    const badBodyMissingSku = await api.replaceSkuDetails('nope', { name: '' }, null);
+    expect(badBodyMissingSku).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    const emptyIfMatch = await api.replaceSkuDetails('E', details, '');
+    expect(emptyIfMatch).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    expect(store.details.get('E')?.version).toBe(1);
+  });
+
   it('sends the Idempotency-Key header on add stock (v1)', async () => {
     const r = await api.addStock('A', { quantity: 3 }, key);
     expect(r.ok).toBe(true);

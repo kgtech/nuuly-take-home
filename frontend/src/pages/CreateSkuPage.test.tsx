@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server, store, TEXT } from '../test/server';
@@ -200,6 +200,26 @@ describe('CreateSkuPage (#/new)', () => {
     await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
     expect(store.requests).toHaveLength(2);
     expect(store.requests[1]!.headers.get('Idempotency-Key')).toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+  });
+
+  it('initial stock: text a number input cannot parse gets a "not a number" reason instead of sending 0 (F-fe-03)', async () => {
+    const user = userEvent.setup();
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    const initial = field.initial() as HTMLInputElement;
+    await user.type(initial, '1');
+    Object.defineProperty(initial, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.change(initial, { target: { value: '' } });
+    expect(hintOf(initial)).toHaveTextContent('Enter a number.');
+    expect(initial).toHaveAttribute('aria-invalid', 'true');
+    expect(submit()).toHaveAttribute('aria-disabled', 'true');
+    expect(submit().getAttribute('aria-describedby')!.split(' ')).toContain(hintOf(initial).id);
+    await user.click(submit());
+    expect(store.requests).toHaveLength(0);
+    Object.defineProperty(initial, 'validity', { value: { badInput: false }, configurable: true });
+    await user.type(initial, '3');
+    expect(hintOf(initial)).toBeEmptyDOMElement();
+    expect(submit()).not.toHaveAttribute('aria-disabled');
   });
 
   it('a pasted name longer than 120 characters is kept as typed and refused, not truncated (F-09)', async () => {
