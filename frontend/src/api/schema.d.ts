@@ -138,11 +138,11 @@ export interface components {
         };
         SkuDetails: {
             cost?: components["schemas"]["SkuCost"];
-            /** @description Up to 2000 characters; default "" */
+            /** @description Up to 2000 characters (UTF-16 units); newlines and tabs allowed; default "" */
             description?: string;
             /** @description Up to 10 absolute http or https URLs in ASCII (percent-encoded); default [] */
             images?: string[];
-            /** @description 1 to 120 characters, not blank */
+            /** @description 1 to 120 characters (UTF-16 units), not blank, no control characters */
             name: string;
         };
         SkuItem: {
@@ -466,7 +466,7 @@ export interface operations {
             /** @description The created SKU */
             201: {
                 headers: {
-                    /** @description The details version, a strong validator for If-Match; "0" before any details */
+                    /** @description The details version of a new SKU, always "1" (also on a replayed 201, even after a later PUT) */
                     ETag?: string;
                     [name: string]: unknown;
                 };
