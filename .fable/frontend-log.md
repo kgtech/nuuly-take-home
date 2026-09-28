@@ -16,3 +16,7 @@
 - 2026-09-27T21:35:00Z [frontend] Fixed F-fe-01 (isRetryable), F-fe-02 (uuidV4 fallback, finally), F-fe-03 (no key on StockForm), F-fe-06 (--on-accent), F-fe-07 (HTTP <status>), F-fe-09 (SkuView G11 pre-check), F-fe-10 (tests above), F-fe-11 (check:api script). Installed @axe-core/playwright.
 - 2026-09-27T21:37:00Z [frontend] F-fe-04/05: e2e asserts UUID v4 header, adds a route.fetch+abort retry flow (same key, stock changed once), axe on list/sku/add in both projects, scrollWidth ≤ viewport, screenshots. `npx playwright test`: 12/12 passed.
 - 2026-09-27T21:38:03Z [frontend] Green: lint, typecheck, vitest 65/65 (10 files), build, check:api, playwright 12/12. Pushed.
+
+# v2 details run (branch v2-details-frontend)
+
+- 2026-09-28T04:55:37Z [frontend] Branched v2-details-frontend from 1255c4d. Read PROMPT.md (Front end), DESIGN-V2.md §8, openapi.yaml v2 paths, frontend/DECISIONS.md FE1–FE29, .fable/ui-review.md, issues #72 and #73. `npm ci` ok; baseline green: lint, typecheck, vitest 72/72 (10 files). Regenerated src/api/schema.d.ts (v2 paths, SkuItem/SkuDetails/SkuCost/CreateSkuRequest; initialQuantity is generated as required because the schema gives it a default).

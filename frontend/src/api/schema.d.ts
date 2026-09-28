@@ -59,10 +59,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all SKUs with details
+         * @description Returns SKUs sorted by skuId with their quantity and details (absent for a SKU that has none), at most 250 per response; the same limit, after and Link rules as GET /inventory.
+         */
+        get: operations["listSkus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/inventory/{skuId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a SKU with its details */
+        get: operations["getSku"];
+        /**
+         * Replace a SKU's details
+         * @description Replaces the SKU's details (creates them for a SKU that has none). Stock is not changed. With If-Match, the details are replaced only when their current ETag is one of the listed values, else 412.
+         */
+        put: operations["replaceSkuDetails"];
+        /**
+         * Create a SKU with details
+         * @description Creates the SKU with its details and optional initial stock in one transaction; initial stock is recorded in the ledger like an add. A SKU that already exists (including one created by POST /inventory/{skuId}) is 409; set its details with PUT and add stock with POST /inventory/{skuId}.
+         */
+        post: operations["createSku"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        CreateSkuRequest: {
+            details: components["schemas"]["SkuDetails"];
+            /**
+             * Format: int32
+             * @description Stock to record at creation (default 0), through the same ledger as an add
+             * @default 0
+             */
+            initialQuantity: number;
+        };
         InventoryItem: {
             /** Format: int64 */
             quantity?: number;
@@ -71,6 +125,31 @@ export interface components {
         InventoryQuantity: {
             /** Format: int32 */
             quantity: number;
+        };
+        /** @description A cost in minor units of a currency */
+        SkuCost: {
+            /**
+             * Format: int64
+             * @description Minor units (e.g. cents), never negative
+             */
+            amount: number;
+            /** @description Three-letter uppercase currency code */
+            currency: string;
+        };
+        SkuDetails: {
+            cost?: components["schemas"]["SkuCost"];
+            /** @description Up to 2000 characters; default "" */
+            description?: string;
+            /** @description Up to 10 absolute http or https URLs; default [] */
+            images?: string[];
+            /** @description 1 to 120 characters, not blank */
+            name: string;
+        };
+        SkuItem: {
+            details?: components["schemas"]["SkuDetails"];
+            /** Format: int64 */
+            quantity: number;
+            skuId: string;
         };
     };
     responses: never;
@@ -227,6 +306,185 @@ export interface operations {
             };
             /** @description SKU not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    listSkus: {
+        parameters: {
+            query?: {
+                /** @description Optional page size, 1 to 250 (default 250). Larger values mean 250; other values are ignored and the default applies. */
+                limit?: number;
+                /** @description Optional cursor: return only SKUs whose skuId sorts after this value, up to the page size. It must not be repeated. */
+                after?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of SKUs with details, at most 250, sorted by skuId */
+            200: {
+                headers: {
+                    /** @description Next page, when more SKUs follow: <URL>; rel="next" */
+                    Link?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuItem"][];
+                };
+            };
+            /** @description Invalid request: the query string can't be decoded or repeats after */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    getSku: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
+                skuId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The SKU with its quantity and details */
+            200: {
+                headers: {
+                    /** @description The details version, a strong validator for If-Match; "0" before any details */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuItem"];
+                };
+            };
+            /** @description SKU not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    replaceSkuDetails: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional strong ETag(s) from a previous response; "*" or absent means unconditional */
+                "If-Match"?: string;
+            };
+            path: {
+                /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
+                skuId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkuDetails"];
+            };
+        };
+        responses: {
+            /** @description The SKU after the update */
+            200: {
+                headers: {
+                    /** @description The details version, a strong validator for If-Match; "0" before any details */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuItem"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description SKU not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Details changed since you read them. Reload the SKU and retry with its new ETag. */
+            412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    createSku: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
+                skuId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSkuRequest"];
+            };
+        };
+        responses: {
+            /** @description The created SKU */
+            201: {
+                headers: {
+                    /** @description The details version, a strong validator for If-Match; "0" before any details */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuItem"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
