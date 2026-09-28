@@ -9,7 +9,7 @@ describe('formatCost', () => {
   });
   it('uses the currency\'s own minor-unit count', () => {
     expect(formatCost({ amount: 500, currency: 'JPY' }, 'en-US')).toBe('¥500');
-    expect(formatCost({ amount: 12345, currency: 'KWD' }, 'en-US')).toBe('KWD 12.345');
+    expect(formatCost({ amount: 12345, currency: 'KWD' }, 'en-US')).toMatch(/^KWD\s12\.345$/);
   });
   it('falls back to "<amount> <currency>" when Intl rejects the code', () => {
     expect(formatCost({ amount: 500, currency: 'ab' }, 'en-US')).toBe('500 ab');

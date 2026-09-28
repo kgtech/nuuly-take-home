@@ -74,3 +74,10 @@ export const ShoppingBag = (p: Props) => (
     <path d="M88 104V72a40 40 0 0 1 80 0v32" />
   </Icon>
 );
+
+export const PencilSimple = (p: Props) => (
+  <Icon {...p}>
+    <path d="M92.7 216H48a8 8 0 0 1-8-8v-44.7a8 8 0 0 1 2.3-5.6L165.7 34.3a8 8 0 0 1 11.3 0l44.7 44.7a8 8 0 0 1 0 11.3L98.3 213.7a8 8 0 0 1-5.6 2.3Z" />
+    <line x1={136} y1={64} x2={192} y2={120} />
+  </Icon>
+);

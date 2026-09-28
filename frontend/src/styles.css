@@ -122,7 +122,7 @@ main {
   gap: 40px;
 }
 main.narrow {
-  max-width: 560px;
+  max-width: 640px;
 }
 .page-head {
   display: flex;
@@ -510,4 +510,64 @@ tbody tr:hover {
   display: flex;
   flex-direction: column;
   gap: 40px;
+}
+
+/* Details (v2) */
+.card.details .description {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.card.details .cost {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 22px;
+  font-family: var(--serif);
+}
+.card.details .cost .label {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.images {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.thumb {
+  display: block;
+  width: 120px;
+  height: 120px;
+  max-width: 100%;
+  object-fit: cover;
+  background: var(--tint);
+  border: 1px solid var(--line);
+}
+.thumb.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cost-row {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+}
+form.card {
+  gap: 18px;
+}
+td.name {
+  color: var(--muted);
 }

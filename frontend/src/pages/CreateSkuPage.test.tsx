@@ -153,12 +153,12 @@ describe('CreateSkuPage (#/new)', () => {
     expect(alert).toHaveTextContent(GUIDANCE.refused);
   });
 
-  it('network failure: says a retry is safe and reuses the key; a double click sends one request', async () => {
+  it('network failure: says a retry is safe and reuses the key', async () => {
     const user = userEvent.setup();
     server.use(http.post('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
     render(<CreateSkuPage />);
     await fillValid(user);
-    await user.dblClick(submit());
+    await user.click(submit());
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/network/i);
     expect(alert).toHaveTextContent(GUIDANCE.retrySafe);
@@ -169,7 +169,7 @@ describe('CreateSkuPage (#/new)', () => {
     expect(store.requests[1]!.headers.get('Idempotency-Key')).toBe(store.requests[0]!.headers.get('Idempotency-Key'));
   });
 
-  it('in flight: aria-busy form, read-only fields, aria-disabled button', async () => {
+  it('in flight: aria-busy form, read-only fields, aria-disabled button; a double click sends one request', async () => {
     const user = userEvent.setup();
     let release: () => void = () => {};
     server.use(
@@ -180,13 +180,17 @@ describe('CreateSkuPage (#/new)', () => {
     );
     render(<CreateSkuPage />);
     await fillValid(user);
-    await user.click(submit());
+    await user.dblClick(submit());
     await waitFor(() => expect(screen.getByRole('form', { name: 'New SKU' })).toHaveAttribute('aria-busy', 'true'));
     expect(field.name()).toHaveAttribute('readonly');
     expect(field.images()).toHaveAttribute('readonly');
     expect(field.name()).not.toBeDisabled();
-    expect(submit()).toHaveAttribute('aria-disabled', 'true');
+    const busy = screen.getByRole('button', { name: 'Sending…' });
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
+    expect(busy).not.toBeDisabled();
+    await user.keyboard('{Enter}');
     release();
     await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
+    expect(store.requests).toHaveLength(1);
   });
 });

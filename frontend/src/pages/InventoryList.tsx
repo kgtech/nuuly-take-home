@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { api, type ApiResult, type InventoryItem, type ListParams } from '../api/client';
+import { api, type ApiResult, type ListParams, type SkuItem } from '../api/client';
 import { skuHref } from '../hooks/useHashRoute';
 import { ErrorText, Hint, Loading } from '../components/Messages';
 import { FindSku } from '../components/FindSku';
@@ -7,11 +7,11 @@ import { ArrowRight } from '../components/Icons';
 import { BRAND } from '../brand';
 import { limitReason } from '../validation';
 
-type PageRequest = { n: number; pageNo: number; params: ListParams; run: () => Promise<ApiResult<InventoryItem[]>> };
-type PageResult = { n: number; result: ApiResult<InventoryItem[]> };
+type PageRequest = { n: number; pageNo: number; params: ListParams; run: () => Promise<ApiResult<SkuItem[]>> };
+type PageResult = { n: number; result: ApiResult<SkuItem[]> };
 
 function firstPage(params: ListParams, n: number): PageRequest {
-  return { n, pageNo: 1, params, run: () => api.listInventory(params) };
+  return { n, pageNo: 1, params, run: () => api.listSkus(params) };
 }
 
 /** Badge thresholds from the design (FE27): 0 is rented out, 1–3 almost gone, above that available. */
@@ -61,7 +61,7 @@ export function InventoryList() {
   };
 
   const nextPage = (url: string) => {
-    setRequest((r) => ({ n: r.n + 1, pageNo: r.pageNo + 1, params: r.params, run: () => api.listInventoryAt(url) }));
+    setRequest((r) => ({ n: r.n + 1, pageNo: r.pageNo + 1, params: r.params, run: () => api.listSkusAt(url) }));
     headingRef.current?.focus();
   };
 
@@ -128,7 +128,7 @@ export function InventoryList() {
         <div className="empty">
           <h3>The closet is empty</h3>
           <p>
-            No SKUs yet. <a href="#/add">Add stock</a> to create one.
+            No SKUs yet. <a href="#/new">Create a SKU</a> or <a href="#/add">add stock</a> to make one.
           </p>
         </div>
       )}
@@ -154,6 +154,7 @@ export function InventoryList() {
               <thead>
                 <tr>
                   <th scope="col">SKU</th>
+                  <th scope="col">Name</th>
                   <th scope="col">Availability</th>
                   <th scope="col" className="num">
                     Quantity
@@ -162,18 +163,19 @@ export function InventoryList() {
               </thead>
               <tbody>
                 {result.data.map((item) => {
-                  const badge = availability(item.quantity ?? 0);
+                  const badge = availability(item.quantity);
                   return (
                     <tr key={item.skuId}>
                       <td>
-                        <a href={skuHref(item.skuId ?? '')} className="row-link">
+                        <a href={skuHref(item.skuId)} className="row-link">
                           {item.skuId}
                         </a>
                       </td>
+                      <td className="name">{item.details?.name ?? '—'}</td>
                       <td>
                         <span className={`badge ${badge.tone}`}>{badge.text}</span>
                       </td>
-                      <td className="num">{(item.quantity ?? 0).toLocaleString()}</td>
+                      <td className="num">{item.quantity.toLocaleString()}</td>
                     </tr>
                   );
                 })}

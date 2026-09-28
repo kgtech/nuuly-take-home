@@ -21,7 +21,8 @@ describe('InventoryList', () => {
     render(<InventoryList />);
     expect(await screen.findByText(/no skus yet/i)).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 3, name: 'The closet is empty' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Add stock' })).toHaveAttribute('href', '#/add');
+    expect(screen.getByRole('link', { name: 'Create a SKU' })).toHaveAttribute('href', '#/new');
+    expect(screen.getByRole('link', { name: 'add stock' })).toHaveAttribute('href', '#/add');
   });
 
   it('labels the page and shows an availability badge per row (0 / 1–3 / above 3)', async () => {
