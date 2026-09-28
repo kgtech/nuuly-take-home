@@ -112,6 +112,30 @@ describe('SkuView', () => {
     expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(2);
   });
 
+  it('when the re-fetch after an add fails too, keeps the quantity and shows a details error with Retry, not "No details yet" (R-04)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('D-1', 1, details);
+    let gets = 0;
+    server.use(
+      http.get('*/v2/inventory/:skuId', () => {
+        gets += 1;
+        return gets <= 2 ? new HttpResponse(null, { status: 502 }) : undefined;
+      }),
+    );
+    render(<SkuView skuId="D-1" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 502');
+    await user.type(form('Add stock').getByLabelText(/quantity/i), '4{Enter}');
+    expect(await screen.findByRole('status')).toHaveTextContent('Added 4 to D-1: now 5.');
+    await waitFor(() => expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(2));
+    expect(screen.getByTestId('quantity')).toHaveTextContent('5');
+    expect(screen.queryByText('No details yet')).not.toBeInTheDocument();
+    const detailsError = await screen.findByText(/could not load the details/i);
+    expect(detailsError.closest('[role="alert"]')).toHaveTextContent('HTTP 502');
+    await user.click(screen.getByRole('button', { name: /retry details/i }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Linen dress' })).toBeInTheDocument();
+    expect(screen.getByTestId('quantity')).toHaveTextContent('5');
+  });
+
   it('formats a large quantity with separators (F-fe-08)', async () => {
     store.seed({ big: 1234567 });
     render(<SkuView skuId="big" />);

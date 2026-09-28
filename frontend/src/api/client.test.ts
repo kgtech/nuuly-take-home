@@ -113,7 +113,13 @@ describe('client v2 writes', () => {
     expect(badBodyMissingSku).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
     const emptyIfMatch = await api.replaceSkuDetails('E', details, '');
     expect(emptyIfMatch).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
-    expect(store.details.get('E')?.version).toBe(1);
+    // A G11-invalid skuId and a malformed non-empty If-Match are 400, like the service (R-05).
+    expect(await api.replaceSkuDetails('bad id', details, null)).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    for (const bad of ['1', 'W/"1"', '"1', '"1", x', '* , "1"']) {
+      expect(await api.replaceSkuDetails('E', details, bad)).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    }
+    expect((await api.replaceSkuDetails('E', details, '"0", "1"')).ok).toBe(true);
+    expect(store.details.get('E')?.version).toBe(2);
   });
 
   it('sends the Idempotency-Key header on add stock (v1)', async () => {

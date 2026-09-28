@@ -209,7 +209,7 @@ describe('CreateSkuPage (#/new)', () => {
     const initial = field.initial() as HTMLInputElement;
     await user.type(initial, '1');
     Object.defineProperty(initial, 'validity', { value: { badInput: true }, configurable: true });
-    fireEvent.change(initial, { target: { value: '' } });
+    fireEvent.input(initial, { target: { value: '' } });
     expect(hintOf(initial)).toHaveTextContent('Enter a number.');
     expect(initial).toHaveAttribute('aria-invalid', 'true');
     expect(submit()).toHaveAttribute('aria-disabled', 'true');
@@ -220,6 +220,27 @@ describe('CreateSkuPage (#/new)', () => {
     await user.type(initial, '3');
     expect(hintOf(initial)).toBeEmptyDOMElement();
     expect(submit()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it.each([
+    ['initial stock', 'initial'],
+    ['cost amount', 'amount'],
+  ] as const)('%s: badInput is read on input from an empty field, where React fires no change (R-01)', async (_l, key) => {
+    const user = userEvent.setup();
+    render(<CreateSkuPage />);
+    await user.type(field.skuId(), 'A');
+    await user.type(field.name(), 'A');
+    if (key === 'amount') await user.type(field.currency(), 'USD');
+    const input = field[key]() as HTMLInputElement;
+    expect(input).toHaveValue(null);
+    Object.defineProperty(input, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(input, { target: { value: '' } });
+    expect(hintOf(input)).toHaveTextContent('Enter a number.');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(submit()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(submit());
+    await user.keyboard('{Enter}');
+    expect(store.requests).toHaveLength(0);
   });
 
   it('a pasted name longer than 120 characters is kept as typed and refused, not truncated (F-09)', async () => {

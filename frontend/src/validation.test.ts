@@ -152,10 +152,10 @@ describe('details reasons (DESIGN-V2 §8 field rules)', () => {
     expect(parseImages('https://a.example/café.jpg')).toEqual(['https://a.example/café.jpg']);
   });
   // java.net.URI accepts an IPv6 literal host (F-fe-01); an underscore host, a space or non-ASCII stay rejected.
-  it.each(['http://[::1]/a.png', 'https://[2001:db8::1]:8443/x.jpg', 'https://[fe80::1]/'])('accepts the IPv6 host in %s', (u) => {
+  it.each(['http://[::1]/a.png', 'https://[2001:db8::1]:8443/x.jpg', 'https://[fe80::1]/', 'http://[fe80::1%eth0]/a.png', 'http://[fe80::1%25]:80/'])('accepts the IPv6 host in %s', (u) => {
     expect(imagesReason(u)).toBeNull();
   });
-  it.each(['https://my_host.example/1.jpg', 'https://a.example/a b.jpg', 'https://a.example/café.jpg', 'https://[::1/x', 'https://[zz::1]/x'])(
+  it.each(['https://my_host.example/1.jpg', 'https://a.example/a b.jpg', 'https://a.example/café.jpg', 'https://[::1/x', 'https://[zz::1]/x', 'http://[fe80::1%]/x', 'http://[fe80::1%eth-0]/x'])(
     'still rejects %j',
     (u) => {
       expect(imagesReason(u)).toBe(`Line 1: ${IMAGE_URL_RULE}`);

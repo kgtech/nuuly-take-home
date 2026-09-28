@@ -185,7 +185,7 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     const hint = document.getElementById(amount.getAttribute('aria-describedby')!)!;
     // jsdom never reports badInput; a browser does for "12-3" while showing it and reporting value "".
     Object.defineProperty(amount, 'validity', { value: { badInput: true }, configurable: true });
-    fireEvent.change(amount, { target: { value: '' } });
+    fireEvent.input(amount, { target: { value: '' } });
     expect(hint).toHaveTextContent('Enter a number.');
     expect(amount).toHaveAttribute('aria-invalid', 'true');
     expect(save()).toHaveAttribute('aria-disabled', 'true');
@@ -195,6 +195,61 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     await user.type(amount, '500');
     expect(hint).toBeEmptyDOMElement();
     expect(save()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('cost amount: badInput is read on input, which React fires even when the value stays "" (R-01)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, { name: 'Plain' });
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    const amount = screen.getByLabelText(/cost amount/i) as HTMLInputElement;
+    expect(amount).toHaveValue(null);
+    const hint = document.getElementById(amount.getAttribute('aria-describedby')!)!;
+    Object.defineProperty(amount, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(amount, { target: { value: '' } }); // "e5" typed from empty: the value stays ""
+    expect(hint).toHaveTextContent('Enter a number.');
+    expect(amount).toHaveAttribute('aria-invalid', 'true');
+    expect(save()).toHaveAttribute('aria-disabled', 'true');
+    await user.click(save());
+    await user.keyboard('{Enter}');
+    expect(store.requests.filter((r) => r.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('Reload clears a stale "not a number" state so a valid reloaded amount is not flagged (R-02)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, details, 1);
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    await createClient('http://localhost:3000').replaceSkuDetails('E-1', { ...details, cost: { amount: 777, currency: 'EUR' } }, '*');
+    await user.click(save());
+    await screen.findByRole('alert'); // 412
+    // Before reloading, the amount field holds text a number input cannot parse.
+    const amount = screen.getByLabelText(/cost amount/i) as HTMLInputElement;
+    Object.defineProperty(amount, 'validity', { value: { badInput: true }, configurable: true });
+    fireEvent.input(amount, { target: { value: '' } });
+    expect(save()).toHaveAttribute('aria-disabled', 'true');
+    Object.defineProperty(amount, 'validity', { value: { badInput: false }, configurable: true });
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(screen.getByLabelText(/cost amount/i)).toHaveValue(777));
+    const hint = document.getElementById(screen.getByLabelText(/cost amount/i).getAttribute('aria-describedby')!)!;
+    expect(hint).toBeEmptyDOMElement();
+    expect(save()).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('flags both cost fields when only one is filled (R-06)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, { name: 'Plain' });
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    const amount = screen.getByLabelText(/cost amount/i);
+    const currency = screen.getByLabelText(/^currency/i);
+    await user.type(currency, 'USD');
+    expect(amount).toHaveAttribute('aria-invalid', 'true');
+    expect(currency).not.toHaveAttribute('aria-invalid');
+    await user.clear(currency);
+    await user.type(amount, '100');
+    expect(currency).toHaveAttribute('aria-invalid', 'true');
+    expect(amount).not.toHaveAttribute('aria-invalid');
   });
 
   it('answers an id that fails G11 with "SKU not found" locally and the create link, sending nothing', async () => {
