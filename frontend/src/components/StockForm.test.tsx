@@ -16,7 +16,9 @@ describe('StockForm add', () => {
     await user.click(screen.getByRole('button', { name: /add stock/i }));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith({ skuId: 'new-1', quantity: 5 }));
     expect(screen.getByRole('status')).toHaveTextContent(/added 5.*new-1.*now 5/i);
-    expect(store.requests[0]?.headers.get('Idempotency-Key')).toMatch(UUID);
+    const key = store.requests[0]?.headers.get('Idempotency-Key');
+    expect(key).toMatch(UUID);
+    expect(screen.getByRole('status')).toHaveTextContent(`Idempotency-Key ${key}`);
   });
 
   it('shows the server error text verbatim', async () => {

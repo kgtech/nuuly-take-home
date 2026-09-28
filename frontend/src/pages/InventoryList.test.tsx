@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server, store, TEXT } from '../test/server';
-import { InventoryList } from './InventoryList';
+import { availability, InventoryList } from './InventoryList';
 
 describe('InventoryList', () => {
   it('shows loading then rows', async () => {
@@ -20,6 +20,32 @@ describe('InventoryList', () => {
   it('shows an empty state', async () => {
     render(<InventoryList />);
     expect(await screen.findByText(/no skus yet/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 3, name: 'The closet is empty' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Add stock' })).toHaveAttribute('href', '#/add');
+  });
+
+  it('labels the page and shows an availability badge per row (0 / 1–3 / above 3)', async () => {
+    store.seed({ gone: 0, low1: 1, low3: 3, ok4: 4, big: 12345 });
+    render(<InventoryList />);
+    const rows = await screen.findAllByRole('row');
+    expect(screen.getByText('Page 1 · 5 SKUs')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Availability' })).toBeInTheDocument();
+    const badge = (name: string) =>
+      within(rows.find((r) => within(r).queryByRole('link', { name }))!).getAllByRole('cell')[1]!.textContent;
+    expect(badge('gone')).toBe('Rented out');
+    expect(badge('low1')).toBe('Almost gone');
+    expect(badge('low3')).toBe('Almost gone');
+    expect(badge('ok4')).toBe('Available');
+    expect(badge('big')).toBe('Available');
+    expect(within(rows.find((r) => within(r).queryByRole('link', { name: 'big' }))!).getAllByRole('cell')[2]).toHaveTextContent(
+      (12345).toLocaleString(),
+    );
+  });
+
+  it('labels one SKU in the singular', async () => {
+    store.seed({ A: 1 });
+    render(<InventoryList />);
+    expect(await screen.findByText('Page 1 · 1 SKU')).toBeInTheDocument();
   });
 
   it('shows the error text verbatim', async () => {
@@ -37,7 +63,7 @@ describe('InventoryList', () => {
     store.seed({ A: 1, B: 2, C: 3, D: 4, E: 5 });
     render(<InventoryList />);
     await screen.findAllByRole('row');
-    const limit = screen.getByLabelText(/page size/i);
+    const limit = screen.getByLabelText(/per page/i);
     await user.clear(limit);
     await user.type(limit, '2');
     await user.click(screen.getByRole('button', { name: /apply/i }));
@@ -64,5 +90,16 @@ describe('InventoryList', () => {
     await user.click(screen.getByRole('button', { name: /apply/i }));
     expect(await screen.findByRole('link', { name: 'C' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'A' })).not.toBeInTheDocument();
+  });
+});
+
+describe('availability thresholds', () => {
+  it.each([
+    [0, 'Rented out'],
+    [1, 'Almost gone'],
+    [3, 'Almost gone'],
+    [4, 'Available'],
+  ])('%i → %s', (quantity, text) => {
+    expect(availability(quantity).text).toBe(text);
   });
 });

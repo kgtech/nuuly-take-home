@@ -11,6 +11,14 @@ describe('SkuView', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/loading/i);
     expect(await screen.findByRole('heading', { name: 'shoe-1' })).toBeInTheDocument();
     expect(screen.getByTestId('quantity')).toHaveTextContent('7');
+    expect(screen.queryByText('Rented out')).not.toBeInTheDocument();
+  });
+
+  it('marks a SKU at 0 as rented out', async () => {
+    store.seed({ 'shoe-0': 0 });
+    render(<SkuView skuId="shoe-0" />);
+    expect(await screen.findByTestId('quantity')).toHaveTextContent('0');
+    expect(screen.getByText('Rented out')).toBeInTheDocument();
   });
 
   it('answers "." without a request, since the server is certain to reject it', async () => {

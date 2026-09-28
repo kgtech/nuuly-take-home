@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { api, type InventoryItem } from '../api/client';
 import { StockForm } from '../components/StockForm';
 import { ErrorText, Loading } from '../components/Messages';
+import { ArrowLeft, PlusCircle, ShoppingBag } from '../components/Icons';
 import { SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
 
 type State =
@@ -43,38 +44,60 @@ export function SkuView({ skuId }: { skuId: string }) {
   const onChange = useCallback((item: InventoryItem) => setState({ phase: 'ready', item }), []);
 
   return (
-    <section>
-      <p>
-        <a href="#/">← Inventory</a>
+    <section className="page">
+      <p style={{ margin: 0 }}>
+        <a href="#/" className="back">
+          <ArrowLeft />
+          Back to inventory
+        </a>
       </p>
-      <h1>{skuId}</h1>
-      {state.phase === 'loading' && <Loading what="SKU" />}
-      {state.phase === 'error' && (
-        <>
-          <ErrorText text={state.errorText} />
-          {state.status !== 404 && (
-            <button type="button" onClick={retry}>
-              Retry
-            </button>
+      <div className="sku-grid">
+        <div className="page-head">
+          <p className="kicker">SKU</p>
+          <h1>{skuId}</h1>
+        </div>
+        <div className="on-hand">
+          {state.phase === 'loading' && <Loading what="SKU" />}
+          {state.phase === 'error' && (
+            <div className="stack">
+              <ErrorText text={state.errorText} />
+              {state.status !== 404 && (
+                <button type="button" className="secondary" onClick={retry}>
+                  Retry
+                </button>
+              )}
+            </div>
           )}
-        </>
-      )}
-      {state.phase === 'ready' && (
-        <p className="quantity">
-          Quantity: <strong data-testid="quantity">{state.item.quantity}</strong>
-        </p>
-      )}
+          {state.phase === 'ready' && (
+            <>
+              <span className="label">On hand</span>
+              <div className="row">
+                <span className="big" data-testid="quantity">
+                  {state.item.quantity}
+                </span>
+                {(state.item.quantity ?? 0) === 0 && <span className="badge out">Rented out</span>}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
       {state.phase !== 'loading' && (
-        <div className="forms">
-          <section aria-labelledby={`${id}-add`}>
-            <h2 id={`${id}-add`}>Add stock</h2>
+        <div className="cards forms">
+          <section className="card" aria-labelledby={`${id}-add`}>
+            <h2 id={`${id}-add`}>
+              <PlusCircle />
+              Add stock
+            </h2>
             {state.phase === 'error' && (
-              <p className="muted">Adding stock creates the SKU if it does not exist.</p>
+              <p className="note">Adding stock creates the SKU if it does not exist.</p>
             )}
             <StockForm operation="add" skuId={skuId} onSuccess={onChange} />
           </section>
-          <section aria-labelledby={`${id}-buy`}>
-            <h2 id={`${id}-buy`}>Purchase</h2>
+          <section className="card" aria-labelledby={`${id}-buy`}>
+            <h2 id={`${id}-buy`}>
+              <ShoppingBag />
+              Purchase
+            </h2>
             <StockForm operation="purchase" skuId={skuId} onSuccess={onChange} />
           </section>
         </div>

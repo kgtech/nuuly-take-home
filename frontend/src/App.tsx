@@ -3,7 +3,8 @@ import { useHashRoute } from './hooks/useHashRoute';
 import { InventoryList } from './pages/InventoryList';
 import { SkuView } from './pages/SkuView';
 import { AddStockPage } from './pages/AddStockPage';
-import { FindSku } from './components/FindSku';
+
+import { BRAND } from './brand';
 
 export function App() {
   const route = useHashRoute();
@@ -18,27 +19,33 @@ export function App() {
     mainRef.current?.focus();
   }, [route]);
 
+  const current = (name: string) => (route.name === name ? 'page' : undefined);
+
   return (
     <>
-      <header>
-        <nav aria-label="Main">
-          <a href="#/">Inventory</a>
-          <a href="#/add">Add stock</a>
-        </nav>
+      <header className="site-header">
+        <div className="bar">
+          <a href="#/" className="brand">
+            {BRAND}
+          </a>
+          <nav aria-label="Main">
+            <a href="#/" aria-current={current('list')}>
+              Inventory
+            </a>
+            <a href="#/add" aria-current={current('add')}>
+              Add stock
+            </a>
+          </nav>
+        </div>
       </header>
-      <main ref={mainRef} tabIndex={-1}>
-        {route.name === 'list' && (
-          <>
-            <FindSku />
-            <InventoryList />
-          </>
-        )}
+      <main ref={mainRef} tabIndex={-1} className={route.name === 'add' ? 'narrow' : undefined}>
+        {route.name === 'list' && <InventoryList />}
         {route.name === 'add' && <AddStockPage />}
         {route.name === 'sku' && <SkuView key={route.skuId} skuId={route.skuId} />}
         {route.name === 'notFound' && (
-          <section>
+          <section className="page-head">
             <h1>Page not found</h1>
-            <p>
+            <p className="subtitle">
               No page at <code>{route.path}</code>. Go to the <a href="#/">inventory</a>.
             </p>
           </section>
