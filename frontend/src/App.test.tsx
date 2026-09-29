@@ -81,6 +81,14 @@ describe('App routing', () => {
     expect(window.location.hash).toBe('#/sku/plain');
   });
 
+  it('renders #/sku/x/edit/ (trailing slash) as not found, never as the SKU "x/edit/" (M-40)', async () => {
+    window.location.hash = '#/sku/x/edit/';
+    render(<App />);
+    expect(await screen.findByText(/page not found/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'x/edit/' })).not.toBeInTheDocument();
+    expect(store.requests).toHaveLength(0);
+  });
+
   it('renders an unknown route as not found with a way home', async () => {
     window.location.hash = '#/nothing/here';
     render(<App />);

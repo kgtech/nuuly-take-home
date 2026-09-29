@@ -7,6 +7,7 @@ import { CreateSkuPage } from './CreateSkuPage';
 import { GUIDANCE } from '../components/Messages';
 import { CONTROL_CHARS, COST_AMOUNT, COST_PAIR, IMAGE_URL_RULE, INITIAL_STOCK, SKU_ID_EMPTY, SKU_ID_INVALID } from '../validation';
 
+const EXISTS = 'A SKU with this ID already exists. Open it to edit its details or add stock.';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const field = {
@@ -150,7 +151,7 @@ describe('CreateSkuPage (#/new)', () => {
     expect(store.details.get('DRS-1')?.details.name).toBe('Linen dress');
   });
 
-  it('412: the server text verbatim, its own line and a link to the SKU edit page; nothing else is sent', async () => {
+  it('412: only the exists line as the headline and a link to the SKU edit page (no server text); nothing else is sent', async () => {
     const user = userEvent.setup();
     store.seedDetails('DRS-1', 4, { name: 'Original', description: 'A', images: [] });
     render(<CreateSkuPage />);
@@ -158,8 +159,9 @@ describe('CreateSkuPage (#/new)', () => {
     await user.type(field.initial(), '9');
     await user.click(submit());
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent!.startsWith(TEXT.changed)).toBe(true);
-    expect(alert).toHaveTextContent('A SKU with this ID already exists. Open it to edit its details or add stock.');
+    expect(alert.textContent!.startsWith(EXISTS)).toBe(true);
+    expect(alert.textContent).not.toContain(TEXT.changed);
+    expect(alert.textContent).not.toMatch(/changed since you read|ETag/i);
     expect(alert).toHaveFocus();
     expect(alert.querySelector(`a[href="${editHref}"]`)).not.toBeNull();
     expect(window.location.hash).toBe('');
@@ -225,14 +227,15 @@ describe('CreateSkuPage (#/new)', () => {
     expect(alert.textContent).not.toMatch(/sending again is safe/i);
   });
 
-  it('a 412 with no earlier uncertain attempt keeps the server text, the exists line and the edit link', async () => {
+  it('a 412 with no earlier uncertain attempt shows only the exists line and the edit link, never the server text (M-12)', async () => {
     const user = userEvent.setup();
     store.seedDetails('DRS-1', 4, { name: 'Original', description: 'A', images: [] });
     render(<CreateSkuPage />);
     await fillValid(user);
     await user.click(submit());
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent!.startsWith(TEXT.changed)).toBe(true);
+    expect(alert.textContent!.startsWith(EXISTS)).toBe(true);
+    expect(alert.textContent).not.toContain(TEXT.changed);
     expect(alert).not.toHaveTextContent(/most likely created/);
     expect(alert.querySelector(`a[href="${editHref}"]`)).not.toBeNull();
   });

@@ -102,7 +102,7 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
   });
 
-  it('400 and 5xx on save: verbatim text with the guidance line; the fields keep their values', async () => {
+  it('400 on save: verbatim text with the guidance line; the fields keep their values', async () => {
     const user = userEvent.setup();
     store.seedDetails('E-1', 2, details);
     render(<EditSkuPage skuId="E-1" />);
@@ -110,14 +110,42 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     server.use(http.put('*/v2/inventory/:skuId/details', () => new HttpResponse(TEXT.invalid, { status: 400, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
     await user.type(name(), '!');
     await user.click(save());
-    let alert = await screen.findByRole('alert');
+    const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(`${TEXT.invalid}${GUIDANCE.refused}`);
     expect(name()).toHaveValue('Linen dress!');
-    server.use(http.put('*/v2/inventory/:skuId/details', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
+  });
+
+  it.each([
+    ['a network failure (0)', () => HttpResponse.error(), /network/i],
+    ['408', () => new HttpResponse('Request Timeout', { status: 408, headers: { 'Content-Type': 'text/plain' } }), 'Request Timeout'],
+    ['429', () => new HttpResponse('Too Many Requests', { status: 429, headers: { 'Content-Type': 'text/plain' } }), 'Too Many Requests'],
+    ['500', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } }), 'Internal server error'],
+    ['502 with an empty body', () => new HttpResponse(null, { status: 502 }), 'HTTP 502'],
+  ] as const)('a save that fails with %s says it may or may not have been applied and to Reload, never "Sending again is safe" (M-13)', async (_l, reply, text) => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, details);
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    server.use(http.put('*/v2/inventory/:skuId/details', reply, { once: true }));
+    await user.type(name(), '!');
     await user.click(save());
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Internal server error'));
-    alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent(GUIDANCE.retrySafe);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(text);
+    expect(alert.textContent).toMatch(/The save may or may not have been applied\.\s+Reload\s+to see the current details\./);
+    expect(alert.textContent).not.toMatch(/sending again is safe/i);
+    expect(alert.textContent).not.toContain(GUIDANCE.retrySafe);
+    expect(name()).toHaveValue('Linen dress!');
+  });
+
+  it('a 400 keeps its own guidance and says nothing about the save being applied (M-13)', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('E-1', 2, details);
+    render(<EditSkuPage skuId="E-1" />);
+    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
+    server.use(http.put('*/v2/inventory/:skuId/details', () => new HttpResponse(TEXT.invalid, { status: 400, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
+    await user.type(name(), '!');
+    await user.click(save());
+    expect((await screen.findByRole('alert')).textContent).not.toMatch(/may or may not/i);
   });
 
   it('a field reason makes Save unavailable and sends nothing', async () => {

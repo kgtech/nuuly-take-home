@@ -32,6 +32,15 @@ describe('client v2 reads', () => {
     expect(r.data).toEqual([{ skuId: 'B', quantity: 2 }]);
   });
 
+  it('re-roots a Link URL from another origin onto the base origin (M-24)', async () => {
+    store.seed({ A: 1, X: 2, Y: 3 });
+    const r = await api.listSkusAt('http://service.internal:8080/v2/inventory?limit=5&after=X');
+    if (!r.ok) throw new Error();
+    expect(r.data).toEqual([{ skuId: 'Y', quantity: 3 }]);
+    expect(store.requests).toHaveLength(1);
+    expect(store.requests[0]!.url).toBe('http://localhost:3000/v2/inventory?limit=5&after=X');
+  });
+
   it('requests exactly the Link URL path and query', async () => {
     store.seed({ A: 1, B: 2 });
     await api.listSkusAt('http://other:1/v2/inventory?limit=7&after=A%20b');

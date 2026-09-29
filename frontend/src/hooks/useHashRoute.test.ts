@@ -3,7 +3,14 @@ import { editHref, NEW_HREF, parseRoute, skuHref } from './useHashRoute';
 
 describe('parseRoute', () => {
   it('decodes an encoded skuId', () => {
-    expect(parseRoute('#/sku/a%2Fb')).toEqual({ name: 'sku', skuId: 'a/b' });
+    expect(parseRoute('#/sku/a%20b')).toEqual({ name: 'sku', skuId: 'a b' });
+  });
+  it('a trailing slash or a "/" in the id (raw or %2F) is not a SKU id: Page not found (M-40)', () => {
+    for (const hash of ['#/sku/x/edit/', '#/sku/x/', '#/sku/a/b', '#/sku/a%2Fb', '#/sku/a%2fb/edit', '#/sku/a/b/edit', '#/sku//edit']) {
+      expect(parseRoute(hash).name, hash).toBe('notFound');
+    }
+    expect(parseRoute('#/sku/x/edit')).toEqual({ name: 'edit', skuId: 'x' });
+    expect(parseRoute('#/sku/x')).toEqual({ name: 'sku', skuId: 'x' });
   });
   it('keeps the raw segment when the escape is malformed instead of throwing', () => {
     expect(parseRoute('#/sku/50%off')).toEqual({ name: 'sku', skuId: '50%off' });
@@ -19,6 +26,5 @@ describe('parseRoute', () => {
     expect(parseRoute(editHref('DRS-1'))).toEqual({ name: 'edit', skuId: 'DRS-1' });
     expect(parseRoute(skuHref('DRS-1'))).toEqual({ name: 'sku', skuId: 'DRS-1' });
     expect(parseRoute(NEW_HREF)).toEqual({ name: 'new' });
-    expect(editHref('a/b')).toBe('#/sku/a%2Fb/edit');
   });
 });
