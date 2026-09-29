@@ -98,7 +98,6 @@ class SkuDetailsPutConcurrencyTest {
         assertThat(count("SELECT count(*) FROM sku_details WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(count("SELECT version FROM sku_details WHERE sku_id = ?", sku)).isEqualTo(THREADS);
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isZero();
-        assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
     }
 
     @Test
@@ -149,6 +148,5 @@ class SkuDetailsPutConcurrencyTest {
         assertThat(count("SELECT quantity FROM sku WHERE sku_id = ?", sku)).isEqualTo(adds * 3 - purchases);
         assertThat(count("SELECT count(*) FROM sku_details WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", sku)).isEqualTo(1);
-        assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
     }
 }

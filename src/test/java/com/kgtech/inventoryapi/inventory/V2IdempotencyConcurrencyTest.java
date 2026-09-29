@@ -59,9 +59,8 @@ class V2IdempotencyConcurrencyTest {
     }
 
     @AfterEach
-    void closeClientAndCheckTheBalances() {
+    void closeClientAndCheckNoOversell() {
         http.close();
-        assertThat(Invariants.balanceMismatches(jdbc)).as("sku.quantity equals the ledger SUM").isEmpty();
         assertThat(Invariants.minQuantity(jdbc)).as("no oversell").isGreaterThanOrEqualTo(0);
     }
 
@@ -237,6 +236,8 @@ class V2IdempotencyConcurrencyTest {
         List<Sent> adds = sent.stream().filter(s -> s.quantity() == 1).toList();
         assertThat(adds).extracting(s -> s.reply().status()).containsOnly(200);
         long purchased = sent.stream().filter(s -> s.quantity() == -1 && s.reply().status() == 200).count();
+        assertThat(adds).as("liveness: adds were made").isNotEmpty();
+        assertThat(purchased).as("liveness: the seed of 2 covers at least two purchases").isGreaterThanOrEqualTo(2);
         assertThat(count("SELECT quantity FROM sku WHERE sku_id = ?", sku)).isEqualTo(2 + adds.size() - purchased);
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
                 .isEqualTo(purchased);

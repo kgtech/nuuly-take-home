@@ -9,10 +9,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,11 +23,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -48,6 +49,8 @@ class VersionParityIntegrationTest {
 
     private static final int PAGE_MAX = 250;
     private static final int SKUS = 620;
+    /** Upper and lower case, a leading digit and every punctuation mark the pattern allows, so COLLATE "C" order shows. */
+    private static final String[] ID_FORMATS = {"sku-%03d", "SKU-%03d", "9-lot-%03d", "a.b-%03d", "Z_%03d", "0.%03d"};
     private static final Pattern LINK_VALUE = Pattern.compile("^<([^>]+)>; rel=\"next\"$");
 
     @Autowired
@@ -74,7 +77,7 @@ class VersionParityIntegrationTest {
         Tables.reset(jdbc);
         expected.clear();
         for (int i = 0; i < SKUS; i++) {
-            String sku = String.format("%s-%03d", i % 2 == 0 ? "sku" : "SKU", i);
+            String sku = String.format(ID_FORMATS[i % ID_FORMATS.length], i);
             switch (i % 5) {
                 case 0 -> add(sku, i % 7 + 2, false);
                 case 1 -> add(sku, i % 7 + 2, true);
@@ -177,8 +180,9 @@ class VersionParityIntegrationTest {
                 .as(item.skuId()).isEqualTo(expected.get(item.skuId())));
     }
 
+    /** Invariant 6 "for every SKU": after further interleaved writes, both single reads of all SKUs match the model. */
     @Test
-    void singleReadsAgreeAcrossVersionsAfterInterleavedWrites() throws Exception {
+    void everySkuReadsTheSameThroughBothVersionsAfterInterleavedWrites() throws Exception {
         List<String> sample = new ArrayList<>();
         for (int i = 0; i < SKUS; i += 31) {
             sample.addAll(expected.keySet().stream().skip(i).limit(1).toList());
@@ -190,13 +194,19 @@ class VersionParityIntegrationTest {
                     case 1 -> purchase(sku, 1, false);
                     default -> add(sku, 2, false);
                 }
-                assertThat(quantityOf("/inventory/" + sku)).as("unversioned %s, round %d", sku, round)
-                        .isEqualTo(expected.get(sku));
-                assertThat(quantityOf("/v2/inventory/" + sku)).as("/v2 %s, round %d", sku, round)
-                        .isEqualTo(expected.get(sku));
             }
         }
-        assertThat(walk("/v2/inventory")).isEqualTo(walk("/inventory"));
+
+        assertThat(expected).hasSize(SKUS);
+        expected.forEach((sku, quantity) -> {
+            try {
+                assertThat(quantityOf("/inventory/" + sku)).as("unversioned %s", sku).isEqualTo(quantity);
+                assertThat(quantityOf("/v2/inventory/" + sku)).as("/v2 %s", sku).isEqualTo(quantity);
+            } catch (Exception e) {
+                throw new AssertionError(sku, e);
+            }
+        });
+        assertThat(walk("/v2/inventory?limit=250")).isEqualTo(walk("/inventory"));
     }
 
     /** A limit past the maximum is 250 on /v2 and is ignored on the unversioned list (OD-5): 250 either way. */
@@ -207,31 +217,28 @@ class VersionParityIntegrationTest {
     }
 
     /**
-     * Invariant 7 by enumeration: the only GET routes that answer with a list are the two collection routes, and both
-     * are walked above. A collection route added later fails here until it is bounded and added to this set; no
-     * handler may return a bare collection (an unpaged body).
+     * Invariant 7 by allow-list: the application's whole GET surface is these four routes. Only the two collection
+     * routes can answer with a list, and the walks above prove both are paged at 250 or less. Library mappings
+     * (actuator, springdoc, Swagger UI, the error controller) are excluded by handler class: only handlers declared
+     * under com.kgtech.inventoryapi count. A method-less mapping answers GET too, so it counts as GET.
      */
     @Test
-    void everyCollectionRouteIsOneOfTheBoundedLists() {
-        List<String> collectionRoutes = new ArrayList<>();
+    void theOnlyGetRoutesAreTheTwoPagedListsAndTheirItems() {
+        Set<String> routes = new TreeSet<>();
         for (Map.Entry<RequestMappingInfo, HandlerMethod> route : handlerMapping.getHandlerMethods().entrySet()) {
             RequestMappingInfo info = route.getKey();
             assertThat(info.getPathPatternsCondition()).isNotNull();
-            boolean get = info.getMethodsCondition().getMethods().stream()
-                    .anyMatch(method -> HttpMethod.GET.name().equals(method.name()));
-            if (!get) {
+            Set<RequestMethod> methods = info.getMethodsCondition().getMethods();
+            if (!route.getValue().getBeanType().getPackageName().startsWith("com.kgtech.inventoryapi")
+                    || !(methods.isEmpty() || methods.contains(RequestMethod.GET))) {
                 continue;
             }
-            for (String pattern : info.getPathPatternsCondition().getPatternValues()) {
-                if ((pattern.startsWith("/inventory") || pattern.startsWith("/v2/inventory"))
-                        && !pattern.contains("{")) {
-                    collectionRoutes.add(pattern);
-                }
-            }
-            assertThat(Collection.class.isAssignableFrom(route.getValue().getMethod().getReturnType()))
-                    .as("%s returns a bare collection", route.getValue()).isFalse();
+            info.getPathPatternsCondition().getPatternValues().forEach(pattern -> routes.add("GET " + pattern));
         }
 
-        assertThat(collectionRoutes).containsExactlyInAnyOrder("/inventory", "/v2/inventory");
+        assertThat(routes).as("A new GET route is unproven for invariant 7. Prove it bounded (paged with limit <= 250, "
+                + "walked in this class) and add it here.")
+                .containsExactly("GET /inventory", "GET /inventory/{skuId}", "GET /v2/inventory",
+                        "GET /v2/inventory/{skuId}");
     }
 }

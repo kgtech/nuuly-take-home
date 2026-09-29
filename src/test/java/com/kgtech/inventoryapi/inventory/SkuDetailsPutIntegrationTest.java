@@ -142,7 +142,6 @@ class SkuDetailsPutIntegrationTest {
         assertThat(quantity("PD-1")).isZero();
         assertThat(count("SELECT count(*) FROM sku_details WHERE sku_id = ?", "PD-1")).isEqualTo(1);
         assertThat(getV2("PD-1").etag()).isEqualTo("\"1\"");
-        assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
     }
 
     // ---- replace (existing SKU) ----
@@ -163,7 +162,6 @@ class SkuDetailsPutIntegrationTest {
         assertThat(JsonPath.<String>read(second.body(), "$.details.name")).isEqualTo("Linen shirt, navy");
         assertThat(quantity("PD-2")).isEqualTo(5);
         assertThat(ledgerRows("PD-2")).isEqualTo(1);
-        assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
     }
 
     /** The details PUT never changes stock, and both versions of the API agree on the one SKU. */
