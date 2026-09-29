@@ -274,6 +274,60 @@ class SkuDetailsPutIntegrationTest {
         assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", "PN-5")).isZero();
     }
 
+    // ---- both conditional headers together ----
+
+    /** A malformed If-Match is 400 whatever else is sent; If-None-Match: * must not swallow it. */
+    @ParameterizedTest(name = "malformed If-Match [{0}] with If-None-Match: *")
+    @ValueSource(strings = {"abc", "\"4", ""})
+    void aMalformedIfMatchWithIfNoneMatchStarIs400OnAnAbsentAndAnExistingSku(String ifMatch) throws Exception {
+        assertThat(putDetails("PB-1", DETAILS).status()).isEqualTo(201);
+
+        assertText(send(putRequest("PB-1", OTHER_DETAILS).header(IF_MATCH, ifMatch).header(IF_NONE_MATCH, "*")), 400,
+                INVALID_REQUEST);
+        assertText(send(putRequest("PB-2", DETAILS).header(IF_MATCH, ifMatch).header(IF_NONE_MATCH, "*")), 400,
+                INVALID_REQUEST);
+
+        assertThat(detailsName("PB-1")).isEqualTo("Linen shirt");
+        assertThat(getV2("PB-1").etag()).isEqualTo("\"1\"");
+        assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", "PB-2")).isZero();
+        assertThat(count("SELECT count(*) FROM sku_details WHERE sku_id = ?", "PB-2")).isZero();
+    }
+
+    /** Documents today's behaviour: a well-formed If-Match together with If-None-Match: * always fails (412). */
+    @ParameterizedTest(name = "If-Match [{0}] with If-None-Match: *")
+    @ValueSource(strings = {"\"1\"", "*"})
+    void aValidIfMatchWithIfNoneMatchStarIs412OnAnAbsentAndAnExistingSku(String ifMatch) throws Exception {
+        assertThat(putDetails("PB-3", DETAILS).status()).isEqualTo(201);
+
+        assertText(send(putRequest("PB-3", OTHER_DETAILS).header(IF_MATCH, ifMatch).header(IF_NONE_MATCH, "*")), 412,
+                DETAILS_CHANGED);
+        assertText(send(putRequest("PB-4", DETAILS).header(IF_MATCH, ifMatch).header(IF_NONE_MATCH, "*")), 412,
+                DETAILS_CHANGED);
+
+        assertThat(detailsName("PB-3")).isEqualTo("Linen shirt");
+        assertThat(getV2("PB-3").etag()).isEqualTo("\"1\"");
+        assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", "PB-4")).isZero();
+    }
+
+    // ---- repeated header lines ----
+
+    /** Every If-Match line counts, as one list (RFC 9110 §5.3); a repeated If-None-Match is not "*", so 400. */
+    @Test
+    void repeatedIfMatchLinesAreOneListAndRepeatedIfNoneMatchLinesAre400() throws Exception {
+        assertThat(putDetails("PB-5", DETAILS).status()).isEqualTo(201);
+
+        assertThat(send(putRequest("PB-5", OTHER_DETAILS).header(IF_MATCH, "\"7\"", "\"1\"")).status())
+                .as("one of the tags on separate lines").isEqualTo(200);
+        assertText(send(putRequest("PB-5", DETAILS).header(IF_MATCH, "\"7\"", "\"8\"")), 412, DETAILS_CHANGED);
+        assertText(send(putRequest("PB-5", DETAILS).header(IF_MATCH, "\"2\"", "abc")), 400, INVALID_REQUEST);
+        assertText(send(putRequest("PB-5", DETAILS).header(IF_NONE_MATCH, "*", "*")), 400, INVALID_REQUEST);
+        assertText(send(putRequest("PB-6", DETAILS).header(IF_NONE_MATCH, "*", "*")), 400, INVALID_REQUEST);
+
+        assertThat(detailsName("PB-5")).isEqualTo("Linen shirt, navy");
+        assertThat(getV2("PB-5").etag()).isEqualTo("\"2\"");
+        assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", "PB-6")).isZero();
+    }
+
     // ---- validation ----
 
     static Stream<Arguments> invalidBodies() {

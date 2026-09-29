@@ -8,6 +8,7 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATED_ETAG_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PUT_CREATED_ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.DETAILS_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
@@ -196,7 +197,7 @@ class SkuDetailsController {
             headers = @Header(name = ETAG, description = ETAG_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
     @ApiResponse(responseCode = "201", description = PUT_DETAILS_CREATED_DESCRIPTION,
-            headers = @Header(name = ETAG, description = CREATED_ETAG_DESCRIPTION, schema = @Schema(type = "string")),
+            headers = @Header(name = ETAG, description = PUT_CREATED_ETAG_DESCRIPTION, schema = @Schema(type = "string")),
             content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
     @ApiResponse(responseCode = "400", description = CREATE_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))

@@ -453,8 +453,7 @@ paths:
           description: The SKU was created at quantity 0 with these details
           headers:
             ETag:
-              description: "The details version of a new SKU, always \"1\" (also on\
-                \ a replayed 201, even after a later PUT)"
+              description: "The details version of a new SKU, always \"1\""
               schema:
                 type: string
               style: simple

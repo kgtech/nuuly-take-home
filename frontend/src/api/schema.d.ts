@@ -549,7 +549,7 @@ export interface operations {
             /** @description The SKU was created at quantity 0 with these details */
             201: {
                 headers: {
-                    /** @description The details version of a new SKU, always "1" (also on a replayed 201, even after a later PUT) */
+                    /** @description The details version of a new SKU, always "1" */
                     ETag?: string;
                     [name: string]: unknown;
                 };

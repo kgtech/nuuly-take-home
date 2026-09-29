@@ -86,6 +86,9 @@ final class IfMatch {
         Optional<DetailsPrecondition> match = ifMatch.isEmpty() ? Optional.of(new DetailsPrecondition.Any())
                 : String.join(",", ifMatch).strip().equals("*") ? Optional.of(new DetailsPrecondition.Exists())
                 : parse(ifMatch);
+        if (!ifMatch.isEmpty() && match.isEmpty()) {
+            return Optional.empty(); // a malformed If-Match is 400 whatever else was sent
+        }
         if (noneMatchStar && match.isPresent() && !ifMatch.isEmpty()) {
             return Optional.of(new DetailsPrecondition.Versions(List.of()));
         }

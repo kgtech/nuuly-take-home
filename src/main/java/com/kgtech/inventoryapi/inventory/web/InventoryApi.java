@@ -75,6 +75,7 @@ final class InventoryApi {
             + "details";
     static final String CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\" (also on a replayed "
             + "201, even after a later PUT)";
+    static final String PUT_CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\"";
     static final String PUT_DETAILS_SUMMARY = "Create a SKU or replace its details";
     static final String PUT_DETAILS_DESCRIPTION = "Replaces the whole SkuDetails of the SKU. A SKU that does not exist "
             + "is created with quantity 0 (201, ETag \"1\"); an existing SKU keeps its stock (200, new ETag). "
