@@ -20,7 +20,8 @@ This prompt is the whole job. There is no later prompt per issue.
   - **`/v2` API** means everything under `/v2/inventory…`.
   - In a sentence about paths, "v2" always means the `/v2` API, never build v2.
 - **Owner** is the person who approves the plan. **Spec** is `docs/NUULY-ASSESSMENT-README-JUL-2026.md`.
-- **Decision IDs** (G1, C3, A33, E1, …) are cards on the decision board, whose export is `DECISIONS.md`. New cards for this build use the `H` series; check first that the board doesn't already use it.
+- **Decision IDs** (G1, C3, A33, E1, …) are cards on the decision board, whose export is `DECISIONS.md`. The exception is build v2's A-series entries that #87 never put on the board (for example A19 and A21–A28): those live only in build v2's `DECISIONS-ADDED.md`. New cards for this build use the `H` series.
+- **The q=0 tie-break.** When an Accept header lists equally specific ranges that are compatible with JSON, build v2 decides by the first such range; main's C3 amendment decides by the highest q.
 
 ## Owner decisions (already made)
 These are settled. Don't reopen them. Turn each one into a board card that records the owner's choice (see "Plan gate").
@@ -37,6 +38,7 @@ These are settled. Don't reopen them. Turn each one into a board card that recor
 | OD-8 | Plan gate, then autonomous. |
 | OD-9 | The decision board stays the source of truth for service and API decisions (S9). `DECISIONS.md` and `CLAUDE.md` are regenerated from it and never hand-edited. The front end keeps `frontend/DECISIONS.md`. |
 | OD-10 | Final's board is a new private artifact, seeded with a copy of the current decisions database. Main's board artifact and its database are only ever read, never written, so main's published board keeps matching main's committed exports. |
+| OD-11 | `PUT /v2/inventory/{skuId}/details` supports `If-None-Match: *` (RFC 9110): it answers 412 when the SKU already exists. The front end's Create page always sends it, so creating never overwrites an existing SKU's details. |
 
 ## Target API
 All error bodies are `text/plain`. They use G6's fixed texts ("SKU not found", "Insufficient inventory", "Invalid request", "Internal server error") plus the 412 text below. Requests outside the spec's operations keep the standard behavior of G10 and T3.
@@ -61,7 +63,12 @@ Check order on both unversioned POSTs: body validation (`@Valid`), then `Idempot
 - the body cap (A19)
 - Tomcat-level text/plain errors and TRACE (C1)
 
-The spec's OpenAPI doesn't document them; the README's "Assumptions" does. Freeze this hardening: add no new cases, and leave the known divergences (M-13, the q=0 tie-break) alone unless the critique rates one MAJOR or worse.
+The spec's OpenAPI doesn't document them; the README's "Assumptions" and `openapi-v2.yaml` do.
+
+**Freeze the rules, not the route list.**
+- Apply every check above to every `/v2` route too, including `…/purchase` and `…/details`. Build v2's guard filter skips `/v2` purchase and checks PUT only on two-segment paths, so a `;` skuId would otherwise reach a keyed write, repeating lesson L21.
+- Add no new kinds of check.
+- Leave the known divergences (M-13, the q=0 tie-break) as build v2 has them unless the critique rates one MAJOR or worse. Where C3's text disagrees, the frozen behavior wins, and C3's card changes to match.
 
 ### `/v2`
 Every `/v2` response body uses the v2 representation, `SkuItem` (`skuId`, `quantity`, optional `details`).
@@ -71,10 +78,16 @@ Every `/v2` response body uses the v2 representation, `SkuItem` (`skuId`, `quant
 | `GET /v2/inventory` | 200 `SkuItem[]`, at most 250.<br>`limit` (1–250, default 250, lenient as in R4) and `after`. `Link` points to `/v2/inventory` and carries both.<br>400 as in Z3. |
 | `GET /v2/inventory/{skuId}` | 200 `SkuItem` with `ETag` (the details version, `"0"` before any details) and `Cache-Control: no-store`. Conditional-GET headers are ignored, as in build v2. 404. |
 | `POST /v2/inventory/{skuId}` | Adds stock, creating the SKU if needed. Body `InventoryQuantity`. `Idempotency-Key` is required (UUID).<br>200 `SkuItem`.<br>400 "Invalid request" for: a bad body; a missing or malformed key; a key reused for a different request or older than 24h; an invalid skuId; overflow.<br>A repeated key with the same request replays the stored status, Content-Type and body. |
-| `POST /v2/inventory/{skuId}/purchase` | Same key rules. 200 `SkuItem`; 400 "Insufficient inventory" or "Invalid request"; 404. |
-| `PUT /v2/inventory/{skuId}/details` | Body `SkuDetails`, with build v2's field rules. Optional `If-Match` (strong tags or `*`).<br>If the SKU doesn't exist, it is created at quantity 0 with these details: 201 with `ETag: "1"`.<br>If it exists, its details are replaced: 200 with the new `ETag`.<br>412 "Details changed since you read them. Reload the SKU and retry with its new ETag." when `If-Match` doesn't match, including any `If-Match` on a SKU that doesn't exist yet (RFC 9110).<br>400 "Invalid request".<br>Never changes stock. `Idempotency-Key` is ignored here, because PUT is idempotent by method. |
+| `POST /v2/inventory/{skuId}/purchase` | Same key rules. 200 `SkuItem`; 400 "Insufficient inventory" or "Invalid request"; 404, also for an invalid skuId. |
+| `PUT /v2/inventory/{skuId}/details` | Body `SkuDetails`, with build v2's field rules. Optional `If-Match` (strong tags or `*`) or `If-None-Match: *` (OD-11).<br>If the SKU doesn't exist, it is created at quantity 0 with these details: 201 with `ETag: "1"`.<br>If it exists, its details are replaced: 200 with the new `ETag`.<br>412 "Details changed since you read them. Reload the SKU and retry with its new ETag." when a precondition fails (RFC 9110). That covers: `If-Match` doesn't match; any `If-Match` on a SKU that doesn't exist yet; `If-None-Match: *` on a SKU that already exists.<br>400 "Invalid request", also for an invalid skuId.<br>Never changes stock. `Idempotency-Key` is ignored here, because PUT is idempotent by method. |
 
-**Keys.** The keyed operations are `add` and `purchase`, and the request hash stays as in Y3. Check order on the `/v2` POSTs: body, then key (missing or malformed gives 400), then skuId, then claim and write (A34).
+An invalid skuId (G11, including `;` content) answers 400 on `POST /v2/inventory/{skuId}` and on PUT details, and 404 on the GET and on purchase, as on the spec paths.
+
+**Keys.** The keyed operations are `add` and `purchase`. Check order on the `/v2` POSTs: body, then key (missing or malformed gives 400), then skuId, then claim and write (A34). The request hash follows Y3.
+
+At the gate, `board-cards.md` proposes two more things:
+- Whether the hash input gains the API version. Recommended: yes, so a key stored by build v2's unversioned POSTs, which hashes the same inputs, never replays an `InventoryItem` body on `/v2`; such a key gets 400 instead.
+- A V4 policy for the `'create'` operation and the 201/409 statuses that V3 allowed in the idempotency CHECKs. Stored rows are never purged (R9), so narrowing those CHECKs fails if any such rows exist.
 
 ### OpenAPI
 - There are two springdoc groups, each exported and committed byte-stable:
@@ -83,14 +96,17 @@ Every `/v2` response body uses the v2 representation, `SkuItem` (`skuId`, `quant
 
   Swagger UI shows both.
 - In `openapi.yaml`, restore the spec's summaries, descriptions and examples.
-- A conformance test parses the YAML block in the spec and compares it with `openapi.yaml`. The test lists the allowed differences, each with its decision ID:
-  - the `openapi` version string;
-  - generated `servers` and `tags`;
-  - an `info.description` that states the deviations and points to `/v2`;
-  - on `GET /inventory`: the operation's description and the 200 response's description, which must state the 250 cap and the `after` cursor; OD-5's `after` parameter; the `Link` header; the 400 response;
-  - integer `format`s, if springdoc can't omit them.
-
-  Any other difference fails the test. It replaces build v2's `openapi-v1-baseline.yaml`.
+- C2's documented skuId schema (pattern, minLength, maxLength) moves to `openapi-v2.yaml` only. `openapi.yaml` shows the spec's plain `type: string`.
+- A conformance test parses the YAML block in the spec and compares it with `openapi.yaml`.
+  - Before comparing, it normalizes both documents: path-level `parameters` are pushed down to each operation, and `$ref: '#/components/schemas/Error'` is replaced by its definition.
+  - The test lists the allowed differences, each with its decision ID:
+    - the `openapi` version string;
+    - generated `servers` and `tags`;
+    - an `info.description` that states the deviations and points to `/v2`;
+    - on `GET /inventory`: the operation's description and the 200 response's description, which must state the 250 cap and the `after` cursor; OD-5's `after` parameter; the `Link` header; the 400 response;
+    - integer `format`s, if springdoc can't omit them.
+  - Any other difference fails the test. It replaces build v2's `openapi-v1-baseline.yaml`.
+- Grouped docs are served at `/v3/api-docs/{group}`. The export test (D7), the Gradle test inputs in `build.gradle.kts`, and the front end's `generate:api` and `check:api` scripts (FE23) all move to the two files.
 
 ## Invariants
 Each needs a test that would fail if the invariant broke.
@@ -105,12 +121,20 @@ Each needs a test that would fail if the invariant broke.
 ## Setup (Part 1)
 You may start in any checkout of the repository. Change nothing on GitHub before step 2.
 1. `git fetch origin`. If a `final` branch exists locally or on the remote, stop and report; change nothing.
-2. Create `final` from `origin/v2` as a normal branch, not an orphan. Commit this prompt as `ai/final/PROMPT.md`, and `ai/final/lessons.md` from the same place you got this prompt. Push `final`.
+2. Create `final` from `origin/v2` as a normal branch, not an orphan.
+   - Copy `ai/final/PROMPT.md` and `ai/final/lessons.md` from `origin/main`, or from the branch the owner names if they aren't on `main` yet.
+   - If you can find neither file on a remote branch, stop and report.
+   - Commit both and push `final`.
 3. Make one docs-only commit that gathers every build's AI records under `ai/`:
-   - Move build v2's run records into `ai/v2/` with `git mv`. That means `PROMPT.md`, `lessons.md`, `issues.md`, `DESIGN-V2.md`, `DEVIATIONS.md` and `DECISIONS-ADDED.md`, plus its final report and its hidden run-records directory (both named in its `PROMPT.md` under "Logging" and "Final report").
+   - Move build v2's run records into `ai/v2/` with `git mv`:
+     - `PROMPT.md`, `lessons.md`, `issues.md`, `DESIGN-V2.md`, `DEVIATIONS.md` and `DECISIONS-ADDED.md` keep their names;
+     - its final report becomes `ai/v2/REPORT.md`;
+     - its run-records directory (the only hidden directory at the root besides `.git`) becomes `ai/v2/run-records/`;
+     - its `DECISIONS.md` becomes `ai/v2/DECISIONS-v2.md`;
+     - its hand-edited `CLAUDE.md` becomes `ai/v2/CLAUDE-v2.md`, renamed so no tool loads it as instructions.
    - Remove `spec/`, which is identical to the `docs/` copy below.
    - Copy from `origin/main`: `ai/` (except `ai/final/`), `agent-prompts.md`, and `docs/NUULY-ASSESSMENT-README-JUL-2026.md`.
-   - Copy `ai/decision-board.html` from `origin/feat/issue-87-align-with-v2` over main's copy. It carries the E and A cards that record the balance row and the explicit key call.
+   - Copy `ai/decision-board.html`, `DECISIONS.md` and `CLAUDE.md` from `origin/feat/issue-87-align-with-v2`. That board carries the E and A cards that record the balance row and the explicit key call, and those two files are its exports. The board and its exports now agree; the code doesn't fully follow them yet (see "Study").
    - Fix any relative links that break. Log each copy and move with its source.
 
 ## Preflight
@@ -125,63 +149,71 @@ Write each result to `ai/final/preflight.md`.
 - **GitHub.**
   - You can create labels, issues and PRs.
   - You can push a file under `.github/workflows/`. Test this by pushing a throwaway branch `final-preflight` that holds only a workflow file, then delete it.
-  - Find out whether this environment lets you merge your own PR into `final`.
+  - You can merge your own PR. Test this by opening a PR from `final-preflight-a` into `final-preflight-b` (two throwaway branches off `final`), squash-merging it, then deleting both branches.
 
   Build v2's CI never ran because the token lacked the workflow scope, and a permission check blocked self-merge for about 35 minutes.
 - **Board.**
-  - Dump the board database: the artifact and collection named in `ai/Prompt Template.md`, "Shared rules", board step 1.
-  - Run `ai/export-board.mjs` on the #87 board with the date in #87's `DECISIONS.md` header.
-  - Confirm the output equals `git show origin/feat/issue-87-align-with-v2:DECISIONS.md` and `:CLAUDE.md` byte for byte.
-  - Confirm you can publish a new private artifact with a database and write to that database (OD-10). Only read main's board artifact.
+  - Dump main's board database: the artifact and collection named in `ai/Prompt Template.md`, "Shared rules", board step 1. Read only.
+  - Run `ai/export-board.mjs` on the board with the date in the `DECISIONS.md` header. Confirm the output equals `final`'s committed `DECISIONS.md` and `CLAUDE.md` (#87's exports) byte for byte.
+  - Confirm you can publish a new private artifact with a database and write to that database (OD-10).
 
 Anything that fails here is a blocker to raise at the gate, not something to work around.
 
 ## Study
 Write `ai/final/current-state.md`:
 - For every row of "Target API" and every invariant: where the `final` tip stands (with file references), what changes, and which tests move, invert or go away.
-- Every rule in `CLAUDE.md` and every card whose wording ties an extension to the unversioned paths, with the card change each needs. At least G8, G9, G10, G14, R4, R8, Z3, C2, S12, U3, Y1, G6, and build v2's A21–A28.
-- Every live entry in build v2's `DECISIONS-ADDED.md` that has no card on the #87 board, with a proposed card for each, or a note that an OD supersedes it.
+- Every rule in `CLAUDE.md` and every card whose wording ties an extension to the unversioned paths, with the card change each needs. At least G8, G9, G10, G14, R4, R8, Z3, C2, C3, S12, U3, Y1, G6, and build v2's A21–A28.
+- Every card whose rule names a class, package, file, migration or test that differs on the `final` tip, with either a card change or a costed refactor PR. #87's cards describe #87's planned code, not build v2's, so check at least E1–E3, D5, D7, A37–A39, Z2, S4, S11 and T6. Prefer changing the card to match the code, unless the refactor is small or deletes code.
+- Every live entry in build v2's `DECISIONS-ADDED.md` and every front-end decision the change touches (at least FE9 and FE23) that has no card on the #87 board, with a proposed card for each, or a note that an OD supersedes it. Front-end decisions change in `frontend/DECISIONS.md`, not on the board.
 
 ## Plan gate
 Commit these to `final` (docs only), then stop and wait:
 - `ai/final/preflight.md` and `ai/final/current-state.md`.
 - `DESIGN.md` at the root: the final design. It covers storage, concurrency, idempotency, the versioning policy, failure behavior, and what changed from build v2 and why. Reuse build v2's text where it is still true. Build v2's design stays in `ai/v2/` as history.
 - `ai/final/board-cards.md`: every new or changed card. For each: ID, question, options, the owner's choice (cite the OD) or your recommendation, and the `CLAUDE.md` rule text it generates. Mark every source and framework claim verified or unverified; unverified claims become the first tests.
+- `ai/final/issues.md`: the issues, each with its acceptance criteria and the decision IDs it covers.
 - `ai/final/plan.md`: each PR, the issues it covers, its order, one line on why it is grouped that way, the dependencies it adds (by name), and the build and test commands.
 
 Then send the owner a message with:
 - a short summary;
 - the blockers that need the owner's action;
-- any decision that OD-1 to OD-10 don't cover.
+- any decision that OD-1 to OD-11 don't cover.
 
 Wait for an explicit answer. Silence, an empty reply or "no preference" is not approval. Log the answer verbatim.
 
 ## Build (Part 2)
-**Budget.** 5 hours of wall-clock time from the owner's approval. Start the self-critique no later than 3 h 45 min in. When the budget runs out, stop cleanly: push what is green and write the report.
+**Budget.** 5 hours of wall-clock time from the owner's approval.
+- Start the self-critique no later than 3 h 15 min in.
+- Keep the last 30 minutes for the report, the README and the `agent-prompts.md` entries.
+- If time runs short, cut in this order: MINOR fixes, then the re-check, then the depth of interview prep. Never cut the report.
+- When the budget runs out, stop cleanly: push what is green and write the report.
 
 **No questions.** Nobody answers questions in Part 2. Where you'd normally ask, make the most reasonable choice within the approved plan, log it with one line of reasoning, and continue.
 
 **Unworkable decisions.** If an approved decision turns out to be unworkable, record it in `ai/final/deviations.md` (decision ID, what you did instead, the evidence) and continue. The board change waits for the owner.
 
 **Order.** These constraints are fixed; plan the rest yourself.
+0. Create the `[final]` issues from `ai/final/issues.md`.
 1. The board PR merges first. It:
-   - publishes final's board as a new private artifact, seeded with a copy of the decisions database (OD-10);
-   - adds the approved cards and choices;
-   - regenerates `DECISIONS.md` and `CLAUDE.md` with the board procedure in `ai/Prompt Template.md` (board steps 1–6), run against final's artifact;
-   - points final's copy of `ai/Prompt Template.md` and the README at the new artifact's URL.
+   1. Publishes final's board as a new private artifact (a publish without a URL). It seeds the artifact's `decisions` collection with a copy of the dump from main's database (OD-10), and changes the URL in final's copy of `ai/Prompt Template.md` to the new one.
+   2. Runs the template's board steps 1–6 against final's artifact only, adding the approved cards and choices and regenerating `DECISIONS.md` and `CLAUDE.md`.
+   3. Follows this prompt's rules in place of the template's decision queue, "Never merge", branch naming and "ask me".
+   4. Points the README at the new URL.
 
-   From then on, the code follows the regenerated rules.
-2. The CI workflow merges before any code PR. It covers the service and the front end, and runs on pushes to `final` and PRs into `final`. Start from the workflow build v2 parked in its run-records directory.
+   If the artifact can't be published or written, keep the choices as JSON files in the dump format under `ai/final/board-db/`, export from them, and log it in `deviations.md`. From then on, the code follows the regenerated rules.
+2. The CI workflow merges before any code PR. It covers the service and the front end, and runs on pushes to `final` and PRs into `final`. Start from `ai/v2/run-records/ci-workflow.yml`, the workflow build v2 parked because it couldn't push it.
 3. Contract before consumers: a front-end end-to-end test waits until the service PR it calls has merged.
 
 ## Rules
 **Precedence** when sources disagree, highest first:
 1. The spec, with OD-5's deviation and the frozen hardening.
-2. OD-1 to OD-10.
-3. The invariants.
+2. OD-1 to OD-11.
+3. This prompt's "Target API", "Invariants", "Order" and "Rules".
 4. Approved cards (`DECISIONS.md`, `CLAUDE.md`).
 5. `DESIGN.md`.
 6. The lessons.
+
+Until the board PR merges, `CLAUDE.md` is #87's export and is stale wherever it disagrees with this prompt. Examples: G6 lists four texts with no 412, G8 says the key is optional on the spec POSTs, and T6 sets its own build order and stop hour. This prompt wins; log each conflict you act on.
 
 **Tests and claims**
 - **Tests first.** For each acceptance criterion, a test fails for the right reason before the code that satisfies it exists. A test subagent writes tests. Implementers never edit files under the test tree; if one needs a test changed, the test subagent changes it and you log why.
@@ -190,7 +222,7 @@ Wait for an explicit answer. Silence, an empty reply or "no preference" is not a
   - Keyed tests and paging tests that belong to `/v2` now are moved there.
   - The unversioned side keeps one test per new rule: header rejected, `limit` ignored, `after`-only Link.
   - One validation matrix per rule, at the lowest layer that proves it. HTTP tests take one representative row per outcome.
-  - Every Boot test uses the shared `@IntegrationTest` annotation and the one shared Postgres container.
+  - Every `@SpringBootTest` class uses the shared `@IntegrationTest` annotation and the one shared Postgres container.
 - **Lessons become guards.** Each lesson in `ai/final/lessons.md` marked "guard" gets a test or an ArchUnit rule, named in that file. ArchUnit is approved as a test-only dependency.
 
 **Scope and changes**
@@ -214,7 +246,7 @@ Wait for an explicit answer. Silence, an empty reply or "no preference" is not a
   - Severities are BLOCKER, MAJOR, MINOR and NIT. DECISION CHALLENGE is used instead of a severity when a rule or an approved decision is itself wrong. A DECISION CHALLENGE isn't fixed; it goes in the report for the owner.
 - **Merge.**
   - Squash-merge your own PR into `final` once CI is green and no BLOCKER or MAJOR is open.
-  - Never force-push, never rewrite `final`, and never push to `main`, `v2` or any other branch.
+  - Never force-push and never rewrite `final`. Push only to `final`, `final-<slug>` branches and the `final-preflight*` throwaway branches; never push to a branch that existed before the run.
   - If the environment refuses a merge, don't re-issue the command. Keep working on a local integration branch and report it.
 
 **GitHub**
@@ -236,15 +268,15 @@ Wait for an explicit answer. Silence, an empty reply or "no preference" is not a
 - Every call goes to `/v2`. Generate the API types from `openapi-v2.yaml` only, so a call to an unversioned path fails the type check.
 - Add stock and purchase send an `Idempotency-Key` created once per user action and reused on retry. Keep build v2's rule for when a key is kept or dropped (FE9).
 - Create page:
-  - `PUT /v2/inventory/{skuId}/details` (201).
+  - `PUT /v2/inventory/{skuId}/details` with `If-None-Match: *` (OD-11). 201 on success. A 412 means the SKU already exists; show that, and link to the SKU's edit page.
   - Then, if the initial quantity is above 0, a keyed `POST /v2/inventory/{skuId}`.
-  - If the add fails, show the server's error, keep the key and offer a retry. The SKU exists at 0 stock until the add succeeds.
+  - If the add fails, show the server's error and offer a retry, keeping or dropping the key as FE9 says. The SKU exists at 0 stock until the add succeeds.
 - Edit page: `PUT …/details` with `If-Match`.
-- Playwright against the real service covers: create with initial stock; add then purchase; a double-submitted purchase that changes stock once.
+- Playwright against the real service covers: create with initial stock; a create for an existing SKU that changes nothing; add then purchase; a double-submitted purchase that changes stock once.
 - Keep the existing views, states, accessibility and phone-width behavior. The gate is `lint`, `typecheck`, `test`, `build`, `test:e2e`.
 
 ## Self-critique and fix
-Run it when every planned PR has merged and `final` is green, or at 3 h 45 min, whichever comes first.
+Run it when every planned PR has merged and `final` is green, or at 3 h 15 min, whichever comes first.
 
 ### Reviewers
 Fresh subagents that wrote none of the code, running in parallel, one per area.
@@ -269,7 +301,7 @@ Areas:
    - the 250 cap on a spec path
    - required keys
    - mirror routes
-   - PUT creating a SKU
+   - PUT creating a SKU, guarded by `If-None-Match: *`
    - the board
 
    For each, write the question a senior interviewer would ask, and check whether the code and records answer it with a reason, a rejected alternative and the tradeoff accepted.

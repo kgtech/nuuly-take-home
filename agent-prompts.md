@@ -1097,10 +1097,17 @@ Tool: Claude Code (cloud session). One orchestrator plus four read-only subagent
   - build v2's prompt, lessons, design, deviations, run log and critique loop;
   - a main-versus-v2 comparison of rules, code, migrations, tests and OpenAPI.
 - **Key finding:** both builds attach every extension to the unversioned spec paths: the optional Idempotency-Key, `limit`/`after`/`Link`, the 400 on `GET /inventory`, and the skuId pattern in the OpenAPI. Build v2's "byte for byte" guard pins those paths to main's *extended* export, not to the spec. Build v2 also has no `/v2` stock writes, and its `POST /v2/inventory/{skuId}` already means "create with details", so the versioning split needed a route decision.
-- **Owner questions:** nine, in three rounds (see My response).
+- **Owner questions:** ten, in four rounds (see My response).
 - **Wrote:**
-  - [`ai/final/PROMPT.md`](ai/final/PROMPT.md): owner decisions OD-1 to OD-10, the target API for both versions, seven invariants, setup, preflight, study, plan gate, build rules, front end, self-critique, done criteria and the final report;
+  - [`ai/final/PROMPT.md`](ai/final/PROMPT.md): owner decisions OD-1 to OD-11, the target API for both versions, seven invariants, setup, preflight, study, plan gate, build rules, front end, self-critique, done criteria and the final report;
   - [`ai/final/lessons.md`](ai/final/lessons.md): 31 lessons from both builds, each with its evidence and where the prompt enforces it, 7 of them marked as guards.
+- **Independent review of the draft:** 17 findings, 4 of them HIGH, all addressed. The HIGH ones:
+  - The board procedure would have written to main's board and stopped on a byte-for-byte check against build v2's hand-edited files. Fixed: setup copies #87's exports with its board, and the board steps run only against final's artifact.
+  - #87's cards describe #87's planned classes and migrations. Fixed: the study must reconcile each card with the code.
+  - The frozen hardening skipped the new `/v2` routes. Fixed: the rules are frozen, not the route list.
+  - The conformance test clashed with C2's documented skuId schema and with what springdoc generates. Fixed: the schema moves to `openapi-v2.yaml`, with normalization rules for the comparison.
+  - Also fixed: branch-push scope, budget reserves and cut order, issue creation, explicit sources and destinations in setup, and wrong citations in `lessons.md`.
+  - One finding went to the owner: PUT details silently overwrote an existing SKU.
 - **Enhancements beyond the two earlier prompts:**
   - a plan gate before any code;
   - a preflight that checks CI workflow scope, self-merge and board access before relying on them;
@@ -1122,7 +1129,8 @@ Tool: Claude Code (cloud session). One orchestrator plus four read-only subagent
   - keep the front end and retarget it to `/v2`;
   - plan gate, then autonomous;
   - the board stays the source of truth;
-  - a new board artifact for final.
+  - a new board artifact for final;
+  - `If-None-Match: *` on PUT details, sent by the Create page.
 - Defaults stated in the prompt:
   - hardening on the spec paths frozen, including M-13 and the q=0 tie-break;
   - PUT details ignores `Idempotency-Key`, since PUT is idempotent by method;
@@ -1142,10 +1150,12 @@ Tool: Claude Code (cloud session). One orchestrator plus four read-only subagent
   - the front end: dropping it;
   - run mode: fully autonomous, or per-issue owner gates;
   - decision records: a hand-maintained `DECISIONS.md`, or layered decision files;
-  - the board: the shared artifact.
+  - the board: the shared artifact;
+  - the create guard: a front-end check first, or allowing the overwrite.
 
 **My response**
 - Mid-run: "Idempotency should be moved to the versioned endpoints since they were not in line with the original spec document."
 - Round 1: fork from v2 tip; keep default page of 250; mirror + details sub-resource; v2 requires, v1 rejects header.
 - Round 2: only `after` on /inventory; keep and retarget the front end to /v2; plan gate, then autonomous; board stays source of truth.
 - Round 3: new board artifact for final.
+- Round 4, after the review: support If-None-Match: *.

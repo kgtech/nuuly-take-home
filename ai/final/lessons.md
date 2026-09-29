@@ -3,7 +3,7 @@
 This file merges what build v1 (on `main`) and build v2 (on branch `v2`) learned into one list. Each lesson names its evidence and where [`PROMPT.md`](PROMPT.md) enforces it.
 
 Where the evidence comes from:
-- **Build v1:** [`agent-prompts.md`](../../agent-prompts.md), [`ai/decision-review.md`](../decision-review.md) and [`ai/codebase-critique.md`](../codebase-critique.md) (findings C-01 to C-39).
+- **Build v1:** [`agent-prompts.md`](../../agent-prompts.md), [`ai/decision-review.md`](../decision-review.md), and the codebase critique. Its prompt is [`ai/codebase-critique.md`](../codebase-critique.md); its findings, C-01 to C-39, were posted on the critique PR and grouped into issues #21–#30.
 - **Build v2:** its `lessons.md`, `DESIGN-V2.md`, `DEVIATIONS.md`, its run log and its critique. These move to `ai/v2/` at setup.
 - **IDs:** K-, R-, S- and T- IDs are build v2's `lessons.md` entries; A- IDs are its `DECISIONS-ADDED.md` entries.
 
@@ -19,13 +19,13 @@ Where the evidence comes from:
 | L4 | Verify framework and runtime claims before planning on them; prove the uncertain ones with a test first. | Unchecked claims were wrong in 6 of 9 v1 runs; for example, 55P03 arrives as `UncategorizedSQLException`. v2: Jackson 3 answers 400 for a missing primitive, and Spring sent an automatic 304 on the v2 GET. | Rules: verify claims first; `board-cards.md` marks claims verified or unverified |
 | L5 | One role owns the tests, and red tests come first. | v1: 0 of 37 implementer commits touched `src/test` (K-03). v2 wrote its storage tests in the same pass as the code, and the first run had 24 failures. | Rules: tests first |
 | L6 | Push only green commits, and every commit must build on its own. | v1 had 4 red commits in 3 runs (R-07). v2 pushed red commit e8bb70c when the session hit its usage limit. | Rules: green |
-| L7 | Add CI before the first PR. | v1: 0 of 13 merged PRs had checks. v2 parked its workflow and never ran it. | Build order step 2; preflight |
+| L7 | Add CI before the first code PR. | v1: 0 of 13 merged PRs had checks. v2 parked its workflow and never ran it. | Build order step 2; preflight |
 | L8 | Give every role a "the plan is wrong" channel, and stop and propose instead of working around it. | v1 K-04 and R-01: all 5 decision challenges found in the critique had never been raised in a PR review. | Rules: review (DECISION CHALLENGE); `deviations.md` |
 | L9 | In round 2, review the round-1 fix commits for regressions. | v1 K-07: 3 of 4 round-2 findings were regressions. v2's details run: fix PRs #78 and #79 brought new MAJORs. | Rules: review |
 | L10 | Log as you go, with timestamps; never summarize after the fact. | v1: the entries for #3, #4, #6 and #15 were missing and needed a separate docs PR (#17). v2: several log stamps are marked "(approx.)". | Rules: logging; Done means (agent-prompts entries) |
 | L11 | Never hand-edit generated decision files, and reproduce the export byte for byte before changing anything. | v1 S9 and K-05. v2 hand-edited `CLAUDE.md`, recorded in its `DEVIATIONS.md`. | OD-9; preflight board check |
 | L12 | Keep scope honest against the budget. | v1's estimate grew from about 23 h to 45.7 h against a 16 h budget, and the hour-20 stop never happened. The most-refined rules, G11 (5 refinements) and G10 (4), grew from HTTP edge cases. | Rules: scope; frozen hardening; budget |
-| L13 | A lesson written as text gets repeated; make it a guard. | v2 was given "use the routed path" (L-35), yet its new guard filter used `getRequestURI()`, and `/%69nventory/VER-1;lot=7` wrote stock (V-04). Duplicate matrices came back when tests were copied from main. | Rules: lessons become guards |
+| L13 | A lesson written as text gets repeated; make it a guard. | v2 was given "use the routed path" (item 35 of its `lessons.md`), yet its new guard filter used `getRequestURI()`, and `/%69nventory/VER-1;lot=7` wrote stock (V-04). Duplicate matrices came back when tests were copied from main. | Rules: lessons become guards |
 | L14 | Run the thing. Reviewers and the verifier run the stack. | v2: Playwright, not four code-reading reviewers, found the stale count caused by Spring's automatic 304. Compose found that the healthcheck image had no curl. | Self-critique: reviewers may run |
 | L15 | Ask the critique for deletions, not justifications. | v2: removing Redis (#76) and the AOP interceptor (#81) both came from the owner. The critique had "recorded" those same issues (V-16, V-17, F-intv-10 as a MINOR). | Critique area 9; fix preference |
 | L16 | GitHub mechanics. | Reviews go as COMMENT on your own PR. Only one PENDING review is allowed (a 422 once cost an issue). Issues must be closed by hand when the base isn't the default branch. Never re-issue a command the permission system denied (T-01). `<base>/<slug>` branch names can't exist while `<base>` does (v2 A1). | Rules: GitHub |
