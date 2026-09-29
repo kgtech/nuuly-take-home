@@ -19,6 +19,19 @@ describe('AddStockPage', () => {
     expect(screen.getByRole('link', { name: 'View new-9' })).toBeInTheDocument();
   });
 
+  it('adds through POST /v2/inventory/{id} with a UUID Idempotency-Key and links to the SKU the response names', async () => {
+    const user = userEvent.setup();
+    render(<AddStockPage />);
+    await user.type(screen.getByLabelText('SKU ID'), 'new-9');
+    await user.type(screen.getByLabelText(/quantity/i), '4{Enter}');
+    expect(await screen.findByRole('link', { name: 'View new-9' })).toHaveAttribute('href', '#/sku/new-9');
+    expect(store.requests).toHaveLength(1);
+    const req = store.requests[0]!;
+    expect(req.method).toBe('POST');
+    expect(new URL(req.url).pathname).toBe('/v2/inventory/new-9');
+    expect(req.headers.get('Idempotency-Key')).toMatch(/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i);
+  });
+
   it.each([
     ['empty', '', SKU_ID_EMPTY],
     ['malformed', 'bad id', SKU_ID_INVALID],

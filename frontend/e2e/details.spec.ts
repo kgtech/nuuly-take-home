@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { randomUUID } from 'node:crypto';
 
-// v2 details flows against the real service through the Vite dev proxy (/v2 is proxied like /inventory).
+// v2 details flows against the real service through the Vite dev proxy (only /v2 is proxied, OD-7).
 const sku = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const IMAGE = 'https://example.com/e2e/dress.jpg';
@@ -28,7 +29,7 @@ async function createSku(page: Page, skuId: string, name: string, initial: numbe
 test('create with details, edit them, then purchase', async ({ page }) => {
   const skuId = sku('e2e-v2');
   const detailsPath = `/v2/inventory/${encodeURIComponent(skuId)}/details`;
-  const addPath = `/inventory/${encodeURIComponent(skuId)}`;
+  const addPath = `/v2/inventory/${encodeURIComponent(skuId)}`;
   const seen: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
   page.on('request', (r) => {
     if (r.method() === 'GET') return;
@@ -89,7 +90,7 @@ test('create with details, edit them, then purchase', async ({ page }) => {
     images: [IMAGE],
   });
 
-  // Purchase still goes through v1 and the details stay on screen.
+  // Purchase goes through /v2 and the details stay on screen (the page shows the write response).
   const buyForm = page.getByRole('form', { name: 'Purchase' });
   await buyForm.getByLabel('Quantity').fill('2');
   await buyForm.getByRole('button', { name: 'Purchase' }).click();
@@ -110,7 +111,7 @@ test('create with details, edit them, then purchase', async ({ page }) => {
 test('a double-clicked Create sends one PUT and one keyed add and creates one SKU', async ({ page }) => {
   const skuId = sku('e2e-dblcreate');
   const detailsPath = `/v2/inventory/${encodeURIComponent(skuId)}/details`;
-  const addPath = `/inventory/${encodeURIComponent(skuId)}`;
+  const addPath = `/v2/inventory/${encodeURIComponent(skuId)}`;
   const puts: (string | undefined)[] = [];
   const keys: (string | undefined)[] = [];
   page.on('request', (r) => {
@@ -136,7 +137,7 @@ test('a double-clicked Create sends one PUT and one keyed add and creates one SK
 test('an add retried after a network failure sends the same key, no second PUT, and adds the initial stock once', async ({ page }) => {
   const skuId = sku('e2e-retrycreate');
   const detailsPath = `/v2/inventory/${encodeURIComponent(skuId)}/details`;
-  const addPath = `/inventory/${encodeURIComponent(skuId)}`;
+  const addPath = `/v2/inventory/${encodeURIComponent(skuId)}`;
   const keys: (string | undefined)[] = [];
   let putCount = 0;
   let failed = false;
@@ -181,7 +182,7 @@ test('a create whose response is lost: the next click says the earlier attempt m
   let putCount = 0;
   const adds: string[] = [];
   page.on('request', (r) => {
-    if (r.method() === 'POST' && new URL(r.url()).pathname === `/inventory/${id}`) adds.push(r.url());
+    if (r.method() === 'POST' && new URL(r.url()).pathname === `/v2/inventory/${id}`) adds.push(r.url());
   });
   // The service applies the first create, but the browser sees a network error instead of the 201.
   await page.route((url) => url.pathname === detailsPath, async (route) => {
@@ -228,7 +229,10 @@ test('creating an existing SKU changes nothing: the 412 text and a link to its e
     data: original,
   });
   expect(made.status()).toBe(201);
-  const stocked = await page.request.post(`/inventory/${id}`, { data: { quantity: 4 } });
+  const stocked = await page.request.post(`/v2/inventory/${id}`, {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { quantity: 4 },
+  });
   expect(stocked.status()).toBe(200);
 
   await page.goto('/#/new');

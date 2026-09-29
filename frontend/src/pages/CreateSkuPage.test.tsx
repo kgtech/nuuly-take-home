@@ -133,7 +133,7 @@ describe('CreateSkuPage (#/new)', () => {
     expect(await store.requests[0]!.json()).toEqual({ name: 'Belt', description: '', images: [] });
   });
 
-  it('initial stock above 0: after the 201, one keyed add through POST /inventory, then navigates', async () => {
+  it('initial stock above 0: after the 201, one keyed add through POST /v2/inventory/{id}, then navigates', async () => {
     const user = userEvent.setup();
     render(<CreateSkuPage />);
     await fillValid(user);
@@ -143,7 +143,7 @@ describe('CreateSkuPage (#/new)', () => {
     expect(store.requests.map((r) => r.method)).toEqual(['PUT', 'POST']);
     const [put, add] = store.requests as [Request, Request];
     expect(put.headers.has('Idempotency-Key')).toBe(false);
-    expect(new URL(add.url).pathname).toBe('/inventory/DRS-1');
+    expect(new URL(add.url).pathname).toBe('/v2/inventory/DRS-1');
     expect(add.headers.get('Idempotency-Key')).toMatch(UUID);
     expect(await add.json()).toEqual({ quantity: 7 });
     expect(store.items.get('DRS-1')).toBe(7);
@@ -241,7 +241,7 @@ describe('CreateSkuPage (#/new)', () => {
     const user = userEvent.setup();
     let release: () => void = () => {};
     server.use(
-      http.post('*/inventory/:skuId', async () => {
+      http.post('*/v2/inventory/:skuId', async () => {
         await new Promise<void>((r) => (release = r));
         return HttpResponse.error();
       }, { once: true }),
@@ -290,7 +290,7 @@ describe('CreateSkuPage (#/new)', () => {
     ['a 502', () => text(502, 'Bad gateway')],
   ] as const)('the add fails with %s: server error, "exists at 0 stock", Retry sends only the add with the same key', async (_l, failure) => {
     const user = userEvent.setup();
-    server.use(http.post('*/inventory/:skuId', failure, { once: true }));
+    server.use(http.post('*/v2/inventory/:skuId', failure, { once: true }));
     render(<CreateSkuPage />);
     await fillValid(user);
     await user.type(field.initial(), '7');
@@ -315,7 +315,7 @@ describe('CreateSkuPage (#/new)', () => {
   it('a retried add whose first try was applied but not seen is replayed: stock is the initial quantity once', async () => {
     const user = userEvent.setup();
     server.use(
-      http.post('*/inventory/:skuId', async ({ request, params }) => {
+      http.post('*/v2/inventory/:skuId', async ({ request, params }) => {
         const key = request.headers.get('Idempotency-Key')!;
         const body = (await request.json()) as { quantity: number };
         store.items.set(String(params.skuId), (store.items.get(String(params.skuId)) ?? 0) + body.quantity);
@@ -341,7 +341,7 @@ describe('CreateSkuPage (#/new)', () => {
 
   it('after a non-retryable add failure the key is dropped: the next Retry sends a new key', async () => {
     const user = userEvent.setup();
-    server.use(http.post('*/inventory/:skuId', () => text(400, TEXT.invalid), { once: true }));
+    server.use(http.post('*/v2/inventory/:skuId', () => text(400, TEXT.invalid), { once: true }));
     render(<CreateSkuPage />);
     await fillValid(user);
     await user.type(field.initial(), '7');
@@ -356,7 +356,7 @@ describe('CreateSkuPage (#/new)', () => {
 
   it('after step 1 succeeds and the add fails the form is locked: SKU ID, details and initial stock are read-only', async () => {
     const user = userEvent.setup();
-    server.use(http.post('*/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    server.use(http.post('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
     render(<CreateSkuPage />);
     await fillValid(user);
     await user.type(field.initial(), '7');

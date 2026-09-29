@@ -1,26 +1,24 @@
 import type { components, operations, paths } from './schema';
 import { nextLink } from './link';
 
-export type InventoryItem = components['schemas']['InventoryItem'];
 export type InventoryQuantity = components['schemas']['InventoryQuantity'];
 export type SkuItem = components['schemas']['SkuItem'];
 export type SkuDetails = components['schemas']['SkuDetails'];
 export type SkuCost = components['schemas']['SkuCost'];
 export type ListParams = NonNullable<operations['listSkus']['parameters']['query']>;
 
-type ItemPath = keyof Pick<paths, '/inventory/{skuId}'>;
-type PurchasePath = keyof Pick<paths, '/inventory/{skuId}/purchase'>;
+type PurchasePath = keyof Pick<paths, '/v2/inventory/{skuId}/purchase'>;
 type SkuListPath = keyof Pick<paths, '/v2/inventory'>;
 type SkuPath = keyof Pick<paths, '/v2/inventory/{skuId}'>;
 type DetailsPath = keyof Pick<paths, '/v2/inventory/{skuId}/details'>;
 
 type Json<T> = T extends { content: { 'application/json': infer J } } ? J : never;
-type AddOk = Json<operations['createInventory']['responses'][200]>;
-type PurchaseOk = Json<operations['purchaseItem']['responses'][200]>;
+type AddOk = Json<operations['addStock']['responses'][200]>;
+type PurchaseOk = Json<operations['purchaseStock']['responses'][200]>;
 type ListOk = Json<operations['listSkus']['responses'][200]>;
 type GetOk = Json<operations['getSku']['responses'][200]>;
 type DetailsOk = Json<operations['putSkuDetails']['responses'][200]>;
-type IdempotencyHeader = NonNullable<operations['createInventory']['parameters']['header']>;
+type IdempotencyHeader = NonNullable<operations['addStock']['parameters']['header']>;
 type DetailsHeader = NonNullable<operations['putSkuDetails']['parameters']['header']>;
 export const IDEMPOTENCY_KEY = 'Idempotency-Key' satisfies keyof IdempotencyHeader;
 export const IF_MATCH = 'If-Match' satisfies keyof DetailsHeader;
@@ -50,19 +48,18 @@ export interface InventoryClient {
    * `ifNoneMatch: '*'` makes it create-only and `ifMatch` makes it a compare-and-swap, both 412 when they fail.
    */
   putDetails(skuId: string, body: SkuDetails, preconditions?: DetailsPreconditions): Promise<ApiResult<DetailsOk>>;
-  /** POST /inventory/{skuId} (v1): add stock, creating the SKU. */
-  addStock(skuId: string, body: InventoryQuantity, key: string | null): Promise<ApiResult<AddOk>>;
-  /** POST /inventory/{skuId}/purchase (v1). */
-  purchase(skuId: string, body: InventoryQuantity, key: string | null): Promise<ApiResult<PurchaseOk>>;
+  /** POST /v2/inventory/{skuId}: add stock (creating the SKU); the key is required. */
+  addStock(skuId: string, body: InventoryQuantity, key: string): Promise<ApiResult<AddOk>>;
+  /** POST /v2/inventory/{skuId}/purchase; the key is required. */
+  purchase(skuId: string, body: InventoryQuantity, key: string): Promise<ApiResult<PurchaseOk>>;
 }
 
-const ITEM: ItemPath = '/inventory/{skuId}';
-const PURCHASE: PurchasePath = '/inventory/{skuId}/purchase';
+const PURCHASE: PurchasePath = '/v2/inventory/{skuId}/purchase';
 const SKU_LIST: SkuListPath = '/v2/inventory';
 const SKU: SkuPath = '/v2/inventory/{skuId}';
 const DETAILS: DetailsPath = '/v2/inventory/{skuId}/details';
 
-function itemUrl(template: ItemPath | PurchasePath | SkuPath | DetailsPath, skuId: string): string {
+function itemUrl(template: PurchasePath | SkuPath | DetailsPath, skuId: string): string {
   return template.replace('{skuId}', encodeURIComponent(skuId));
 }
 
@@ -107,7 +104,7 @@ async function call<T>(url: URL, init: RequestInit, timeoutMs: number): Promise<
 
 const JSON_HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json, text/plain' } as const;
 
-function post(body: unknown, key: string | null): RequestInit {
+function post(body: unknown, key: string): RequestInit {
   const headers: Record<string, string> = { ...JSON_HEADERS };
   if (key !== null) headers[IDEMPOTENCY_KEY] = key;
   return { method: 'POST', headers, body: JSON.stringify(body) };
@@ -143,7 +140,7 @@ export function createClient(base: string = window.location.origin, options: Cli
       return call<DetailsOk>(new URL(itemUrl(DETAILS, skuId), base), put(body, preconditions), t);
     },
     addStock(skuId, body, key) {
-      return call<AddOk>(new URL(itemUrl(ITEM, skuId), base), post(body, key), t);
+      return call<AddOk>(new URL(itemUrl(SKU, skuId), base), post(body, key), t);
     },
     purchase(skuId, body, key) {
       return call<PurchaseOk>(new URL(itemUrl(PURCHASE, skuId), base), post(body, key), t);

@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 // Runs against the real service (API_URL, default :8080) through the Vite dev proxy (VITE_PORT, default 5173).
+// The front end calls only /v2 (OD-7): every URL below is /v2, matched by exact pathname.
 const sku = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -82,14 +83,14 @@ test('add stock then purchase', async ({ page }) => {
 
 test('a double-submitted purchase changes stock once', async ({ page }) => {
   const skuId = sku('e2e-dbl');
-  const purchaseUrl = `/inventory/${encodeURIComponent(skuId)}/purchase`;
+  const purchasePath = `/v2/inventory/${encodeURIComponent(skuId)}/purchase`;
   await openSku(page, skuId);
   await addStock(page, 10);
   await expect(page.getByTestId('quantity')).toHaveText('10');
 
   const keys: (string | undefined)[] = [];
   page.on('request', (r) => {
-    if (r.method() === 'POST' && r.url().endsWith(purchaseUrl)) keys.push(r.headers()['idempotency-key']);
+    if (r.method() === 'POST' && new URL(r.url()).pathname === purchasePath) keys.push(r.headers()['idempotency-key']);
   });
 
   await buyForm(page).getByLabel('Quantity').fill('3');
@@ -99,20 +100,24 @@ test('a double-submitted purchase changes stock once', async ({ page }) => {
 
   await page.reload();
   await expect(page.getByTestId('quantity')).toHaveText('7');
+  // The stock changed once: the service says 7, not 4.
+  const read = await page.request.get(`/v2/inventory/${encodeURIComponent(skuId)}`);
+  expect(read.status()).toBe(200);
+  expect((await read.json()).quantity).toBe(7);
   expect(keys).toHaveLength(1);
   expect(keys[0]).toMatch(UUID_V4);
 });
 
 test('a retry after a network failure reuses the key and changes stock once', async ({ page }) => {
   const skuId = sku('e2e-retry');
-  const purchaseUrl = `/inventory/${encodeURIComponent(skuId)}/purchase`;
+  const purchasePath = `/v2/inventory/${encodeURIComponent(skuId)}/purchase`;
   await openSku(page, skuId);
   await addStock(page, 10);
 
   const keys: (string | undefined)[] = [];
   let failed = false;
   // The server processes the first purchase, but the browser sees a network error.
-  await page.route(`**${purchaseUrl}`, async (route) => {
+  await page.route((url) => url.pathname === purchasePath, async (route) => {
     keys.push(route.request().headers()['idempotency-key']);
     if (!failed) {
       failed = true;
@@ -138,6 +143,47 @@ test('a retry after a network failure reuses the key and changes stock once', as
   expect(keys[1]).toBe(keys[0]);
   await page.reload();
   await expect(page.getByTestId('quantity')).toHaveText('6');
+  const read = await page.request.get(`/v2/inventory/${encodeURIComponent(skuId)}`);
+  expect((await read.json()).quantity).toBe(6);
+});
+
+test('the main flows request only /v2 paths and static assets, never an unversioned /inventory path (OD-7)', async ({ page }) => {
+  const skuId = sku('e2e-v2only');
+  const paths: string[] = [];
+  page.on('request', (r) => {
+    const u = new URL(r.url());
+    if (u.hostname === 'localhost') paths.push(u.pathname);
+  });
+  // List, SKU page, add (creating the SKU), purchase, a refused purchase, the Add stock page and Create.
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await openSku(page, skuId);
+  await addStock(page, 5);
+  await buyForm(page).getByLabel('Quantity').fill('2');
+  await buyForm(page).getByRole('button', { name: 'Purchase' }).click();
+  await expect(outcome(page)).toContainText(`Purchased 2 of ${skuId}: 3 left.`);
+  await buyForm(page).getByLabel('Quantity').fill('9');
+  await buyForm(page).getByRole('button', { name: 'Purchase' }).click();
+  await expect(failure(page)).toContainText('Insufficient inventory');
+  await page.goto('/#/add');
+  await page.getByLabel('SKU ID').fill(`${skuId}-b`);
+  await page.getByLabel('Quantity').fill('1');
+  await page.getByRole('button', { name: 'Add stock' }).click();
+  await expect(outcome(page)).toContainText('Added 1');
+  await page.goto('/#/new');
+  await page.getByLabel('SKU ID').fill(`${skuId}-c`);
+  await page.getByLabel('Name', { exact: true }).fill('V2 only');
+  await page.getByLabel(/^Initial stock/).fill('2');
+  await page.getByRole('button', { name: 'Create SKU' }).click();
+  await expect(page.getByTestId('quantity')).toHaveText('2');
+
+  const api = paths.filter((p) => p.startsWith('/inventory'));
+  expect(api).toEqual([]);
+  const v2 = paths.filter((p) => p.startsWith('/v2/inventory'));
+  expect(v2.length).toBeGreaterThan(5);
+  expect(v2).toContain(`/v2/inventory/${skuId}/purchase`);
+  expect(v2).toContain(`/v2/inventory/${skuId}-b`);
+  expect(v2).toContain(`/v2/inventory/${skuId}-c`);
 });
 
 test('Find a SKU: Open is unavailable with a reason until the id is valid', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { api, type InventoryItem } from '../api/client';
+import { api, type SkuItem } from '../api/client';
 import { useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
 import { quantityReason, skuIdReason } from '../validation';
 import { ErrorText, Hint, SubmitButton, Success, writeGuidance } from './Messages';
@@ -8,7 +8,7 @@ export type Operation = 'add' | 'purchase';
 
 /** What a submit ended in; the page that owns the outcome area renders it (FE32). */
 export type StockOutcome =
-  | { kind: 'done'; operation: Operation; sent: number; item: InventoryItem; key: string }
+  | { kind: 'done'; operation: Operation; sent: number; item: SkuItem; key: string }
   | { kind: 'failed'; operation: Operation; sent: number; status: number; errorText: string };
 
 interface Props {
