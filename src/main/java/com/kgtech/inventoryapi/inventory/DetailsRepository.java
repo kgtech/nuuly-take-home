@@ -27,7 +27,7 @@ class DetailsRepository {
             RETURNING version
             """.formatted(IMAGES);
 
-    /** §8 "Edit", unconditional: upsert gated on the SKU's existence; a PUT never creates a SKU. */
+    /** §8 "Edit", unconditional: upsert gated on the SKU's existence; this statement never creates a SKU. */
     static final String REPLACE_ANY = """
             WITH target AS (SELECT s.sku_id FROM sku s WHERE s.sku_id = :id)
             INSERT INTO sku_details (sku_id, name, description, cost_amount, cost_currency, images)
@@ -89,8 +89,9 @@ class DetailsRepository {
     /** Inside the caller's transaction: the new version, or empty when the SKU is missing or the version differs. */
     Optional<Long> replace(String skuId, SkuDetails details, DetailsPrecondition precondition) {
         return switch (precondition) {
-            case DetailsPrecondition.Any _ ->
+            case DetailsPrecondition.Any _, DetailsPrecondition.Exists _ ->
                     withDetails(jdbc.sql(REPLACE_ANY).param("id", skuId), details).query(Long.class).optional();
+            case DetailsPrecondition.Absent _ -> Optional.empty(); // this only replaces: an existing SKU fails it
             case DetailsPrecondition.Versions v when v.versions().isEmpty() -> Optional.empty();
             case DetailsPrecondition.Versions v -> withDetails(jdbc.sql(REPLACE_IF).param("id", skuId)
                     .param("versions", v.versions()), details).query(Long.class).optional();

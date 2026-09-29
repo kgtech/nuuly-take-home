@@ -104,6 +104,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/inventory/{skuId}/details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Create a SKU or replace its details
+         * @description Replaces the whole SkuDetails of the SKU. A SKU that does not exist is created with quantity 0 (201, ETag "1"); an existing SKU keeps its stock (200, new ETag). If-Match (strong ETags, or "*" for any existing SKU) and If-None-Match: * (create only) are optional preconditions; without one the PUT is unconditional. Any If-Match on a SKU that does not exist is 412. Idempotency-Key is ignored: PUT is idempotent by method.
+         */
+        put: operations["putSkuDetails"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -485,6 +505,69 @@ export interface operations {
             };
             /** @description SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    putSkuDetails: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional strong ETag(s) from a previous response, or "*" for any existing SKU; 412 when none matches or the SKU does not exist */
+                "If-Match"?: string;
+                /** @description Optional; only "*" is supported: create only, 412 when the SKU already exists. Any other value is 400 */
+                "If-None-Match"?: string;
+            };
+            path: {
+                /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
+                skuId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkuDetails"];
+            };
+        };
+        responses: {
+            /** @description The SKU with its replaced details */
+            200: {
+                headers: {
+                    /** @description The details version, a strong validator for If-Match; "0" before any details */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuItem"];
+                };
+            };
+            /** @description The SKU was created at quantity 0 with these details */
+            201: {
+                headers: {
+                    /** @description The details version of a new SKU, always "1" (also on a replayed 201, even after a later PUT) */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuItem"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Details changed since you read them. Reload the SKU and retry with its new ETag. */
+            412: {
                 headers: {
                     [name: string]: unknown;
                 };

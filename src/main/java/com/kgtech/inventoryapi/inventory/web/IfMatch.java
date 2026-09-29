@@ -72,6 +72,26 @@ final class IfMatch {
         return Long.toString(value).equals(tag) ? Optional.of(value) : Optional.empty();
     }
 
+    /**
+     * The conditions of PUT .../details (OD-11, RFC 9110 §13.1): here If-Match "*" means a current representation
+     * exists (Exists), not "unconditional" as on the old PUT, and If-None-Match accepts only "*" (Absent). Both
+     * present fail on every SKU, so they give an empty version list, which never matches (412). Malformed values are
+     * empty (400), checked before that.
+     */
+    static Optional<DetailsPrecondition> parsePut(List<String> ifMatch, List<String> ifNoneMatch) {
+        boolean noneMatchStar = !ifNoneMatch.isEmpty();
+        if (noneMatchStar && !String.join(",", ifNoneMatch).strip().equals("*")) {
+            return Optional.empty();
+        }
+        Optional<DetailsPrecondition> match = ifMatch.isEmpty() ? Optional.of(new DetailsPrecondition.Any())
+                : String.join(",", ifMatch).strip().equals("*") ? Optional.of(new DetailsPrecondition.Exists())
+                : parse(ifMatch);
+        if (noneMatchStar && match.isPresent() && !ifMatch.isEmpty()) {
+            return Optional.of(new DetailsPrecondition.Versions(List.of()));
+        }
+        return noneMatchStar ? Optional.of(new DetailsPrecondition.Absent()) : match;
+    }
+
     static String etag(long version) {
         return "\"" + version + "\"";
     }

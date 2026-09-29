@@ -8,13 +8,20 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATED_ETAG_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.DETAILS_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IF_MATCH_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IF_NONE_MATCH_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LINK_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_INVALID_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PUT_DETAILS_CREATED_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PUT_DETAILS_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PUT_DETAILS_IF_MATCH_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PUT_DETAILS_REPLACED_DESCRIPTION;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PUT_DETAILS_SUMMARY;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_ID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_NOT_FOUND_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.SKU_PATH;
@@ -37,6 +44,7 @@ import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.springframework.http.HttpHeaders.CACHE_CONTROL;
 import static org.springframework.http.HttpHeaders.ETAG;
 import static org.springframework.http.HttpHeaders.IF_MATCH;
+import static org.springframework.http.HttpHeaders.IF_NONE_MATCH;
 import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import static org.springframework.http.MediaType.TEXT_PLAIN_VALUE;
@@ -76,6 +84,7 @@ import com.kgtech.inventoryapi.inventory.DetailsOutcome.Created;
 import com.kgtech.inventoryapi.inventory.DetailsPrecondition;
 import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.PutResult;
 import com.kgtech.inventoryapi.inventory.ReplaceResult;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.NotFound;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.Replaced;
@@ -173,6 +182,42 @@ class SkuDetailsController {
             case NotFound _ -> TextErrors.skuNotFound();
             case VersionMismatch _ -> TextErrors.detailsChanged();
             case ReplaceResult.InvalidRequest _ -> TextErrors.invalidRequest();
+        };
+    }
+
+    @PutMapping(path = DETAILS_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+    @Operation(operationId = "putSkuDetails", summary = PUT_DETAILS_SUMMARY, description = PUT_DETAILS_DESCRIPTION,
+            parameters = {
+                    @Parameter(name = IF_MATCH, in = ParameterIn.HEADER, required = false,
+                            description = PUT_DETAILS_IF_MATCH_DESCRIPTION, schema = @Schema(type = "string")),
+                    @Parameter(name = IF_NONE_MATCH, in = ParameterIn.HEADER, required = false,
+                            description = IF_NONE_MATCH_DESCRIPTION, schema = @Schema(type = "string"))})
+    @ApiResponse(responseCode = "200", description = PUT_DETAILS_REPLACED_DESCRIPTION,
+            headers = @Header(name = ETAG, description = ETAG_DESCRIPTION, schema = @Schema(type = "string")),
+            content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
+    @ApiResponse(responseCode = "201", description = PUT_DETAILS_CREATED_DESCRIPTION,
+            headers = @Header(name = ETAG, description = CREATED_ETAG_DESCRIPTION, schema = @Schema(type = "string")),
+            content = @Content(mediaType = APPLICATION_JSON_VALUE, schema = @Schema(implementation = SkuItem.class)))
+    @ApiResponse(responseCode = "400", description = CREATE_INVALID_DESCRIPTION,
+            content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
+    @ApiResponse(responseCode = "412", description = V2_PRECONDITION_DESCRIPTION,
+            content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
+    ResponseEntity<?> putDetails(
+            @Parameter(description = SKU_ID_DESCRIPTION,
+                    schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
+            @PathVariable String skuId,
+            @RequestBody SkuDetails body,
+            HttpServletRequest request) {
+        Optional<DetailsPrecondition> precondition = IfMatch.parsePut(
+                Collections.list(request.getHeaders(IF_MATCH)), Collections.list(request.getHeaders(IF_NONE_MATCH)));
+        if (precondition.isEmpty()) {
+            return TextErrors.invalidRequest();
+        }
+        return switch (service.putDetails(skuId, body, precondition.get())) {
+            case PutResult.Created created -> withEtag(ResponseEntity.status(HttpStatus.CREATED), created.item());
+            case PutResult.Replaced replaced -> withEtag(ResponseEntity.ok(), replaced.item());
+            case PutResult.PreconditionFailed _ -> TextErrors.detailsChanged();
+            case PutResult.InvalidRequest _ -> TextErrors.invalidRequest();
         };
     }
 
