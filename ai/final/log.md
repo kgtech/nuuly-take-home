@@ -46,3 +46,4 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T19:49:08Z [service] PR #109 round-1 fixes applied in wt-p5 (parsePut: malformed If-Match wins; PUT-specific 201 ETag description); waiting for test agent's rows, then build + regenerate openapi/schema.
 - 2026-09-29T19:50:47Z [service] PR #109 round-1 fixes committed d92a6f4 (build green, check:api clean); round-2 review requested from aaf992392eb82be7d. PR6 (FE) waits on #109 merge.
 - 2026-09-29T19:52:44Z [service] PR #109 (details PUT) round-2 review clean (no blocker/regression); gate --e2e green; merged; #98 closed. NIT import order left.
+- 2026-09-29T19:54:29Z [frontend] PR6 branch merged with final (first attempt committed conflict markers locally by mistake: caught by the build, redone by resolving all conflicts to final's version; only frontend files differ from final), gate --e2e green, PR opened. Lesson: check for conflict markers before committing a merge.
