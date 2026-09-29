@@ -123,7 +123,9 @@ class RequestGuardTomcatIntegrationTest {
         String chunked = Integer.toHexString(body.length()) + "\r\n" + body + "\r\n0\r\n\r\n";
         String head = requestLine + " HTTP/1.1\r\n" + header(HOST, "localhost") + header(CONNECTION, "close")
                 + header(CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                + header(TRANSFER_ENCODING, "chunked") + header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+                + header(TRANSFER_ENCODING, "chunked")
+                // the /v2 routes take a key; the unversioned POST rejects the header (H3)
+                + (requestLine.contains(" /v2/") ? header(IDEMPOTENCY_KEY, UUID.randomUUID().toString()) : "");
         java.util.Map<String, Long> before = Tables.counts(jdbc);
 
         RawHttp.Response response = RawHttp.send(port, head, chunked);

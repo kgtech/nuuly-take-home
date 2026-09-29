@@ -36,8 +36,8 @@ class DurabilityAcrossServiceInstancesTest {
 
     @Test
     void aFreshInstanceReportsTheAcknowledgedStock() {
-        assertThat(service.add("durable", 10, null)).isEqualTo(new StockOutcome.Ok(10));
-        assertThat(service.purchase("durable", 3, null)).isEqualTo(new StockOutcome.Ok(7));
+        assertThat(service.add("durable", 10)).isEqualTo(new StockOutcome.Ok(10));
+        assertThat(service.purchase("durable", 3)).isEqualTo(new StockOutcome.Ok(7));
         assertThat(service.find("durable")).contains(new InventoryItem("durable", 7));
 
         // A real second instance: the full application on its own random port, configured by connection properties
@@ -51,7 +51,7 @@ class DurabilityAcrossServiceInstancesTest {
             JdbcClient secondJdbc = fresh.getBean(JdbcClient.class);
 
             assertThat(second.find("durable")).contains(new InventoryItem("durable", 7));
-            assertThat(second.list(null, null).items()).containsExactly(new InventoryItem("durable", 7));
+            assertThat(second.list(null).items()).containsExactly(new InventoryItem("durable", 7));
             assertThat(Invariants.balanceMismatches(secondJdbc)).isEmpty();
             assertThat(secondJdbc.sql("SELECT count(*) FROM inventory_ledger WHERE sku_id = 'durable'")
                     .query(Long.class).single()).isEqualTo(2);

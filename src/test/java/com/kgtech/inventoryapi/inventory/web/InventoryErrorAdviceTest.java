@@ -81,9 +81,9 @@ class InventoryErrorAdviceTest {
         void failWith(InventoryService service, RuntimeException failure) {
             switch (this) {
                 case GET_ITEM -> when(service.find(anyString())).thenThrow(failure);
-                case LIST -> when(service.list(any(), any())).thenThrow(failure);
-                case CREATE -> when(service.add(anyString(), anyInt(), any())).thenThrow(failure);
-                case PURCHASE -> when(service.purchase(anyString(), anyInt(), any())).thenThrow(failure);
+                case LIST -> when(service.list(any())).thenThrow(failure);
+                case CREATE -> when(service.add(anyString(), anyInt())).thenThrow(failure);
+                case PURCHASE -> when(service.purchase(anyString(), anyInt())).thenThrow(failure);
             }
         }
     }

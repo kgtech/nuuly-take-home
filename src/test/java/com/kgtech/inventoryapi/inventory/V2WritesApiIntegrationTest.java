@@ -27,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,8 +44,9 @@ import com.kgtech.inventoryapi.inventory.V2Writes.Reply;
  * /v2/inventory/{skuId}/purchase against Postgres. Both require an Idempotency-Key; the order is body, key, skuId,
  * claim and write (A34); the answer is a SkuItem; a key replays its stored status, Content-Type and body byte for byte,
  * and is 400 for another operation, skuId or quantity, after 24h, when its response was cleared, or when an
- * unversioned request stored it. The same chain under concurrency is V2IdempotencyConcurrencyTest's. Not
- * @Transactional; the "recorded" invariant is checked after every test.
+ * unversioned request stored it. The keyed matrix of build v2's unversioned POSTs lives here now (F-07); the
+ * unversioned side only rejects the header (UnversionedIdempotencyIntegrationTest). The same chain under concurrency
+ * is V2IdempotencyConcurrencyTest's. Not @Transactional; the "recorded" invariant is checked after every test.
  */
 @IntegrationTest
 @AutoConfigureMockMvc
@@ -58,13 +60,21 @@ class V2WritesApiIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    JdbcTemplate jdbcTemplate;
+
+    private LedgerFaultTrigger fault;
+
     @BeforeEach
     void clean() {
+        fault = new LedgerFaultTrigger(jdbcTemplate);
+        fault.drop(); // in case an earlier run was killed before its @AfterEach
         Tables.reset(jdbc);
     }
 
     @AfterEach
     void balancesMatchTheLedger() {
+        fault.drop();
         assertThat(Invariants.balanceMismatches(jdbc)).as("sku.quantity equals the ledger SUM").isEmpty();
     }
 
@@ -145,6 +155,7 @@ class V2WritesApiIntegrationTest {
         assertThat(count("SELECT count(*) FROM idempotency_keys WHERE idempotency_key = ?::uuid AND operation = 'add' "
                 + "AND sku_id = 'A-1' AND status = 200 AND content_type LIKE 'application/json%' AND body = ?",
                 key, first.body())).isEqualTo(1);
+        assertThat(storedHash(key)).as("H10: /v2 stores the versioned hash").isEqualTo(V2Writes.v2Hash(Op.ADD, "A-1", 5));
     }
 
     @Test
@@ -454,7 +465,7 @@ class V2WritesApiIntegrationTest {
     void aKeyStoredByAnUnversionedRequestNeverReplaysOnV2(Op op) throws Exception {
         Tables.seed(jdbc, "widget", 10);
         String key = newKey();
-        // A row exactly as the unversioned POST stores it (same key, operation, skuId, quantity; old-form hash).
+        // A row as build v2's unversioned POST stored it (the unversioned POSTs reject keys now, but old rows stay).
         jdbc.sql("INSERT INTO idempotency_keys (idempotency_key, operation, sku_id, request_hash, status, "
                 + "content_type, body) VALUES (?::uuid, ?, 'widget', ?, 200, 'application/json', "
                 + "'{\"skuId\":\"widget\",\"quantity\":11}')")
@@ -467,25 +478,6 @@ class V2WritesApiIntegrationTest {
         assertThat(quantity("widget")).isEqualTo(10);
     }
 
-    /** The two versions never share a key in either direction, and /v2 stores the versioned hash (H10). */
-    @Test
-    void aKeyIsNeverSharedBetweenTheVersions() throws Exception {
-        Tables.seed(jdbc, "widget", 10);
-        String unversionedKey = newKey();
-        assertThat(send(post("/inventory/{skuId}", "widget").accept(APPLICATION_JSON).contentType(APPLICATION_JSON)
-                .content(quantityJson(5)).header(IDEMPOTENCY_KEY, unversionedKey)).status()).isEqualTo(200);
-        String v2Key = newKey();
-        assertThat(itemQuantity(send(Op.ADD, "widget", 5, v2Key), "widget")).isEqualTo(20);
-
-        assertText(send(Op.ADD, "widget", 5, unversionedKey), 400, INVALID_REQUEST);
-        assertText(send(post("/inventory/{skuId}", "widget").accept(APPLICATION_JSON).contentType(APPLICATION_JSON)
-                .content(quantityJson(5)).header(IDEMPOTENCY_KEY, v2Key)), 400, INVALID_REQUEST);
-
-        assertThat(quantity("widget")).isEqualTo(20);
-        assertThat(storedHash(v2Key)).isEqualTo(V2Writes.v2Hash(Op.ADD, "widget", 5));
-        assertThat(storedHash(unversionedKey)).isEqualTo(V2Writes.unversionedHash(Op.ADD, "widget", 5));
-    }
-
     @Test
     void thePurchaseStoresTheVersionedHash() throws Exception {
         Tables.seed(jdbc, "widget", 5);
@@ -494,6 +486,52 @@ class V2WritesApiIntegrationTest {
         assertThat(send(Op.PURCHASE, "widget", 2, key).status()).isEqualTo(200);
 
         assertThat(storedHash(key)).isEqualTo(V2Writes.v2Hash(Op.PURCHASE, "widget", 2));
+    }
+
+    // ---- ported from build v2's unversioned keyed matrix (F-07) ----
+
+    /** R1, U1: an overflow 400 is stored against the key and replays after the state changes. */
+    @Test
+    void anOverflowIsStoredAndReplaysAsStored() throws Exception {
+        Tables.seed(jdbc, "big", Long.MAX_VALUE - 5); // the API can't reach the limit (S11)
+        String key = newKey();
+        Reply first = send(Op.ADD, "big", 10, key);
+        assertText(first, 400, INVALID_REQUEST);
+        assertThat(itemQuantity(send(Op.PURCHASE, "big", 100, newKey()), "big")).isEqualTo(Long.MAX_VALUE - 105);
+
+        assertThat(send(Op.ADD, "big", 10, key)).isEqualTo(first);
+
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = 'big' AND reason = 'add'")).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM idempotency_keys WHERE idempotency_key = ?::uuid AND status = 400 "
+                + "AND content_type LIKE 'text/plain%' AND body = 'Invalid request'", key)).isEqualTo(1);
+    }
+
+    /** S3: the key is a uuid, so an upper-case form of a used key replays it. */
+    @Test
+    void anUpperCaseKeyReplaysTheLowerCaseKey() throws Exception {
+        String key = newKey();
+        Reply first = send(Op.ADD, "widget", 5, key);
+        assertThat(itemQuantity(first, "widget")).isEqualTo(5);
+
+        assertThat(send(Op.ADD, "widget", 5, key.toUpperCase())).isEqualTo(first);
+
+        assertThat(ledgerRows("widget")).isEqualTo(1);
+        assertThat(keyRows()).isEqualTo(1);
+    }
+
+    /** A 500 rolls back the claim: nothing is stored and the key stays usable. */
+    @Test
+    void aWriteFailureStoresNothingAndTheKeyStaysUsable() throws Exception {
+        fault.failOnInsert("widget", 1, "P0001");
+        String key = newKey();
+
+        assertText(send(Op.ADD, "widget", 5, key), 500, "Internal server error");
+        assertThat(fault.attempts()).isEqualTo(1);
+        assertThat(Tables.counts(jdbc).values()).containsOnly(0L);
+
+        assertThat(itemQuantity(send(Op.ADD, "widget", 5, key), "widget")).isEqualTo(5);
+        assertThat(keyRows()).isEqualTo(1);
+        assertThat(ledgerRows("widget")).isEqualTo(1);
     }
 
     private byte[] storedHash(String key) {

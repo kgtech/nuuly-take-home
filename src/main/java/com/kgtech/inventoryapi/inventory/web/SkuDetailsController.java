@@ -5,7 +5,6 @@ import static com.kgtech.inventoryapi.inventory.InventoryService.MAX_LIMIT;
 import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
 import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.PUT_CREATED_ETAG_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.DETAILS_PATH;
@@ -29,6 +28,7 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.TAG_V2;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_ADD_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_ADD_OK_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_ADD_SUMMARY;
+import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_AFTER_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_BASE_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_GET_OK_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_GET_SUMMARY;
@@ -76,10 +76,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.kgtech.inventoryapi.inventory.DetailsPrecondition;
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 import com.kgtech.inventoryapi.inventory.PutResult;
 import com.kgtech.inventoryapi.inventory.SkuDetails;
@@ -210,31 +208,18 @@ class SkuDetailsController {
                     schema = @Schema(type = "integer", minimum = "1", maximum = "" + MAX_LIMIT,
                             defaultValue = "" + DEFAULT_LIMIT))
             @RequestParam(name = LIMIT, required = false) String limit,
-            @Parameter(description = AFTER_DESCRIPTION,
+            @Parameter(description = V2_AFTER_DESCRIPTION,
                     schema = @Schema(type = "string"))
             @RequestParam(name = AFTER, required = false) String after,
             HttpServletRequest request) {
-        String[] afters = request.getParameterValues(AFTER);
-        if (afters != null && afters.length > 1) {
+        if (Paging.afterRepeated(request)) {
             return TextErrors.invalidRequest(); // Z3
         }
         SkuPage page = service.listSkus(limit, after);
         return page.next()
-                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next))
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, Paging.nextLink(V2_BASE_PATH, next.limit(), next.after()))
                         .header(CACHE_CONTROL, NO_STORE).body(page.items()))
                 .orElseGet(() -> ResponseEntity.ok().header(CACHE_CONTROL, NO_STORE).body(page.items()));
-    }
-
-    /** C2 for v2: the Link is built from the request's origin plus the routed base path. */
-    private static String nextLink(Next next) {
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path(V2_BASE_PATH)
-                .queryParam(LIMIT, next.limit())
-                .queryParam(AFTER, "{after}")
-                .encode()
-                .buildAndExpand(next.after())
-                .toUriString();
-        return "<" + url + ">; rel=\"next\"";
     }
 
     /** The ETag is a details validator for If-Match, not a cache key for the count: no store, no 304 (§8). */

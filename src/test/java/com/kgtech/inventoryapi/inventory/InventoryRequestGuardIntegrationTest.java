@@ -86,10 +86,14 @@ class InventoryRequestGuardIntegrationTest {
         return write(HttpMethod.POST, path, "{\"quantity\":1}", accept);
     }
 
-    /** A well-formed write with a valid Idempotency-Key. The path is a URI, so %3B reaches the guard undecoded. */
+    /**
+     * A well-formed write, with a valid Idempotency-Key on the /v2 routes only: the unversioned POSTs reject the header
+     * (H3). The path is a URI, so %3B reaches the guard undecoded.
+     */
     private static MockHttpServletRequestBuilder write(HttpMethod method, String path, String body, String accept) {
-        return request(method, URI.create(path)).contentType(APPLICATION_JSON).header(HttpHeaders.ACCEPT, accept)
-                .content(body).header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+        MockHttpServletRequestBuilder request = request(method, URI.create(path)).contentType(APPLICATION_JSON)
+                .header(HttpHeaders.ACCEPT, accept).content(body);
+        return path.startsWith("/v2") ? request.header(IDEMPOTENCY_KEY, UUID.randomUUID().toString()) : request;
     }
 
     private static MockHttpServletRequestBuilder write(Route route, String path, String accept) {

@@ -83,13 +83,9 @@ class SkuDetailsApiIntegrationTest {
         return send(get("/v2/inventory/{skuId}", skuId).accept(APPLICATION_JSON));
     }
 
-    private Reply addV1(String skuId, int quantity, String key) throws Exception {
-        MockHttpServletRequestBuilder request = post("/inventory/{skuId}", skuId).accept(APPLICATION_JSON)
-                .contentType(APPLICATION_JSON).content("{\"quantity\":" + quantity + "}");
-        if (key != null) {
-            request.header(IDEMPOTENCY_KEY, key);
-        }
-        return send(request);
+    private Reply addV1(String skuId, int quantity) throws Exception {
+        return send(post("/inventory/{skuId}", skuId).accept(APPLICATION_JSON).contentType(APPLICATION_JSON)
+                .content("{\"quantity\":" + quantity + "}"));
     }
 
     private static void assertText(Reply reply, int status, String body) {
@@ -193,7 +189,7 @@ class SkuDetailsApiIntegrationTest {
     @Test
     void getV2ReturnsTheItemWithDetailsAndEtag() throws Exception {
         withDetails("G-1", 3);
-        assertThat(addV1("G-1", 2, null).status()).isEqualTo(200);
+        assertThat(addV1("G-1", 2).status()).isEqualTo(200);
 
         Reply reply = getV2("G-1");
 

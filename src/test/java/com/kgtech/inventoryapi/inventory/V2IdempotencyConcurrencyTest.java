@@ -171,6 +171,21 @@ class V2IdempotencyConcurrencyTest {
         assertThat(keyRows()).as("every business outcome is stored").isEqualTo(THREADS);
     }
 
+    /** R2, W2: distinct fresh keys each add once; every add sees a distinct running total. */
+    @Test
+    void distinctKeysEachAddOnce() throws Exception {
+        String sku = newSku("v2-adds");
+
+        List<Reply> replies = Concurrently.run(THREADS, () -> send(Op.ADD, sku, 1, newKey()));
+
+        assertThat(replies).extracting(Reply::status).as("never a 500").containsOnly(200);
+        assertThat(replies.stream().map(reply -> itemQuantity(reply, sku)).toList())
+                .containsExactlyInAnyOrder(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L);
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(THREADS);
+        assertThat(count("SELECT quantity FROM sku WHERE sku_id = ?", sku)).isEqualTo(THREADS);
+        assertThat(keyRows()).isEqualTo(THREADS);
+    }
+
     /**
      * Invariant 1 across versions: half the threads purchase through the unversioned route (no key), half through
      * /v2 (a distinct key each), for stock M < N; in total exactly M succeed and stock ends at 0.

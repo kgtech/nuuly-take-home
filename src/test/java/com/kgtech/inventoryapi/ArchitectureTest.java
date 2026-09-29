@@ -5,15 +5,25 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyP
 import static com.tngtech.archunit.lang.conditions.ArchConditions.callMethodWhere;
 import static com.tngtech.archunit.lang.conditions.ArchPredicates.are;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import com.tngtech.archunit.core.domain.JavaAccess;
 import com.tngtech.archunit.core.domain.JavaCall;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaFieldAccess;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 
@@ -36,6 +46,14 @@ class ArchitectureTest {
     private static final Set<String> RAW_PATH_ALLOW_LIST = Set.of(
             ROOT + ".inventory.web.RoutedPath",
             ROOT + ".inventory.web.InventoryErrorAdvice");
+
+    private static final String IDEMPOTENCY_PACKAGE = ROOT + ".idempotency";
+    private static final String INVENTORY_SERVICE = ROOT + ".inventory.InventoryService";
+    /** Package-private, so named by string: the unversioned (spec) controller and the /v2 controller. */
+    private static final String UNVERSIONED_CONTROLLER = ROOT + ".inventory.web.InventoryController";
+    private static final String V2_CONTROLLER = ROOT + ".inventory.web.SkuDetailsController";
+    /** The service methods behind the spec's four operations; the keyed /v2 ones end in V2 (F-07). */
+    private static final Set<String> UNVERSIONED_SERVICE_METHODS = Set.of("add", "purchase", "find", "list");
 
     private static JavaClasses main;
     private static JavaClasses tests;
@@ -89,5 +107,85 @@ class ArchitectureTest {
                         "org.springframework.data..", "org.hibernate.."))
                 .as("no main class depends on jakarta.persistence, org.springframework.data or org.hibernate")
                 .check(main);
+    }
+
+    /** L31, OD-4: the unversioned controller knows no idempotency type, so it can't read, replay or store a key. */
+    @Test
+    void unversionedControllerDoesNotDependOnTheIdempotencyPackage() {
+        noClasses().that().haveFullyQualifiedName(UNVERSIONED_CONTROLLER)
+                .should().dependOnClassesThat(resideInAnyPackage(IDEMPOTENCY_PACKAGE + ".."))
+                .as("the unversioned InventoryController depends on no class in " + IDEMPOTENCY_PACKAGE)
+                .check(main);
+    }
+
+    /** L31: the unversioned controller calls only the service methods of the spec's operations, never a keyed one. */
+    @Test
+    void unversionedControllerCallsOnlyTheUnversionedServiceMethods() {
+        noClasses().that().haveFullyQualifiedName(UNVERSIONED_CONTROLLER)
+                .should(callMethodWhere(describe("an InventoryService method that is not add, purchase, find or list "
+                        + "(the keyed /v2 methods end in V2)", (JavaCall<?> call) ->
+                        call.getTargetOwner().getName().equals(INVENTORY_SERVICE)
+                                && !UNVERSIONED_SERVICE_METHODS.contains(call.getName()))))
+                .as("the unversioned InventoryController calls InventoryService.add, purchase, find and list only")
+                .check(main);
+    }
+
+    /** L31: the /v2 controller never calls the unversioned add, purchase, find or list. */
+    @Test
+    void v2ControllerDoesNotCallTheUnversionedServiceMethods() {
+        noClasses().that().haveFullyQualifiedName(V2_CONTROLLER)
+                .should(callMethodWhere(describe("an unversioned InventoryService method", (JavaCall<?> call) ->
+                        call.getTargetOwner().getName().equals(INVENTORY_SERVICE)
+                                && UNVERSIONED_SERVICE_METHODS.contains(call.getName()))))
+                .as("SkuDetailsController calls no unversioned InventoryService method")
+                .check(main);
+    }
+
+    /**
+     * L31, invariant 5: the service methods behind the spec's operations, and every method of the service they call,
+     * reach no type of the idempotency package. The keyed writes are addV2 and purchaseV2.
+     */
+    @Test
+    void unversionedServiceMethodsReachNoIdempotencyType() {
+        JavaClass service = main.get(INVENTORY_SERVICE);
+        Deque<JavaMethod> todo = new ArrayDeque<>();
+        service.getMethods().stream().filter(method -> isUnversioned(method.getName())).forEach(todo::add);
+        assertThat(todo).as("the unversioned add, purchase, find and list are found").isNotEmpty();
+        Set<JavaMethod> seen = new HashSet<>();
+        List<String> violations = new ArrayList<>();
+        while (!todo.isEmpty()) {
+            JavaMethod method = todo.poll();
+            if (!seen.add(method)) {
+                continue;
+            }
+            method.getRawParameterTypes().forEach(type -> flagIdempotency(method, type, violations));
+            flagIdempotency(method, method.getRawReturnType(), violations);
+            for (JavaAccess<?> access : method.getAccessesFromSelf()) {
+                flagIdempotency(method, access.getTargetOwner(), violations);
+                if (access instanceof JavaFieldAccess field) {
+                    flagIdempotency(method, field.getTarget().getRawType(), violations);
+                }
+                if (access instanceof JavaCall<?> call && access.getTargetOwner().equals(service)) {
+                    call.getTarget().resolveMember().filter(JavaMethod.class::isInstance).map(JavaMethod.class::cast)
+                            .ifPresent(todo::add);
+                }
+            }
+        }
+        assertThat(violations).as("unversioned service methods reaching the idempotency package").isEmpty();
+    }
+
+    /** add, purchase, find, list and the synthetic lambda$add$0-style methods compiled from their lambdas. */
+    private static boolean isUnversioned(String methodName) {
+        if (UNVERSIONED_SERVICE_METHODS.contains(methodName)) {
+            return true;
+        }
+        String[] parts = methodName.split("\\$");
+        return parts.length == 3 && parts[0].equals("lambda") && UNVERSIONED_SERVICE_METHODS.contains(parts[1]);
+    }
+
+    private static void flagIdempotency(JavaMethod method, JavaClass type, List<String> violations) {
+        if (type.getPackageName().startsWith(IDEMPOTENCY_PACKAGE)) {
+            violations.add(method.getFullName() + " -> " + type.getName());
+        }
     }
 }

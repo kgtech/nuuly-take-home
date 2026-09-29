@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * List all inventory
-         * @description Returns SKUs sorted by skuId, at most 250 per response. When more SKUs follow, the Link header holds the next page's URL; follow it until a response has no Link to list all inventory. If no SKUs exist, returns an empty array.
+         * @description Returns SKUs sorted by skuId, at most 250 per response. When more SKUs follow, the Link header holds the next page's URL (it carries the after cursor); follow it until a response has no Link to list all inventory. If no SKUs exist, returns an empty array.
          */
         get: operations["listInventory"];
         put?: never;
@@ -190,9 +190,7 @@ export interface operations {
     listInventory: {
         parameters: {
             query?: {
-                /** @description Optional page size, 1 to 250 (default 250). Larger values mean 250; other values are ignored and the default applies. */
-                limit?: number;
-                /** @description Optional cursor: return only SKUs whose skuId sorts after this value, up to the page size. It must not be repeated. */
+                /** @description Optional exclusive cursor: return only SKUs whose skuId sorts after this value, up to 250. It must not be repeated. */
                 after?: string;
             };
             header?: never;
@@ -201,7 +199,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One page of inventory items, at most 250, sorted by skuId */
+            /** @description One page of inventory items, at most 250, sorted by skuId; the Link header points to the next page after the last skuId */
             200: {
                 headers: {
                     /** @description Next page, when more SKUs follow: <URL>; rel="next" */
@@ -258,10 +256,7 @@ export interface operations {
     createInventory: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400. */
-                "Idempotency-Key"?: string;
-            };
+            header?: never;
             path: {
                 /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
                 skuId: string;
@@ -297,10 +292,7 @@ export interface operations {
     purchaseItem: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400. */
-                "Idempotency-Key"?: string;
-            };
+            header?: never;
             path: {
                 /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
                 skuId: string;
@@ -347,7 +339,7 @@ export interface operations {
             query?: {
                 /** @description Optional page size, 1 to 250 (default 250). Larger values mean 250; other values are ignored and the default applies. */
                 limit?: number;
-                /** @description Optional cursor: return only SKUs whose skuId sorts after this value, up to the page size. It must not be repeated. */
+                /** @description Optional exclusive cursor: return only SKUs whose skuId sorts after this value, up to the page size. It must not be repeated. */
                 after?: string;
             };
             header?: never;
