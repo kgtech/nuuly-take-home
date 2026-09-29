@@ -111,7 +111,7 @@ Everything not listed here still applies. IDs from `DECISIONS.md` / `CLAUDE.md`;
 | U3, S2, S3 | The key format and the skuId are checked once each, in the service, in that order, before the claim (§10, A34); the advice's copy of the skuId check is gone. |
 | R2 (40001 clause) | A concurrent claim blocks on the unique index instead of raising 40001; after the first commits, the second replays. |
 | D8, S4 (compose content) | compose.yaml runs Postgres **and Redis**; the app depends on both. Reverted by §9: compose runs Postgres alone, as on `main`. |
-| D10 | Package layout gains `cache/` (Redis) beside `inventory/` and `idempotency/`. Reverted by §9: `inventory/` and `idempotency/` only. |
+| D10 | Package layout gains `cache/` (Redis) beside `inventory/` and `idempotency/`. Reverted by §9: `inventory/` and `idempotency/` only. Then `web/` gains the app-wide HTTP classes (error advice, `TextErrors`, Tomcat valve and container settings, Jackson and OpenAPI configuration), moved out of `inventory/web/`, which keeps the feature's package-private endpoints and filters (A37); ArchUnit guards the layout (A39). |
 | Issues #24 AC3, #26 AC1–3, #29, #30 (test-suite items written against `main`'s tests) | Their intent is met by construction in V2 (one shared container per store, no SUM query plan to EXPLAIN, no SSI conflicts); the V2 issues restate them for V2's tests. |
 | L-26 (retry lesson content), L-33 (cross-SKU SSI) | No longer apply without SERIALIZABLE; the cross-SKU concurrency test is kept as a regression guard. |
 
