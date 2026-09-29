@@ -17,18 +17,16 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * S11, D9, W2 (owner decision OQ2): concurrent stock writes through the service; the HTTP versions come in #4.
  * Not @Transactional: every thread commits its own SERIALIZABLE transaction. Tables are emptied before each test.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class InventoryConcurrencyTest {
 
     /** W2 caps concurrency tests at 8 threads per SKU. */
@@ -43,8 +41,7 @@ class InventoryConcurrencyTest {
     @BeforeEach
     void cleanTables() {
         // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.update("DELETE FROM inventory_ledger");
-        jdbc.update("DELETE FROM sku");
+        Tables.reset(jdbc);
     }
 
     private static String newSku(String prefix) {

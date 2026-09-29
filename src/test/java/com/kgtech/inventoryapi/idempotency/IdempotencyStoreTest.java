@@ -11,22 +11,20 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * R2, G14, S8, T1, Y4: claim, replay, mismatch and expiry against Postgres, with {@code execute} run inside a
  * SERIALIZABLE TransactionTemplate as the @Idempotent interceptor runs it (X1, Z1). Not @Transactional: each call
  * commits.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class IdempotencyStoreTest {
 
     private static final StoredResponse OK = new StoredResponse(200, "application/json",
@@ -47,7 +45,7 @@ class IdempotencyStoreTest {
     @BeforeEach
     void setUp() {
         // test-only delete; the application never purges keys (R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
+        Tables.reset(jdbc);
         serializable = new TransactionTemplate(transactionManager);
         serializable.setIsolationLevel(TransactionDefinition.ISOLATION_SERIALIZABLE);
         actionRuns.set(0);

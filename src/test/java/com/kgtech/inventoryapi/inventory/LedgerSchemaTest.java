@@ -13,16 +13,13 @@ import java.util.UUID;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 
 /** AC2 and the V1 schema shape, executed against Postgres (S11). */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class LedgerSchemaTest {
 
     private static final String CHECK_VIOLATION = "23514";

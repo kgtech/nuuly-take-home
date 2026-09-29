@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.BiFunction;
@@ -18,25 +17,23 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * AC6–AC8, W2, X1, Y2: real Postgres errors raised by {@link LedgerFaultTrigger} go through the driver, Spring's
- * translation and the @Retryable interceptor. Not @Transactional; seed rows are committed before the trigger is
- * installed, and trigger, function, sequences and rows are removed afterwards.
+ * translation and the @Retryable interceptor. Not @Transactional; the tables are emptied before each test, seed rows
+ * are committed before the trigger is installed, and trigger, function and sequences are removed afterwards.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 @ExtendWith(OutputCaptureExtension.class)
 class StockWriteRetryTest {
 
@@ -72,26 +69,21 @@ class StockWriteRetryTest {
     JdbcTemplate jdbcTemplate;
 
     private LedgerFaultTrigger fault;
-    private final List<String> skus = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
         fault = new LedgerFaultTrigger(jdbcTemplate);
         fault.drop(); // in case an earlier run was killed before its @AfterEach
+        Tables.reset(jdbc);
     }
 
     @AfterEach
-    void cleanUp() {
+    void dropTrigger() {
         fault.drop();
-        for (String sku : skus) {
-            jdbc.sql("DELETE FROM inventory_ledger WHERE sku_id = ?").param(sku).update();
-            jdbc.sql("DELETE FROM sku WHERE sku_id = ?").param(sku).update();
-        }
     }
 
     private String newSku(String prefix, long seed) {
         String sku = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
-        skus.add(sku);
         if (seed > 0) {
             jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(sku).update();
             jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, ?, 'add')")

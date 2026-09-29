@@ -3,8 +3,6 @@ package com.kgtech.inventoryapi.inventory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -15,10 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -26,16 +22,16 @@ import org.springframework.resilience.retry.MethodRetryEvent;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * Issue #15 (R3-2), W2, S2, S3, S8: requests rejected before or at the idempotency claim return an outcome and never
  * throw, so no MethodRetryEvent is published and StockWriteFailureLogger logs nothing. Regression guard; the
  * positive controls force a non-retryable 55P03 so the recorded events and the log capture are shown to work. Not
- * {@code @Transactional}; rows and the fault trigger are removed afterwards.
+ * {@code @Transactional}; the tables are emptied before each test and the fault trigger is removed afterwards.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 @ExtendWith(OutputCaptureExtension.class)
 @RecordApplicationEvents
 class StockWriteRejectionEventsTest {
@@ -56,37 +52,25 @@ class StockWriteRejectionEventsTest {
     JdbcTemplate jdbcTemplate;
 
     private LedgerFaultTrigger fault;
-    private final List<String> skus = new ArrayList<>();
-    private final List<String> keys = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
         fault = new LedgerFaultTrigger(jdbcTemplate);
         fault.drop(); // in case an earlier run was killed before its @AfterEach
+        Tables.reset(jdbc);
     }
 
     @AfterEach
-    void cleanUp() {
+    void dropTrigger() {
         fault.drop();
-        for (String key : keys) {
-            jdbc.sql("DELETE FROM idempotency_keys WHERE idempotency_key = ?::uuid").param(key).update();
-        }
-        for (String sku : skus) {
-            jdbc.sql("DELETE FROM inventory_ledger WHERE sku_id = ?").param(sku).update();
-            jdbc.sql("DELETE FROM sku WHERE sku_id = ?").param(sku).update();
-        }
     }
 
-    private String newSku(String prefix) {
-        String sku = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
-        skus.add(sku);
-        return sku;
+    private static String newSku(String prefix) {
+        return prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
-    private String newKey() {
-        String key = UUID.randomUUID().toString();
-        keys.add(key);
-        return key;
+    private static String newKey() {
+        return UUID.randomUUID().toString();
     }
 
     private void assertNoRetryEventAndNoFailureLog(CapturedOutput output) {

@@ -9,15 +9,12 @@ import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationState;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 
 /** AC1: context loads against Testcontainers Postgres, Flyway applied, Hibernate validation on. */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class InventoryApplicationTests {
 
     @Autowired

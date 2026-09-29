@@ -20,10 +20,8 @@ import org.springframework.aop.Advisor;
 import org.springframework.aop.framework.Advised;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -33,16 +31,16 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * Z1, X1, W2 wiring in the real context: the InventoryService proxy's advisors run [Retry, Idempotency, Tx], a
  * keyed 40001 retries the claim in a new transaction, and the store is reached only with a key. The store is a spy
  * on the real bean; requests go through MockMvc against Postgres. Not @Transactional; tables are emptied first.
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
 class IdempotencyWiringTest {
 
     @Autowired
@@ -60,9 +58,7 @@ class IdempotencyWiringTest {
     @BeforeEach
     void cleanTables() {
         // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
     }
 
     private MockHttpServletResponse create(String skuId, int quantity, String key) throws Exception {

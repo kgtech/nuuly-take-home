@@ -22,10 +22,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -35,8 +35,7 @@ import tools.jackson.databind.json.JsonMapper;
  * pool, asserting the client only ever sees the spec's 200 and 400 (never a 500). Not @Transactional: every request
  * commits its own SERIALIZABLE transaction, so the tables are emptied before each test.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class InventoryHttpConcurrencyTest {
 
     /** W2 caps concurrency tests at 8 threads per SKU. */
@@ -58,8 +57,7 @@ class InventoryHttpConcurrencyTest {
     @BeforeEach
     void setUp() {
         // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
         http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(TIMEOUT).build();
     }
 

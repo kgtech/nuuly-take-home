@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.web;
 
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,13 +32,13 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.tomcat.TomcatWebServer;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * C1, C3, G11, S5, T3 through real Tomcat: a request Tomcat rejects before routing gets text/plain (400 "Invalid
@@ -46,8 +46,7 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
  * reaches the controller, where SkuId.isValid rejects it (GET and purchase 404, create 400). MockMvc bypasses Tomcat,
  * so every request is written to a raw socket. Not @Transactional; the tables are emptied before each test.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class TomcatRejectionIntegrationTest {
 
     private static final String SEEDED = "ABC-1";
@@ -68,9 +67,7 @@ class TomcatRejectionIntegrationTest {
     @BeforeEach
     void seed() {
         // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
         jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(SEEDED).update();
         jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
                 .param(SEEDED).update();

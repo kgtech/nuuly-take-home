@@ -10,20 +10,17 @@ import java.sql.SQLException;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 
 /**
  * Y2 at the interceptor: the ledger write is mocked to throw a PessimisticLockingFailureException, so it passes the
  * {@code includes} filter and only the SerializationFailure predicate decides. The service's real @Retryable proxy and
  * SERIALIZABLE TransactionTemplate (PROPAGATION_REQUIRED, no Idempotency-Key) run. Not @Transactional.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class StockWriteRetryFilterTest {
 
     @MockitoBean

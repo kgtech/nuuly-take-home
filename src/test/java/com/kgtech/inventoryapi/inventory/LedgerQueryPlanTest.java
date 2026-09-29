@@ -9,21 +9,18 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
 
 /**
  * AC5 / W2: the balance SUM and both write statements read inventory_ledger through inventory_ledger_sku.
  * {@code @Transactional} is allowed here only because this class never calls the service: seed rows, ANALYZE and
  * EXPLAIN all run in the test's own transaction, which rolls back.
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 @Transactional
 class LedgerQueryPlanTest {
 

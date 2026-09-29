@@ -17,9 +17,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,7 +26,8 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * Issue #6 end to end against Postgres: Idempotency-Key claim, replay, mismatch, expiry and what is never stored
@@ -36,9 +35,8 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
  * transaction, so the tables are emptied before each test. Same annotations as InventoryApiIntegrationTest so the
  * context and container are reused.
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
 class IdempotencyApiIntegrationTest {
 
     private static final String INVALID_REQUEST = "Invalid request";
@@ -75,9 +73,7 @@ class IdempotencyApiIntegrationTest {
         fault = new LedgerFaultTrigger(jdbcTemplate);
         fault.drop(); // in case an earlier run was killed before its @AfterEach
         // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
     }
 
     @AfterEach

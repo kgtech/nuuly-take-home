@@ -17,24 +17,22 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * The four spec operations end to end against Postgres (AC4, AC6, AC7, G12, Y1, NQ6). Not @Transactional: every
  * request commits its own transaction, so the tables are emptied before each test.
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
 class InventoryApiIntegrationTest {
 
     @Autowired
@@ -46,8 +44,7 @@ class InventoryApiIntegrationTest {
     @BeforeEach
     void cleanTables() {
         // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
     }
 
     private ResultActions create(String skuId, long quantity) throws Exception {
