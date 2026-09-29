@@ -132,10 +132,41 @@ public class InventoryService {
                 .orElseGet(() -> switch (precondition) {
                     // Unconditional: the only way to get no row is a missing SKU; no probe, so a create that commits
                     // between the two statements can never turn it into a 412 (review R-03).
-                    case DetailsPrecondition.Any _ -> new ReplaceResult.NotFound();
-                    case DetailsPrecondition.Versions _ -> details.exists(skuId) ? new ReplaceResult.VersionMismatch()
+                    case DetailsPrecondition.Any _, DetailsPrecondition.Exists _ -> new ReplaceResult.NotFound();
+                    case DetailsPrecondition.Versions _, DetailsPrecondition.Absent _ -> details.exists(skuId) ? new ReplaceResult.VersionMismatch()
                             : new ReplaceResult.NotFound();
                 }));
+    }
+
+    /**
+     * OD-6, OD-11: PUT /v2/inventory/{skuId}/details in one READ COMMITTED transaction; it never touches stock or the
+     * sku row's quantity. Without a condition it creates an absent SKU at quantity 0 (claim the sku row, then insert
+     * the details) or replaces the details of an existing one. Versions and Exists never create: on an absent SKU
+     * they fail (RFC 9110 §13.1.1). Absent creates only, and fails on an existing SKU (§13.1.2). A malformed skuId
+     * is 400 before any I/O.
+     */
+    public PutResult putDetails(String skuId, SkuDetails replacement, DetailsPrecondition precondition) {
+        if (!SkuId.isValid(skuId)) {
+            return new PutResult.InvalidRequest();
+        }
+        return transaction.execute(status -> switch (precondition) {
+            case DetailsPrecondition.Any _ -> details.claimSku(skuId) ? created(skuId, replacement)
+                    : replaced(skuId, details.replace(skuId, replacement, precondition));
+            case DetailsPrecondition.Absent _ -> details.claimSku(skuId) ? created(skuId, replacement)
+                    : new PutResult.PreconditionFailed();
+            case DetailsPrecondition.Exists _, DetailsPrecondition.Versions _ ->
+                    replaced(skuId, details.replace(skuId, replacement, precondition));
+        });
+    }
+
+    private PutResult created(String skuId, SkuDetails replacement) {
+        return new PutResult.Created(new SkuItem(skuId, 0, Optional.of(replacement), details.insert(skuId, replacement)));
+    }
+
+    private PutResult replaced(String skuId, Optional<Long> version) {
+        return version.<PutResult>map(v -> new PutResult.Replaced(details.find(skuId)
+                        .orElseThrow(() -> new IllegalStateException("replaced details vanished: " + skuId))))
+                .orElseGet(PutResult.PreconditionFailed::new);
     }
 
     /** DESIGN-V2 §8 "Reads": G11 first, then one join. */

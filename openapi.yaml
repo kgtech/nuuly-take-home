@@ -393,6 +393,86 @@ paths:
       summary: Replace a SKU's details
       tags:
       - inventory-v2
+  /v2/inventory/{skuId}/details:
+    put:
+      description: "Replaces the whole SkuDetails of the SKU. A SKU that does not\
+        \ exist is created with quantity 0 (201, ETag \"1\"); an existing SKU keeps\
+        \ its stock (200, new ETag). If-Match (strong ETags, or \"*\" for any existing\
+        \ SKU) and If-None-Match: * (create only) are optional preconditions; without\
+        \ one the PUT is unconditional. Any If-Match on a SKU that does not exist\
+        \ is 412. Idempotency-Key is ignored: PUT is idempotent by method."
+      operationId: putSkuDetails
+      parameters:
+      - description: "Optional strong ETag(s) from a previous response, or \"*\" for\
+          \ any existing SKU; 412 when none matches or the SKU does not exist"
+        in: header
+        name: If-Match
+        schema:
+          type: string
+      - description: "Optional; only \"*\" is supported: create only, 412 when the\
+          \ SKU already exists. Any other value is 400"
+        in: header
+        name: If-None-Match
+        schema:
+          type: string
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
+        name: skuId
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkuDetails"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkuItem"
+          description: The SKU with its replaced details
+          headers:
+            ETag:
+              description: "The details version, a strong validator for If-Match;\
+                \ \"0\" before any details"
+              schema:
+                type: string
+              style: simple
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkuItem"
+          description: The SKU was created at quantity 0 with these details
+          headers:
+            ETag:
+              description: "The details version of a new SKU, always \"1\""
+              schema:
+                type: string
+              style: simple
+        "400":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: Invalid request
+        "412":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: Details changed since you read them. Reload the SKU and retry
+            with its new ETag.
+      summary: Create a SKU or replace its details
+      tags:
+      - inventory-v2
 components:
   schemas:
     CreateSkuRequest:

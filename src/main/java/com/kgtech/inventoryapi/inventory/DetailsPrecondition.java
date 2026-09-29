@@ -5,8 +5,16 @@ import java.util.List;
 /** What a PUT of details requires of the current details version (DESIGN-V2 §8 "Edit"): nothing, or one of these. */
 public sealed interface DetailsPrecondition {
 
-    /** No If-Match, or "*": last write wins. */
+    /** No condition, or the old PUT's If-Match "*": last write wins. */
     record Any() implements DetailsPrecondition {
+    }
+
+    /** PUT details, If-Match: * (RFC 9110 §13.1.1): a current representation must exist, so the SKU must exist. */
+    record Exists() implements DetailsPrecondition {
+    }
+
+    /** PUT details, If-None-Match: * (RFC 9110 §13.1.2): the SKU must not exist yet. */
+    record Absent() implements DetailsPrecondition {
     }
 
     /** The replacement applies only when the current version is listed; an empty list never matches (412). */

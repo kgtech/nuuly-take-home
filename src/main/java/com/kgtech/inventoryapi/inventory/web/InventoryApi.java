@@ -10,6 +10,7 @@ final class InventoryApi {
     static final String BASE_PATH = "/inventory";
     static final String SKU_PATH = "/{skuId}";
     static final String PURCHASE_PATH = SKU_PATH + "/purchase";
+    static final String DETAILS_PATH = SKU_PATH + "/details";
 
     /** DESIGN-V2 §8, A21: the additive v2 paths. */
     static final String V2_BASE_PATH = "/v2/inventory";
@@ -74,6 +75,19 @@ final class InventoryApi {
             + "details";
     static final String CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\" (also on a replayed "
             + "201, even after a later PUT)";
+    static final String PUT_CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\"";
+    static final String PUT_DETAILS_SUMMARY = "Create a SKU or replace its details";
+    static final String PUT_DETAILS_DESCRIPTION = "Replaces the whole SkuDetails of the SKU. A SKU that does not exist "
+            + "is created with quantity 0 (201, ETag \"1\"); an existing SKU keeps its stock (200, new ETag). "
+            + "If-Match (strong ETags, or \"*\" for any existing SKU) and If-None-Match: * (create only) are optional "
+            + "preconditions; without one the PUT is unconditional. Any If-Match on a SKU that does not exist is 412. "
+            + "Idempotency-Key is ignored: PUT is idempotent by method.";
+    static final String PUT_DETAILS_CREATED_DESCRIPTION = "The SKU was created at quantity 0 with these details";
+    static final String PUT_DETAILS_REPLACED_DESCRIPTION = "The SKU with its replaced details";
+    static final String PUT_DETAILS_IF_MATCH_DESCRIPTION = "Optional strong ETag(s) from a previous response, or \"*\" "
+            + "for any existing SKU; 412 when none matches or the SKU does not exist";
+    static final String IF_NONE_MATCH_DESCRIPTION = "Optional; only \"*\" is supported: create only, 412 when the SKU "
+            + "already exists. Any other value is 400";
     static final String IF_MATCH_DESCRIPTION = "Optional strong ETag(s) from a previous response; \"*\" or absent "
             + "means unconditional";
 

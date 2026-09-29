@@ -83,12 +83,13 @@ class ApiDocsTest {
         Map<String, Map<String, Map<String, Object>>> paths = operations();
 
         assertThat(paths.keySet()).containsExactlyInAnyOrder("/inventory", "/inventory/{skuId}",
-                "/inventory/{skuId}/purchase", "/v2/inventory", "/v2/inventory/{skuId}");
+                "/inventory/{skuId}/purchase", "/v2/inventory", "/v2/inventory/{skuId}", "/v2/inventory/{skuId}/details");
         assertThat(paths.get("/inventory").keySet()).containsExactly("get");
         assertThat(paths.get("/inventory/{skuId}").keySet()).containsExactlyInAnyOrder("get", "post");
         assertThat(paths.get("/inventory/{skuId}/purchase").keySet()).containsExactly("post");
         assertThat(paths.get("/v2/inventory").keySet()).containsExactly("get");
         assertThat(paths.get("/v2/inventory/{skuId}").keySet()).containsExactlyInAnyOrder("get", "post", "put");
+        assertThat(paths.get("/v2/inventory/{skuId}/details").keySet()).containsExactly("put");
     }
 
     /**
@@ -150,7 +151,7 @@ class ApiDocsTest {
                 }
             }
         }
-        assertThat(checked).isEqualTo(20);
+        assertThat(checked).isEqualTo(24);
     }
 
     /** C-28 (#61): the catch-all handler must stay @Hidden, or springdoc could document a 500 on every operation. */
@@ -414,8 +415,8 @@ class ApiDocsTest {
                 }
             }
         }
-        assertThat(errors).as("error responses").isEqualTo(12);
-        assertThat(successes).as("2xx responses").isEqualTo(8);
+        assertThat(errors).as("error responses").isEqualTo(14);
+        assertThat(successes).as("2xx responses").isEqualTo(10);
     }
 
     private static void collectWildcards(Object node, String where, List<String> found) {
@@ -604,7 +605,7 @@ class ApiDocsTest {
         for (Map<String, Object> tag : (List<Map<String, Object>>) doc.getOrDefault("tags", List.of())) {
             allTags.add((String) tag.get("name"));
         }
-        assertThat(checked).as("operations").isEqualTo(8);
+        assertThat(checked).as("operations").isEqualTo(9);
         assertThat(allTags).noneMatch(tag -> tag.contains("controller"));
     }
 

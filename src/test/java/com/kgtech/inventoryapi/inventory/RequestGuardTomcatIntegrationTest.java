@@ -105,7 +105,8 @@ class RequestGuardTomcatIntegrationTest {
                 Arguments.of("POST /v2/inventory/CH-1", v2Create, 40_000, 201),
                 Arguments.of("POST /v2/inventory/CH-1", v2Create, 70_000, 400),
                 Arguments.of("PUT /v2/inventory/CH-1", DETAILS_BODY, 70_000, 400),
-                // chunked v2 purchase and details rows are added by the PRs that map those routes (details PUT PR, v2 add/purchase PR): a count-while-read cap needs a handler
+                Arguments.of("PUT /v2/inventory/CH-1/details", DETAILS_BODY, 70_000, 400),
+                // the chunked v2 purchase row is added by the v2 add/purchase PR that maps that route: a count-while-read cap needs a handler
                 // frozen, not changed (A19): an unversioned chunked body is not capped while read
                 Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, 70_000, 200));
     }
