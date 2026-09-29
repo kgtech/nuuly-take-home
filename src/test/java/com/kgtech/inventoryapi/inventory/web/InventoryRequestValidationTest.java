@@ -194,8 +194,12 @@ class InventoryRequestValidationTest {
 
     // --- G11 and S2 ---
 
+    /**
+     * Too long and a bad character: the service is a mock, so these rows check only that the raw value is passed and
+     * the outcome mapped, which is the same for every malformed skuId.
+     */
     static Stream<String> invalidSkuIds() {
-        return Stream.of("-bad", "a".repeat(65), "a!b");
+        return Stream.of("a".repeat(65), "a!b");
     }
 
     @ParameterizedTest

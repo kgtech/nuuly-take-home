@@ -114,18 +114,18 @@ class IdempotencyHeaderOrderTest {
     }
 
     static Stream<Arguments> rawKeyAndSkuIdPassedThrough() {
-        List<Arguments> cases = new ArrayList<>();
-        for (Post op : Post.values()) {
-            for (String skuId : List.of("widget", "-bad", "ABC")) {
-                for (String key : List.of(KEY, KEY.toUpperCase(), "nope", "", "1-1-1-1-1")) {
-                    cases.add(Arguments.of(op, skuId, key));
-                }
-            }
-        }
-        return cases.stream();
+        return Stream.of(
+                Arguments.of(Post.CREATE, "widget", KEY),
+                Arguments.of(Post.CREATE, "-bad", ""),
+                Arguments.of(Post.PURCHASE, "ABC", "nope"),
+                Arguments.of(Post.PURCHASE, "-bad", KEY.toUpperCase()));
     }
 
-    /** S2, S3, Z1: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. */
+    /**
+     * S2, S3, Z1: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. A
+     * valid, an empty, a non-UUID and an upper-case key, and a malformed and an upper-case skuId, spread over both
+     * POSTs, are enough: the service is a mock, so no row here validates anything.
+     */
     @ParameterizedTest(name = "{0} {1} key \"{2}\"")
     @MethodSource
     void rawKeyAndSkuIdPassedThrough(Post op, String skuId, String key) throws Exception {
@@ -166,20 +166,18 @@ class IdempotencyHeaderOrderTest {
     }
 
     static Stream<Arguments> storedResultRenderedUnchanged() {
-        List<Arguments> cases = new ArrayList<>();
-        for (Post op : Post.values()) {
-            for (StoredResponse stored : List.of(
-                    new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, "{\"skuId\":\"widget\",\"quantity\":5}"),
-                    new StoredResponse(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found"),
-                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory"),
-                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Invalid request"))) {
-                cases.add(Arguments.of(op, stored));
-            }
-        }
-        return cases.stream();
+        return Stream.of(
+                Arguments.of(Post.CREATE, new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE,
+                        "{\"skuId\":\"widget\",\"quantity\":5}")),
+                Arguments.of(Post.PURCHASE, new StoredResponse(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found")),
+                Arguments.of(Post.PURCHASE,
+                        new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory")));
     }
 
-    /** Y4: a stored response (first keyed response or replay) is sent with its status, Content-Type and body. */
+    /**
+     * Y4: a stored response (first keyed response or replay) is sent with its status, Content-Type and body. One 200,
+     * one 404 and one 400 cover the single {@code case Stored} branch; StoredResponsesTest holds the other shapes.
+     */
     @ParameterizedTest(name = "{0} {1}")
     @MethodSource
     void storedResultRenderedUnchanged(Post op, StoredResponse stored) throws Exception {

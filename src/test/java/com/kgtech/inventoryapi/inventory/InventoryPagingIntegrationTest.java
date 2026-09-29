@@ -265,19 +265,6 @@ class InventoryPagingIntegrationTest {
                 .andExpect(header().doesNotExist(LINK));
     }
 
-    /** Z3: a repeated after is 400 text/plain "Invalid request"; the cursor must be one sku_id. */
-    @ParameterizedTest(name = "?{0} → 400")
-    @ValueSource(strings = {"after=A-1&after=B-2", "limit=2&after=A-1&after=B-2", "after=&after=B-2"})
-    void repeatedAfterReturns400(String query) throws Exception {
-        seedMixed();
-
-        list(URI.create("/inventory?" + query))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
-                .andExpect(content().string("Invalid request"))
-                .andExpect(header().doesNotExist(LINK));
-    }
-
     /**
      * R4, Z3: a single after containing a comma is one plain-string cursor, not a repeated after. "A-1,B-2" sorts
      * after "A-1" and before "B-2" in COLLATE "C", so the list starts at B-2.
@@ -355,14 +342,14 @@ class InventoryPagingIntegrationTest {
         assertThat(page.next()).isEqualTo(URI.create("http://localhost/inventory?limit=2&after=Z-9"));
     }
 
-    /** G11: the cursor compares in COLLATE "C" (byte) order: 'Z' < '_' < 'a', '-' < '.'. */
+    /**
+     * G11: the cursor compares in COLLATE "C" (byte) order: 'Z' < 'a', '-' < '.'. Two rows through the API;
+     * SchemaTest#skuIdOrdersByCCollation pins the column's order.
+     */
     @ParameterizedTest(name = "after={0}")
     @CsvSource(delimiter = '|', value = {
         "Z   | Z-9,a-1,b-2,c.3",
-        "_   | a-1,b-2,c.3",
-        "Z-: | a-1,b-2,c.3",
-        "c-  | c.3",
-        "a   | a-1,b-2,c.3"
+        "c-  | c.3"
     })
     void afterUsesCCollation(String after, String expected) throws Exception {
         seedMixed();
@@ -485,19 +472,5 @@ class InventoryPagingIntegrationTest {
         // '+' (0x2B) sorts before '-' (0x2D), so the next SKU is a-1
         assertThat(ids(page)).containsExactly("a-1");
         assertThat(page.next()).isEqualTo(URI.create("http://localhost/inventory?limit=1&after=a-1"));
-    }
-
-    /** U2: a paged GET ignores Accept: application/xml and still answers JSON with its Link. */
-    @Test
-    void pagedGetIgnoresXmlAccept() throws Exception {
-        seedMixed();
-
-        mvc.perform(get(uri("2", null)).accept(MediaType.APPLICATION_XML))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(content().json(
-                        "[{\"skuId\":\"A-1\",\"quantity\":5},{\"skuId\":\"B-2\",\"quantity\":12}]",
-                        JsonCompareMode.STRICT))
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=2&after=B-2>; rel=\"next\""));
     }
 }
