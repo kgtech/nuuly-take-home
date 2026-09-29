@@ -1,11 +1,11 @@
 package com.kgtech.inventoryapi.idempotency;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
@@ -37,26 +37,19 @@ class IdempotencyKeyTest {
     @ParameterizedTest
     @MethodSource("validKeys")
     void validKeysAccepted(String key) {
-        assertThat(IdempotencyKey.isValid(key)).isTrue();
+        assertThat(IdempotencyKey.parse(key)).contains(UUID.fromString(key));
     }
 
     @ParameterizedTest
     @NullSource
     @MethodSource("invalidKeys")
     void invalidKeysRejected(String key) {
-        assertThat(IdempotencyKey.isValid(key)).isFalse();
+        assertThat(IdempotencyKey.parse(key)).isEmpty();
     }
 
-    @ParameterizedTest
-    @MethodSource("validKeys")
-    void parseReturnsSameUuidRegardlessOfCase(String key) {
-        assertThat(IdempotencyKey.parse(key)).isEqualTo(UUID.fromString(key));
-    }
-
-    @ParameterizedTest
-    @NullSource
-    @MethodSource("invalidKeys")
-    void parseRejectsInvalid(String key) {
-        assertThatThrownBy(() -> IdempotencyKey.parse(key)).isInstanceOf(IllegalArgumentException.class);
+    /** The key is a uuid: case does not matter (S3). */
+    @Test
+    void parseReturnsSameUuidRegardlessOfCase() {
+        assertThat(IdempotencyKey.parse(UUID_TEXT.toUpperCase())).contains(UUID.fromString(UUID_TEXT));
     }
 }

@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory.web;
+package com.kgtech.inventoryapi.web;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import java.util.List;

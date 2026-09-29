@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -17,6 +18,9 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import io.swagger.v3.oas.annotations.Hidden;
+import jakarta.servlet.http.HttpServletRequest;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -102,41 +106,16 @@ class ApiDocsTest {
         assertThat(responses.keySet()).containsExactlyInAnyOrder(codes.split(","));
     }
 
+    /**
+     * C-28 (#61), S6, S12: the catch-all handler stays @Hidden, so with override-with-generic-response=false springdoc
+     * documents no 500 on any operation (eachOperationListsExactlyItsSpecCodes pins each operation's codes).
+     */
     @Test
-    void errorResponsesAreTextPlainAndSuccessIsJson() throws Exception {
-        String docs = apiDocs();
-        int checked = 0;
-        for (var path : operations().entrySet()) {
-            for (String method : path.getValue().keySet()) {
-                Map<String, Object> responses =
-                        JsonPath.read(docs, "$.paths['" + path.getKey() + "']." + method + ".responses");
-                for (String code : responses.keySet()) {
-                    Map<String, Object> contentTypes = JsonPath.read(docs,
-                            "$.paths['" + path.getKey() + "']." + method + ".responses['" + code + "'].content");
-                    String where = method + " " + path.getKey() + " " + code;
-                    if (code.equals("200")) {
-                        assertThat(contentTypes.keySet()).as(where).containsExactly(MediaType.APPLICATION_JSON_VALUE);
-                    } else {
-                        assertThat(contentTypes.keySet()).as(where).containsExactly(MediaType.TEXT_PLAIN_VALUE);
-                    }
-                    checked++;
-                }
-            }
-        }
-        assertThat(checked).isEqualTo(9);
-    }
-
-    /** S6, S12: the @Hidden catch-all and override-with-generic-response=false keep 500 off the operations. */
-    @Test
-    void catchAllIsNotAddedToOperations() throws Exception {
-        String docs = apiDocs();
-        for (var path : operations().entrySet()) {
-            for (String method : path.getValue().keySet()) {
-                Map<String, Object> responses =
-                        JsonPath.read(docs, "$.paths['" + path.getKey() + "']." + method + ".responses");
-                assertThat(responses).as(method + " " + path.getKey()).doesNotContainKeys("500", "default");
-            }
-        }
+    void catchAllHandlerIsHidden() throws Exception {
+        // The advice is package-private in web (A37), so it is loaded by name.
+        Class<?> advice = Class.forName("com.kgtech.inventoryapi.web.InventoryErrorAdvice");
+        Method anyOther = advice.getDeclaredMethod("anyOther", Exception.class, HttpServletRequest.class);
+        assertThat(anyOther.isAnnotationPresent(Hidden.class)).isTrue();
     }
 
     @SuppressWarnings("unchecked")

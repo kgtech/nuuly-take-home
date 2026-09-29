@@ -7,7 +7,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.net.URI;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -43,7 +42,6 @@ class InventoryApiIntegrationTest {
 
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
         Tables.reset(jdbc);
     }
 
@@ -79,13 +77,6 @@ class InventoryApiIntegrationTest {
         result.andExpect(status().is(status))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
                 .andExpect(content().string(body));
-    }
-
-    private void seedLedger(String skuId, long delta) {
-        jdbc.sql("INSERT INTO sku (sku_id) VALUES (?) ON CONFLICT DO NOTHING").param(skuId).update();
-        jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, ?, 'add')")
-                .params(skuId, delta)
-                .update();
     }
 
     private long ledgerRows(String skuId) {
@@ -173,7 +164,7 @@ class InventoryApiIntegrationTest {
     /** G12, U1: an add past Long.MAX_VALUE is 400 "Invalid request" and inserts nothing; the exact limit is fine. */
     @Test
     void overflowReturns400AndWritesNothing() throws Exception {
-        seedLedger("big", Long.MAX_VALUE - 1); // the API can't reach the limit
+        Tables.seed(jdbc, "big", Long.MAX_VALUE - 1); // the API can't reach the limit
 
         expectText(create("big", 2), 400, "Invalid request");
         assertThat(ledgerRows("big")).isEqualTo(1);
@@ -193,40 +184,17 @@ class InventoryApiIntegrationTest {
         assertThat(skuRows("new")).isZero();
         assertThat(ledgerRows("new")).isZero();
 
-        seedLedger("stocked", 10);
+        Tables.seed(jdbc, "stocked", 10);
         expectText(mvc.perform(post("/inventory/{skuId}/purchase", "stocked").header(ACCEPT, accept)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}")), 400, "Invalid request");
         assertThat(ledgerRows("stocked")).isEqualTo(1);
         expectJson(find("stocked"), item("stocked", 10));
     }
 
-    /**
-     * AC1, G11, C3: ";" content in the skuId segment is part of the ID, so it never reaches ABC-1: create 400, purchase
-     * and GET 404, and no sku or ledger row is written. URI.create keeps the raw ";" in the request path.
-     */
-    @Test
-    void semicolonInSkuIdSegmentNeverReachesAnotherSku() throws Exception {
-        seedLedger("ABC-1", 10);
-
-        expectText(mvc.perform(post(URI.create("/inventory/ABC-1;lot=7")).accept(MediaType.APPLICATION_JSON)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}")), 400, "Invalid request");
-        expectText(mvc.perform(post(URI.create("/inventory/ABC-1;")).accept(MediaType.APPLICATION_JSON)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":1}")), 400, "Invalid request");
-        expectText(mvc.perform(post(URI.create("/inventory/ABC-1;x/purchase")).accept(MediaType.APPLICATION_JSON)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":2}")), 404, "SKU not found");
-        expectText(mvc.perform(get(URI.create("/inventory/ABC-1;x=y")).accept(MediaType.APPLICATION_JSON)),
-                404, "SKU not found");
-
-        assertThat(ledgerRows("ABC-1")).isEqualTo(1);
-        assertThat(allSkuRows()).isEqualTo(1);
-        assertThat(allLedgerRows()).isEqualTo(1);
-        expectJson(find("ABC-1"), item("ABC-1", 10));
-    }
-
     /** AC4, U2: GET ignores the Accept header. */
     @Test
     void getWithXmlAcceptReturnsJson() throws Exception {
-        seedLedger("widget", 4);
+        Tables.seed(jdbc, "widget", 4);
 
         expectJson(mvc.perform(get("/inventory/{skuId}", "widget").accept(MediaType.APPLICATION_XML)),
                 item("widget", 4));

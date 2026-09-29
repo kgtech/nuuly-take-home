@@ -15,7 +15,7 @@ repositories { mavenCentral() }
 dependencies {
     implementation(platform(SpringBootPlugin.BOM_COORDINATES)) // BOM without a second plugin or version
     implementation(libs.spring.boot.starter.webmvc)
-    implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.spring.boot.starter.jdbc) // JdbcClient and the JDBC transaction manager (E2)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.spring.boot.starter.actuator)

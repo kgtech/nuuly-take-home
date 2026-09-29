@@ -5,7 +5,6 @@ import java.util.Optional;
 
 /**
  * One page of a list (G9, C2, A38): the items in skuId order, and the cursor for the next page when there is one.
- * Stub for #87's red tests; it replaces InventoryPage in the implementation.
  */
 public record Page<T>(List<T> items, Optional<Next> next) {
 

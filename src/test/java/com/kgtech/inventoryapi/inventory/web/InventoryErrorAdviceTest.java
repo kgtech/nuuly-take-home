@@ -29,6 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -45,6 +46,7 @@ import com.kgtech.inventoryapi.inventory.InventoryService;
  * reason phrase, whatever the Accept header. Every request sends Accept: application/json unless noted.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 @ExtendWith(OutputCaptureExtension.class)
 class InventoryErrorAdviceTest {
 
@@ -157,7 +159,7 @@ class InventoryErrorAdviceTest {
         assertThat(output.getAll()).contains("java.lang.RuntimeException: boom-logged");
     }
 
-    /** PR #10 follow-up, W2: a serialization failure that escapes the retries is a plain 500. */
+    /** PR #10 follow-up, E1: a database failure, even a serialization failure, is a plain 500; nothing retries. */
     @ParameterizedTest
     @EnumSource(value = Operation.class, names = {"CREATE", "PURCHASE"})
     void serializationFailureReturns500(Operation operation) throws Exception {

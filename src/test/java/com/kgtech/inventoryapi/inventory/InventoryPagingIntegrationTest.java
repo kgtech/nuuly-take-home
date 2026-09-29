@@ -37,7 +37,7 @@ import com.kgtech.inventoryapi.Tables;
 
 /**
  * G9, R4, R8, C2, AC1–AC4 against Postgres (S11): keyset pages over the sku table in COLLATE "C" order, balances from
- * the ledger SUM, a Link on every page but the last, a lenient limit, and a default page of 250 when limit is absent
+ * the sku row (E1), a Link on every page but the last, a lenient limit, and a default page of 250 when limit is absent
  * or ignored. Not @Transactional: every request commits its own transaction, so the tables are emptied before each
  * test.
  */
@@ -58,7 +58,6 @@ class InventoryPagingIntegrationTest {
 
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
         Tables.reset(jdbc);
     }
 
@@ -80,8 +79,7 @@ class InventoryPagingIntegrationTest {
         create("a-1", 4);
         purchase("a-1", 4); // 0 stock, still listed
         create("Z-9", 1);
-        jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES ('Z-9', ?, 'add')")
-                .param(Long.MAX_VALUE - 1).update(); // the API can't reach the limit
+        Tables.seed(jdbc, "Z-9", Long.MAX_VALUE - 1); // the API can't reach the limit
         create("b-2", 5);
         create("C-3", 5);
         purchase("C-3", 2);
@@ -114,7 +112,7 @@ class InventoryPagingIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
     }
 
-    /** Seeds count SKUs p001, p002, … with no ledger rows (quantity 0); ids sort numerically in COLLATE "C". */
+    /** Seeds count bare SKU rows p001, p002, … (quantity 0, no ledger rows); ids sort numerically in COLLATE "C". */
     private void seedNumbered(int count) {
         jdbc.sql("INSERT INTO sku (sku_id) SELECT 'p' || lpad(g::text, 3, '0') FROM generate_series(1, ?) g")
                 .param(count).update();
@@ -217,7 +215,7 @@ class InventoryPagingIntegrationTest {
         assertThat(second.next()).isNull();
     }
 
-    /** AC2, D3: every page's quantities are the ledger SUM, including 0 and Long.MAX_VALUE. */
+    /** AC2, A14: every page's quantities (the sku rows) equal the ledger SUM, including 0 and Long.MAX_VALUE. */
     @Test
     void pageQuantitiesMatchLedgerSum() throws Exception {
         seedMixed();
@@ -239,9 +237,12 @@ class InventoryPagingIntegrationTest {
                 tuple("c.3", 1L));
     }
 
-    /** AC3, R4, C2: an unusable limit is ignored: 200, the default page (here every SKU), no Link. Never 400. */
+    /**
+     * AC3, R4, C2: an unusable limit is ignored: 200, the default page (here every SKU), no Link. Never 400. Zero,
+     * non-numeric and above the max here; InventoryServiceReadTest#listIgnoresUnusableLimit has the other forms.
+     */
     @ParameterizedTest
-    @ValueSource(strings = {"0", "-1", "-0", "abc", "", " ", "1.5", " 5", "5 ", "1e3", "٣"})
+    @ValueSource(strings = {"0", "abc", "99999999999999999999"})
     void lenientLimitAlwaysReturns200(String limit) throws Exception {
         seedMixed();
         String unpaged = defaultPageBody();
@@ -376,7 +377,7 @@ class InventoryPagingIntegrationTest {
 
     /**
      * C2, AC2, R4: over 250 SKUs without limit, or with a limit R4 ignores, → the first 250 and a Link with limit=250;
-     * the Link reaches the rest. InventoryServiceReadTest#listTreatsUnusableLimitAsDefault covers the other ignored
+     * the Link reaches the rest. InventoryServiceReadTest#listIgnoresUnusableLimit covers the other ignored
      * forms.
      */
     @ParameterizedTest

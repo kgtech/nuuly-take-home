@@ -1,10 +1,6 @@
 spring:
   application:
     name: inventory-api
-  jpa:
-    open-in-view: false
-    hibernate:
-      ddl-auto: validate
   jackson:
     mapper:
       allow-coercion-of-scalars: false

@@ -1,6 +1,6 @@
 # Nuuly Inventory API
 
-A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring Data JPA and PostgreSQL 18. Stock is an append-only ledger (balance = SUM of the deltas), written in SERIALIZABLE transactions with retries, so concurrent purchases never oversell.
+A REST inventory service for the Nuuly Services assessment. It receives stock by SKU, processes purchases and lists inventory. It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1), Spring's JdbcClient and PostgreSQL 18. Each SKU's stock is a row changed by a conditional `UPDATE` at READ COMMITTED, so concurrent purchases never oversell, and every change is appended to a ledger the database keeps append-only.
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ A REST inventory service for the Nuuly Services assessment. It receives stock by
 - JDK 25. The Gradle wrapper (Gradle 9.1+) downloads Gradle itself and finds the JDK 25 toolchain.
 - Docker, for Testcontainers and for `bootRun`'s Postgres.
 
-Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), springdoc-openapi 3.1.x (built with 3.1.1), Gradle 9.1+, PostgreSQL 18. Library versions are set only in `gradle/libs.versions.toml` and the Gradle version only in `gradle/wrapper/gradle-wrapper.properties`. (S10)
+Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), springdoc-openapi 3.1.x (built with 3.1.1), ArchUnit 1.5.x (built with 1.5.1, tests only), Gradle 9.1+, PostgreSQL 18. Library versions are set only in `gradle/libs.versions.toml` and the Gradle version only in `gradle/wrapper/gradle-wrapper.properties`. (S10)
 
 ## Build and run
 
@@ -94,7 +94,7 @@ done
 # 400 Invalid request                 same key, different quantity
 ```
 
-The controller passes the raw header and SKU ID to the service. An `@Idempotent` interceptor on the service's stock-write methods checks the key, then the SKU ID, and then claims the key, changes stock and stores the response in one SERIALIZABLE transaction, which is retried as a whole on a serialization failure. Without a key, the service runs the same stock write on its own. (Z1)
+The controller passes the raw header and SKU ID to the service. The service checks the key's format, then the SKU ID, and then `IdempotencyStore` claims the key, changes stock and stores the response in one READ COMMITTED transaction. A request with the same key that arrives while the first is still running waits for it, then replays its response. Without a key, the service runs the same stock write in its own READ COMMITTED transaction. (A33, A34)
 
 **Paging.** `GET /inventory` returns SKUs sorted by SKU ID, at most 250 per response. When more SKUs follow, the response has a `Link` header with the next page's URL, and the last page has none; follow `Link` to list every SKU. `limit` (1–250) sets a smaller page. With ABC-1 and K-1 from above, add two more SKUs and page through all four:
 
@@ -110,6 +110,19 @@ curl -i 'localhost:8080/inventory?limit=2&after=B-2'
 ```
 
 Every page is a plain JSON array of items. `after` is the last SKU ID of the previous page. `after` alone returns up to 250 SKUs after it. SKUs created behind the cursor during a walk are not seen by that walk. A query string that can't be decoded (e.g. `after=%zz`) or that repeats `after` returns 400 `Invalid request`. (G9, R4, Z3, C2)
+
+## Storage and concurrency
+
+- **Stock.** Each SKU's stock is `sku.quantity`, a 64-bit integer that a `CHECK` keeps at 0 or above, with a `version` that goes up by 1 with each change. An add inserts the SKU row if it is new, then runs `UPDATE sku SET quantity = quantity + :q … WHERE quantity <= 9223372036854775807 - :q`; a purchase runs `UPDATE sku SET quantity = quantity - :q … WHERE quantity >= :q`. No row back means overflow (add) or insufficient stock or an unknown SKU (purchase), and nothing is written. (E1, G7, G12)
+- **Concurrency.** Writes run at READ COMMITTED and nothing is retried. Writers to one SKU queue on its row lock, and Postgres re-checks a waiting `UPDATE`'s condition against the row the first writer committed, so two purchases of the last 5 units give one 200 and one 400 `Insufficient inventory`. Writes to different SKUs never wait for each other. (E1)
+- **404 or 400 on a purchase.** A purchase decides between `SKU not found` and `Insufficient inventory` in one statement, from one snapshot: a purchase that races the first add of a new SKU answers 404 if that add hasn't committed when the purchase starts. (E1)
+- **Ledger.** Every successful add or purchase also appends a row to `inventory_ledger` in the same transaction; a rejected one appends nothing. The database rejects `UPDATE` or `DELETE` on the ledger and `DELETE` on `sku` (triggers raising SQLSTATE P0001). Tests check that each SKU's quantity equals the sum of its ledger deltas, and never goes below 0, at the end of every concurrency test. (E3, A11, A14)
+- **Reads.** `GET /inventory/{skuId}` and `GET /inventory` read the balance rows in one autocommit query, with no transaction, and never wait for a writer. (E1)
+- **Failures.** A database error during a write returns 500 `Internal server error` and changes nothing. A crash inside a transaction rolls it back: no stock change, no ledger row and no Idempotency-Key claim, so a retry with the same key starts afresh. (E1, G6)
+
+## Upgrading an existing database
+
+Flyway migration V3 moves a database created by the previous version to the balance row. In one transaction it adds `quantity` and `version` to `sku`, sets each SKU's quantity to the sum of its ledger deltas and its version to its number of ledger rows, and then adds the append-only triggers. If V3 fails (for example, on a SKU whose ledger sums below 0), none of it is kept: the database stays at V2 with its data, and the app doesn't start until the data is fixed. Stop every instance of the previous version before starting this one: an old instance still running after V3 would append ledger rows without changing `sku.quantity`. V3 doesn't touch stored Idempotency-Keys, and they keep replaying their stored responses byte for byte. (E3, A33)
 
 ## API docs
 
@@ -131,7 +144,7 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - Malformed JSON, a missing body, or a wrong Content-Type return 400, not 415. (G3)
 - `quantity` must be a JSON integer: `"10"`, `10.5` and `null` return 400. Unknown fields are ignored. (G13)
 - A purchase with an invalid body returns 400 even when the SKU doesn't exist. (G4)
-- A SKU sold down to 0 still exists: GET returns quantity 0 and it stays in the list. (G5)
+- A SKU sold down to 0 still exists: GET returns quantity 0 and it stays in the list. SKU and ledger rows are never deleted, enforced by the database. (G5)
 - Error bodies are fixed strings: `SKU not found`, `Insufficient inventory`, `Invalid request`, and `Internal server error` for unexpected 500s. They never show stock counts. (G6)
 - Concurrent purchases never oversell, however many app instances run. (G7)
 - Both POST endpoints accept an optional `Idempotency-Key` header. Repeating a request with the same key returns the first response and doesn't change stock again. (G8)
@@ -153,8 +166,9 @@ The OpenAPI spec leaves these behaviours open. This implementation does the foll
 - An add rejected for overflow is remembered like other results: retrying it with the same key returns the same 400. (U1)
 - GET requests ignore the `Accept` header and always return JSON; a POST whose `Accept` header excludes JSON, or gives it `q=0` (e.g. `application/json;q=0`), returns 400. (U2, C3)
 - A single request adds or purchases at most 2,147,483,647 units; stock levels are 64-bit. (V2)
-- A stock change that keeps conflicting with concurrent changes is retried up to 10 times; if it still conflicts, the request returns 500 `Internal server error`. (W2)
+- Concurrent changes to one SKU wait for each other; nothing is retried; a database failure returns 500 `Internal server error`. (E1)
 - A retry with the same `Idempotency-Key` counts as the same request when the endpoint, SKU and quantity match; whitespace, field order and unknown fields don't matter. (Y3)
+- An `Idempotency-Key` whose stored response was cleared can't be reused: sending it again returns 400 `Invalid request`. (A18)
 
 ## Future improvements
 
@@ -162,7 +176,6 @@ These are out of scope for the 24-hour build.
 
 - **Idempotency cache in front of Postgres (R2, T1).** A Redis `SET key … NX EX 86400` could turn duplicate and expired keys away before they reach the database. That would reduce load and latency. Postgres (the primary key on the key plus `ON CONFLICT DO NOTHING`) would still be the source of truth, because Redis's own docs discourage relying on simple `SET NX` locks for correctness.
 - **Timed reservations (D4).** A cart or reservation service could hold stock for a few minutes and release it if the purchase doesn't complete, the way ticketing sites do.
-- **Periodic balance snapshots for the ledger (V1).** Every balance is the SUM of a SKU's ledger rows, read through an index on `sku_id`. A periodic snapshot row per SKU (balance up to a ledger id) would let reads and write checks sum only the rows after it, so a long history stays cheap.
 
 ## Designed, not built (T6)
 

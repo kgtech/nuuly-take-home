@@ -18,12 +18,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -67,7 +69,6 @@ class IdempotencyStoreTest {
 
     @BeforeEach
     void setUp() {
-        // test-only delete; the application never purges keys (R9)
         Tables.reset(jdbc);
         transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -184,52 +185,41 @@ class IdempotencyStoreTest {
         assertThat(rows()).isEqualTo(1);
     }
 
-    @Test
-    void differentHashRejected() {
-        UUID key = UUID.randomUUID();
-        execute(add(key, "widget", 5), OK);
+    /** How a reused key's request differs from the first one (S8, G1), or that the key has expired (T1). */
+    enum Reuse {
+        DIFFERENT_HASH(key -> add(key, "widget", 6), null),
+        DIFFERENT_SKU(key -> add(key, "gadget", 5), null),
+        /** G1: skuId comparison is case-sensitive. */
+        DIFFERENT_SKU_CASE(key -> add(key, "WIDGET", 5), null),
+        DIFFERENT_OPERATION(key -> purchase(key, "widget", 5), null),
+        /** T1: a key older than 24h is rejected even with the same request, and is never reused. */
+        OLDER_THAN_24H(key -> add(key, "widget", 5), "24 hours 1 second");
 
-        assertRejectedAndUnchanged(key, add(key, "widget", 6));
+        final Function<UUID, Request> request;
+        final String age;
+
+        Reuse(Function<UUID, Request> request, String age) {
+            this.request = request;
+            this.age = age;
+        }
     }
 
-    @Test
-    void differentSkuRejected() {
+    /** S8, T1, G1 (#24 C-33): each rejected reuse answers Invalid, runs no action and leaves the stored row as is. */
+    @ParameterizedTest
+    @EnumSource(Reuse.class)
+    void reuseIsRejectedAndLeavesTheRowUnchanged(Reuse reuse) {
         UUID key = UUID.randomUUID();
         execute(add(key, "widget", 5), OK);
+        if (reuse.age != null) {
+            backdate(key, reuse.age);
+        }
 
-        assertRejectedAndUnchanged(key, add(key, "gadget", 5));
-    }
-
-    /** G1: skuId comparison is case-sensitive. */
-    @Test
-    void differentSkuCaseRejected() {
-        UUID key = UUID.randomUUID();
-        execute(add(key, "widget", 5), OK);
-
-        assertRejectedAndUnchanged(key, add(key, "WIDGET", 5));
-    }
-
-    @Test
-    void differentOperationRejected() {
-        UUID key = UUID.randomUUID();
-        execute(add(key, "widget", 5), OK);
-
-        assertRejectedAndUnchanged(key, purchase(key, "widget", 5));
-    }
-
-    /** T1: a key older than 24h is rejected even with the same request, and is never reused. */
-    @Test
-    void olderThan24hRejected() {
-        UUID key = UUID.randomUUID();
-        execute(add(key, "widget", 5), OK);
-        backdate(key, "24 hours 1 second");
-
-        assertRejectedAndUnchanged(key, add(key, "widget", 5));
+        assertRejectedAndUnchanged(key, reuse.request.apply(key));
     }
 
     /**
      * T1's boundary: a key exactly 24h old (by the transaction's now()) still replays, so the lookup's comparison is
-     * strict (mutating {@code <} to {@code <=} fails here; a longer interval fails olderThan24hRejected).
+     * strict (mutating {@code <} to {@code <=} fails here; a longer interval fails OLDER_THAN_24H).
      */
     @Test
     void exactly24hStillReplays() {

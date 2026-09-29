@@ -50,12 +50,6 @@ class SchemaTest {
 
     // ---- helpers ----
 
-    /** A SKU with one ledger row, written with V1's columns only. */
-    private void seedLedger(String skuId, long delta) {
-        insertSku(skuId);
-        insertLedger(skuId, delta, delta > 0 ? "add" : "purchase");
-    }
-
     private void insertSku(String skuId) {
         jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(skuId).update();
     }
@@ -202,7 +196,7 @@ class SchemaTest {
 
     // ---- rows Postgres rejects ----
 
-    /** V1's constraints: each rejected row leaves the seeded SKU, its ledger row and its balance unchanged. */
+    /** V1's constraints: each rejected row leaves the seeded SKU, its balance row and its ledger row unchanged. */
     static Stream<Arguments> v1Rejections() {
         return Stream.of(
                 Arguments.of("zero delta", ledgerInsert("'seeded'", "0", "'add'"), CHECK_VIOLATION,
@@ -229,13 +223,14 @@ class SchemaTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource("v1Rejections")
     void postgresRejects(String what, String sql, String sqlState, String messagePart) {
-        seedLedger(SEEDED, 5);
+        Tables.seed(jdbc, SEEDED, 5);
 
         assertRejected(sql, sqlState, messagePart);
 
         assertThat(count("sku")).as("sku rows").isEqualTo(1);
         assertThat(count("inventory_ledger")).as("ledger rows").isEqualTo(1);
-        assertThat(ledgerSum(SEEDED)).as("ledger balance").isEqualTo(5);
+        assertThat(quantity(SEEDED)).as("balance").isEqualTo(5);
+        assertThat(ledgerSum(SEEDED)).as("ledger sum").isEqualTo(5);
     }
 
     /**
@@ -271,15 +266,19 @@ class SchemaTest {
 
     // ---- rows Postgres accepts ----
 
-    /** Add and purchase rows, bigint's extreme deltas and a 64-character skuId are all valid rows. */
+    /**
+     * Add and purchase rows, bigint's extreme deltas and a 64-character skuId are all valid rows. Stock is seeded with
+     * its balance row (Tables.seed); the purchase row and the most negative delta are ledger rows alone, since this
+     * test is about the ledger's constraints and no balance row can hold a negative quantity.
+     */
     @Test
     void acceptsBoundaryRows() {
         assertThatCode(() -> {
-            insertSku("ok");
-            insertLedger("ok", 5L, "add");
+            Tables.seed(jdbc, "ok", 5);
             insertLedger("ok", -3L, "purchase");
-            seedLedger("max", Long.MAX_VALUE);
-            seedLedger("min", Long.MIN_VALUE);
+            Tables.seed(jdbc, "max", Long.MAX_VALUE);
+            insertSku("min");
+            insertLedger("min", Long.MIN_VALUE, "purchase");
             insertSku("x".repeat(64));
         }).doesNotThrowAnyException();
 
@@ -312,7 +311,7 @@ class SchemaTest {
     @Test
     void skuIdOrdersByCCollation() {
         for (String id : List.of("b", "B", "a", "A", "a.1", "a-1", "a_1")) {
-            insertSku(id);
+            Tables.seed(jdbc, id, 1);
         }
 
         List<String> ordered = jdbc.sql("SELECT sku_id FROM sku ORDER BY sku_id").query(String.class).list();
@@ -323,7 +322,7 @@ class SchemaTest {
     /** E3: TRUNCATE is how tests reset (Tables.reset); the row-level triggers don't block it. */
     @Test
     void truncateIsAllowed() {
-        seedLedger(SEEDED, 5);
+        Tables.seed(jdbc, SEEDED, 5);
 
         assertThatCode(() -> Tables.reset(jdbc)).doesNotThrowAnyException();
 

@@ -33,8 +33,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * D9, S11, W2 over real HTTP (#4): concurrent purchases and adds through Tomcat, the filter chain and the Hikari
  * pool, asserting the client only ever sees the spec's 200 and 400 (never a 500). Not @Transactional: every request
- * commits its own SERIALIZABLE transaction, so the tables are emptied before each test. Each test ends by asserting
- * the balance invariants (A14).
+ * commits its own READ COMMITTED transaction (E1), so the tables are reset before each test. Each test ends by
+ * asserting the balance invariants (A14).
  */
 @IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class InventoryHttpConcurrencyTest {
@@ -57,7 +57,6 @@ class InventoryHttpConcurrencyTest {
 
     @BeforeEach
     void setUp() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
         Tables.reset(jdbc);
         http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(TIMEOUT).build();
     }

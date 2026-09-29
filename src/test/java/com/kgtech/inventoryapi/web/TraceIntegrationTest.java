@@ -49,11 +49,8 @@ class TraceIntegrationTest {
 
     @BeforeEach
     void seed() {
-        // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
         Tables.reset(jdbc);
-        jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(SEEDED).update();
-        jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
-                .param(SEEDED).update();
+        Tables.seed(jdbc, SEEDED, 5);
     }
 
     /** Sends a body-less {@code method path} with Host, Accept JSON, Content-Length 0 and Connection: close. */

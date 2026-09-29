@@ -47,12 +47,9 @@ class InventoryListMalformedQueryIntegrationTest {
 
     @BeforeEach
     void seed() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
         Tables.reset(jdbc);
         for (String skuId : SEEDED) {
-            jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(skuId).update();
-            jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
-                    .param(skuId).update();
+            Tables.seed(jdbc, skuId, 5);
         }
     }
 
