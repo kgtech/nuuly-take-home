@@ -254,7 +254,8 @@ class ArchitectureTest {
     /**
      * A37 (L1): TextErrors and BodyTooLargeException are public for inventory.web, so every public method or
      * constructor of a public web type must have a caller outside web; the helpers only web uses (of, textFor,
-     * internalServerError) stay package-private. Constant fields are inlined, so PackageBoundaryTest's scope, not this.
+     * internalServerError) stay package-private. Constant fields are inlined, so webPublicFieldsAreTheSharedConstants
+     * lists them instead.
      */
     @Test
     void webPublicCodeIsUsedByAnotherPackage() {
@@ -264,6 +265,27 @@ class ArchitectureTest {
                 .and().arePublic()
                 .should(beAccessedFromAnotherPackage())
                 .check(MAIN);
+    }
+
+    /**
+     * A37 (L1): javac inlines constants, so bytecode shows no reader of a public field; the list is explicit instead.
+     * inventory.web.InventoryApi reads SKU_EXISTS and DETAILS_CHANGED for the v2 409 and 412 descriptions, and the
+     * controllers read IDEMPOTENCY_KEY (Z2); G6's other texts stay package-private.
+     */
+    @Test
+    void webPublicFieldsAreTheSharedConstants() {
+        Set<String> fields = MAIN.stream()
+                .filter(c -> c.getPackageName().equals(WEB))
+                .filter(JavaClass::isTopLevelClass)
+                .filter(c -> c.getModifiers().contains(JavaModifier.PUBLIC))
+                .flatMap(c -> c.getFields().stream())
+                .filter(f -> f.getModifiers().contains(JavaModifier.PUBLIC))
+                .map(f -> f.getOwner().getSimpleName() + "." + f.getName())
+                .collect(Collectors.toSet());
+
+        assertThat(fields).as("public fields of the public types of %s", WEB)
+                .containsExactlyInAnyOrder("TextErrors.SKU_EXISTS", "TextErrors.DETAILS_CHANGED",
+                        "HttpConstants.IDEMPOTENCY_KEY");
     }
 
     /** L4: members used only inside their own class or package are not public. */
