@@ -1,0 +1,212 @@
+diff --git a/src/main/java/com/kgtech/inventoryapi/idempotency/ApiVersion.java b/src/main/java/com/kgtech/inventoryapi/idempotency/ApiVersion.java
+deleted file mode 100644
+index 37c5659..0000000
+--- a/src/main/java/com/kgtech/inventoryapi/idempotency/ApiVersion.java
++++ /dev/null
+@@ -1,10 +0,0 @@
+-package com.kgtech.inventoryapi.idempotency;
+-
+-/**
+- * The API a keyed request came through. It is part of the request hash (H10), so a key stored by one version never
+- * replays on the other: the two answer with different bodies.
+- */
+-public enum ApiVersion {
+-    UNVERSIONED,
+-    V2
+-}
+diff --git a/src/main/java/com/kgtech/inventoryapi/idempotency/IdempotencyStore.java b/src/main/java/com/kgtech/inventoryapi/idempotency/IdempotencyStore.java
+index 7dcddb4..ccbd6cd 100644
+--- a/src/main/java/com/kgtech/inventoryapi/idempotency/IdempotencyStore.java
++++ b/src/main/java/com/kgtech/inventoryapi/idempotency/IdempotencyStore.java
+@@ -69,12 +69,6 @@ public class IdempotencyStore {
+         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+     }
+ 
+-    /** {@link #run(UUID, ApiVersion, Operation, String, String, Supplier)} for an unversioned (spec) request. */
+-    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+-            Supplier<StoredResponse> write) {
+-        return run(key, ApiVersion.UNVERSIONED, operation, skuId, canonicalRequest, write);
+-    }
+-
+     /**
+      * Claimed → write → store → Response. Not claimed → the stored Response, or Invalid (see
+      * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3), prefixed
+@@ -83,7 +77,7 @@ public class IdempotencyStore {
+      * caller's now() (T1) and rollback scope apply. A runtime exception from the write escapes unchanged and rolls the
+      * claim back; when joined, it marks the caller's transaction rollback-only.
+      */
+-    public Keyed run(UUID key, ApiVersion version, Operation operation, String skuId, String canonicalRequest,
++    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+             Supplier<StoredResponse> write) {
+         // null: no transaction, or a caller at ISOLATION_DEFAULT, which is Postgres's READ COMMITTED here.
+         Integer joined = TransactionSynchronizationManager.isActualTransactionActive()
+@@ -91,8 +85,7 @@ public class IdempotencyStore {
+         if (joined != null && joined != TransactionDefinition.ISOLATION_READ_COMMITTED) {
+             throw new IllegalStateException("IdempotencyStore.run joins only a READ COMMITTED transaction");
+         }
+-        byte[] hash = version == ApiVersion.V2 ? RequestHash.ofV2(operation, skuId, canonicalRequest)
+-                : RequestHash.of(operation, skuId, canonicalRequest);
++        byte[] hash = RequestHash.of(operation, skuId, canonicalRequest);
+         return transaction.execute(status -> {
+             if (!claim(key, operation, skuId, hash)) {
+                 return replay(key, operation, skuId, hash);
+diff --git a/src/main/java/com/kgtech/inventoryapi/idempotency/RequestHash.java b/src/main/java/com/kgtech/inventoryapi/idempotency/RequestHash.java
+index f39a3eb..21c10de 100644
+--- a/src/main/java/com/kgtech/inventoryapi/idempotency/RequestHash.java
++++ b/src/main/java/com/kgtech/inventoryapi/idempotency/RequestHash.java
+@@ -15,10 +15,6 @@ final class RequestHash {
+     }
+ 
+     static byte[] of(Operation operation, String skuId, String canonicalRequest) {
+-        return sha256(operation.dbValue() + "\n" + skuId + "\n" + canonicalRequest);
+-    }
+-
+-    static byte[] ofV2(Operation operation, String skuId, String canonicalRequest) {
+         return sha256("v2\n" + operation.dbValue() + "\n" + skuId + "\n" + canonicalRequest);
+     }
+ 
+diff --git a/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java b/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java
+index b516a4f..c415f21 100644
+--- a/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java
++++ b/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java
+@@ -12,7 +12,6 @@ import org.springframework.transaction.PlatformTransactionManager;
+ import org.springframework.transaction.TransactionDefinition;
+ import org.springframework.transaction.support.TransactionTemplate;
+ 
+-import com.kgtech.inventoryapi.idempotency.ApiVersion;
+ import com.kgtech.inventoryapi.idempotency.IdempotencyKey;
+ import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
+ import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
+@@ -85,7 +84,7 @@ public class InventoryService {
+      */
+     public WriteResult addV2(String skuId, int quantity, String idempotencyKey) {
+         requirePositive(quantity);
+-        return keyed(ApiVersion.V2, Operation.ADD, skuId, idempotencyKey, Integer.toString(quantity),
++        return keyed(Operation.ADD, skuId, idempotencyKey, Integer.toString(quantity),
+                 new WriteResult.InvalidRequest(),
+                 () -> stock.add(skuId, quantity)
+                         .<WriteResult>map(balance -> okWithDetails(skuId, balance))
+@@ -95,7 +94,7 @@ public class InventoryService {
+     /** POST /v2/inventory/{skuId}/purchase: {@link #purchase} with a required key and the details in the Ok. */
+     public WriteResult purchaseV2(String skuId, int quantity, String idempotencyKey) {
+         requirePositive(quantity);
+-        return keyed(ApiVersion.V2, Operation.PURCHASE, skuId, idempotencyKey, Integer.toString(quantity),
++        return keyed(Operation.PURCHASE, skuId, idempotencyKey, Integer.toString(quantity),
+                 new StockOutcome.NotFound(),
+                 () -> stock.purchase(skuId, quantity)
+                         .<WriteResult>map(balance -> okWithDetails(skuId, balance))
+@@ -106,7 +105,7 @@ public class InventoryService {
+     /**
+      * The key (S3), then the skuId, then the claim and write. A null key is 400: only /v2 gets here without one.
+      */
+-    private WriteResult keyed(ApiVersion version, Operation operation, String skuId, String idempotencyKey,
++    private WriteResult keyed(Operation operation, String skuId, String idempotencyKey,
+             String canonicalRequest, WriteResult malformedSkuId, Supplier<WriteResult> action) {
+         Optional<UUID> key = idempotencyKey == null ? Optional.empty() : IdempotencyKey.parse(idempotencyKey);
+         if (key.isEmpty()) {
+@@ -116,7 +115,7 @@ public class InventoryService {
+             return malformedSkuId;
+         }
+         Supplier<StoredResponse> stored = () -> responses.toStored(skuId, action.get());
+-        return switch (idempotency.run(key.get(), version, operation, skuId, canonicalRequest, stored)) {
++        return switch (idempotency.run(key.get(), operation, skuId, canonicalRequest, stored)) {
+             case Keyed.Response response -> new WriteResult.Stored(response.response());
+             case Keyed.Invalid _ -> new WriteResult.InvalidRequest();
+         };
+diff --git a/src/test/java/com/kgtech/inventoryapi/idempotency/RequestHashTest.java b/src/test/java/com/kgtech/inventoryapi/idempotency/RequestHashTest.java
+index fc9b497..61afbd9 100644
+--- a/src/test/java/com/kgtech/inventoryapi/idempotency/RequestHashTest.java
++++ b/src/test/java/com/kgtech/inventoryapi/idempotency/RequestHashTest.java
+@@ -24,9 +24,9 @@ class RequestHashTest {
+     @Test
+     void hashIsSha256OfOperationSkuIdQuantity() {
+         assertThat(hex(RequestHash.of(Operation.ADD, "widget", "5")))
+-                .isEqualTo("24366c5cd0cd15ed3250e59c23b11c984820899122c7d58e6b42601f9d4b1246");
++                .isEqualTo(sha256Hex("v2\nadd\nwidget\n5"));
+         assertThat(hex(RequestHash.of(Operation.PURCHASE, "widget", "5")))
+-                .isEqualTo("c6daae4a6ef7c8753c9055bafd737330257f5b1da55691eb1a3056f29ec1fffd");
++                .isEqualTo(sha256Hex("v2\npurchase\nwidget\n5"));
+     }
+ 
+     @Test
+@@ -40,29 +40,9 @@ class RequestHashTest {
+         assertThat(hex(RequestHash.of(Operation.ADD, "ABC", "6"))).as("quantity").isNotEqualTo(base);
+     }
+ 
+-    /**
+-     * H10: a /v2 request's hash also covers the API version, so a key stored by an unversioned request never matches
+-     * the same request on /v2.
+-     */
+-    @Test
+-    void v2HashPrefixesTheApiVersion() {
+-        assertThat(hex(RequestHash.ofV2(Operation.ADD, "widget", "5")))
+-                .isEqualTo(sha256Hex("v2\nadd\nwidget\n5"));
+-        assertThat(hex(RequestHash.ofV2(Operation.PURCHASE, "widget", "5")))
+-                .isEqualTo(sha256Hex("v2\npurchase\nwidget\n5"));
+-        assertThat(hex(RequestHash.ofV2(Operation.ADD, "widget", "5")))
+-                .as("never the unversioned bytes")
+-                .isNotEqualTo(hex(RequestHash.of(Operation.ADD, "widget", "5")));
+-        assertThat(hex(RequestHash.ofV2(Operation.ADD, "widget", "5")))
+-                .isNotEqualTo(hex(RequestHash.ofV2(Operation.ADD, "widget", "6")))
+-                .isNotEqualTo(hex(RequestHash.ofV2(Operation.PURCHASE, "widget", "5")))
+-                .isNotEqualTo(hex(RequestHash.ofV2(Operation.ADD, "Widget", "5")));
+-    }
+-
+     @Test
+     void hashIs32Bytes() {
+-        assertThat(RequestHash.of(Operation.ADD, "widget", Integer.toString(Integer.MAX_VALUE))).hasSize(32);
+-        assertThat(RequestHash.ofV2(Operation.PURCHASE, "widget", Integer.toString(Integer.MAX_VALUE))).hasSize(32);
++        assertThat(RequestHash.of(Operation.PURCHASE, "widget", Integer.toString(Integer.MAX_VALUE))).hasSize(32);
+     }
+ 
+     private static String sha256Hex(String text) {
+diff --git a/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceWriteChecksTest.java b/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceWriteChecksTest.java
+index 954be8a..5f30065 100644
+--- a/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceWriteChecksTest.java
++++ b/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceWriteChecksTest.java
+@@ -25,7 +25,6 @@ import org.springframework.transaction.PlatformTransactionManager;
+ import org.springframework.transaction.TransactionDefinition;
+ import org.springframework.transaction.support.SimpleTransactionStatus;
+ 
+-import com.kgtech.inventoryapi.idempotency.ApiVersion;
+ import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
+ import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
+ import com.kgtech.inventoryapi.idempotency.Operation;
+@@ -95,8 +94,8 @@ class InventoryServiceWriteChecksTest {
+ 
+     /** The store claims and runs the write once, as for a first keyed request. */
+     private void storeRunsTheWrite() {
+-        when(idempotency.run(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+-            Supplier<StoredResponse> write = invocation.getArgument(5);
++        when(idempotency.run(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
++            Supplier<StoredResponse> write = invocation.getArgument(4);
+             return new Keyed.Response(write.get());
+         });
+     }
+@@ -180,7 +179,7 @@ class InventoryServiceWriteChecksTest {
+ 
+         write.callV2(service, "widget", KEY.toUpperCase());
+ 
+-        verify(idempotency).run(eq(UUID.fromString(KEY)), eq(ApiVersion.V2), eq(write.operation), eq("widget"),
++        verify(idempotency).run(eq(UUID.fromString(KEY)), eq(write.operation), eq("widget"),
+                 eq(write.canonicalRequest), any());
+         verifyNoInteractions(transactions);
+     }
+@@ -200,7 +199,7 @@ class InventoryServiceWriteChecksTest {
+     @Test
+     void aReplayReturnsTheStoredResponseWithoutWriting() {
+         StoredResponse notFound = new StoredResponse(404, "text/plain", "SKU not found");
+-        when(idempotency.run(any(), any(), any(), any(), any(), any())).thenReturn(new Keyed.Response(notFound));
++        when(idempotency.run(any(), any(), any(), any(), any())).thenReturn(new Keyed.Response(notFound));
+ 
+         assertThat(service.purchaseV2("widget", 7, KEY)).isEqualTo(new WriteResult.Stored(notFound));
+ 
+@@ -210,7 +209,7 @@ class InventoryServiceWriteChecksTest {
+     /** S8, T1, A18: a reused key with another request, an expired key or a cleared row is 400 "Invalid request". */
+     @Test
+     void anInvalidReuseIsInvalidRequest() {
+-        when(idempotency.run(any(), any(), any(), any(), any(), any())).thenReturn(new Keyed.Invalid());
++        when(idempotency.run(any(), any(), any(), any(), any())).thenReturn(new Keyed.Invalid());
+ 
+         assertThat(service.addV2("widget", 7, KEY)).isEqualTo(new WriteResult.InvalidRequest());
+ 
