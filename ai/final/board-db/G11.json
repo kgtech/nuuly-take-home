@@ -1,0 +1,8 @@
+{
+  "choice": "D",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded: the answers now name /v2 and PUT details, and the \";\" check belongs to the guard filter, not to the controllers."
+  }
+}

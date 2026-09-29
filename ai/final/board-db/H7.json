@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Owner OD-11",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "Creating then needs a second route, and the create form could not be idempotent by method.",
+    "C": "409 needs a create-only route."
+  }
+}

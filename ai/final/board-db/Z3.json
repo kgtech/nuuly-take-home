@@ -1,0 +1,8 @@
+{
+  "choice": "D",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "Superseded: the repeated-after 400 and its documentation now cover GET /v2/inventory too, and the class names follow the real layout (A37)."
+  }
+}

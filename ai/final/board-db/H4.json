@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Owner OD-5",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "Page-size control is an extension, and extensions live under /v2.",
+    "C": "An unbounded list failed with OutOfMemoryError at 1M SKUs (C-02)."
+  }
+}

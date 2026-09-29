@@ -1,0 +1,6 @@
+{
+  "choice": "C",
+  "notes": "Validation runs first (Spring default). A malformed request is rejected before any lookup. The only overlap is an invalid body on a missing SKU, and this costs no code.",
+  "updatedAt": "2026-09-24T16:07:12.513Z",
+  "why": {}
+}
