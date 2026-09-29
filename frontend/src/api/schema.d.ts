@@ -68,7 +68,7 @@ export interface paths {
         };
         /**
          * List all SKUs with details
-         * @description Returns SKUs sorted by skuId with their quantity and details (absent for a SKU that has none), at most 250 per response; the same limit, after and Link rules as GET /inventory.
+         * @description Returns SKUs sorted by skuId with their quantity and details (absent for a SKU that has none), at most 250 per response. The optional limit (1 to 250, default 250) sets the page size and after is an exclusive cursor; a Link header with rel=next carries both to the next page.
          */
         get: operations["listSkus"];
         put?: never;
