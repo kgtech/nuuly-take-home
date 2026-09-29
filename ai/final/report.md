@@ -72,6 +72,8 @@ Nine fresh reviewers on SHA 436cacae (spec and versioning; concurrency; API cont
 | MINOR | 30 | 10 fixed, 10 recorded, 5 DECISION CHALLENGEs (recorded, owner to decide), 5 won't fix (with reasons); per-entry table at the end of `critique.md` |
 | NIT | 8 | 2 fixed, 6 recorded |
 | Rejected | 1 | M-43 |
+**Re-check after the fixes** ([`critique-recheck.md`](critique-recheck.md)): a fresh verifier re-ran the original reproduction of all 12 fixed findings on `origin/final` (M-01 chunked cap, M-02 `/error`, M-03 overflow, M-04 mutant, M-11, M-12 front end, M-13, M-14, M-22, M-24, M-38, M-40): all fixed, none open; regression sweep (README Try-it, the four spec operations, full service and front-end gates) clean. Its one new observation was that the A19 card, README and DESIGN still described the old uncapped behaviour: fixed by the records PR. INFO: for very large in-flight chunked bodies the server closes the connection early, so a client may see a reset instead of the 400 (the 8 MB case gets a clean 400).
+
 Per area: spec/versioning 0 MAJOR, 1 disputed (ETag: downgraded, the Target API fixes it); concurrency none (could not break an invariant); contract 1 MAJOR fixed; tests 1 MAJOR fixed, 57 Java mutations (52 killed, 1 real survivor fixed); front end 1 MAJOR fixed; security/ops 0 MAJOR (3 MINOR, two of them fixed by the M-01/M-14 work); interview defense 6 source MAJORs, downgraded by the verifier to record gaps and closed in cards and DESIGN; standards 0 MAJOR; simplification 0 MAJOR, 3 proven patches not applied.
 
 ## 8. Industry standards
