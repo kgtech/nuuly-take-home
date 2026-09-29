@@ -97,3 +97,26 @@ Model: claude-fable-5-1. Start checkout: .claude/worktrees/fable-retro-step-6-54
     3. PR description: D10 and S11 do not cite DESIGN-V2 §7 (S11 cites §2), and 733bcb5 came before e6362da, not after it.
   - Checks: ./gradlew cleanTest build green, 747 tests, 0 failures. The diff against fb8c859 touches only .fable/interview-defense.md and this log.
   - Accepted: the substance of both review-3 fixes. Rejected: nothing.
+- 2026-09-29T13:00:19Z [idempotency-future-improvement] Owner decision after PR #82 merged: hold off on storing a domain outcome instead of the HTTP response against an Idempotency-Key, and record it as a future improvement.
+  - Filed #83 (labels v2, future-improvement): today's design with references at 5bf4dc8, the technical reasons to defer (no behaviour gain while every keyed caller is HTTP; trades Y4's byte-for-byte replay for re-rendered replays; a two-format migration on a never-purged table, with A18 and the README clean-up to rework), the triggers to revisit, the proposed approach (decisions first, additive V4 migration, domain outcome codec, rendering after the transaction, 24 h legacy read path) and acceptance criteria.
+  - DESIGN-V2 §10's rejected-alternative entry now points to #83, with the reasons to defer and the approach in brief. No code, test, migration or build change.
+  - Accepted: the owner's "hold off; mark it as a future improvement", recorded in both places. Rejected: nothing.
+- 2026-09-29T13:16:59Z [messaging-future-improvement] Owner asked why the design uses a synchronous Postgres core instead of Kafka or a queue, and when a queue would make sense; then asked to record messaging (flash sales, high throughput, ERP, tradeoffs) as a future improvement, with why it was not built.
+  - Filed #85 (labels v2, future-improvement):
+    - why there is no broker: a synchronous contract with fixed codes (G10); one-transaction correctness; a broker would be a dual write, and consumers would still need the idempotency claim; no consumer exists; the §9 lesson;
+    - where it would help: ERP outbound and inbound, the source-of-truth decision and reconciliation; high throughput (per-SKU row lock, Hikari's default of 10 connections, all unmeasured); flash-sale options from least to most contract change;
+    - a tradeoff table, triggers, a phased approach (measure; decide; outbox out; idempotent consumer in after #83; flash-sale options) and acceptance criteria.
+  - Documented both deferred items (#83, #85):
+    - README "Designed, not built" (CLAUDE.md T6);
+    - DESIGN-V2 §11, with the header's section guide updated;
+    - DECISIONS-ADDED A35 (#83) and A36 (#85).
+  - Added to the open docs PR #84. No code, test, migration or build change.
+  - Accepted: the owner's request to record messaging as a future improvement, with the reasons. Rejected: nothing.
+- 2026-09-29T14:02:15Z [concurrency-analysis] Owner asked "What about concurrency?", then asked to add the answer to #85 and DESIGN-V2.
+  - Added a "Concurrency" section to #85's body and a *Concurrency.* subsection to DESIGN-V2 §11 under the #85 entry:
+    - what holds today, each row naming its mechanism and its test (same-SKU purchases and adds, different SKUs, one key sent twice at once, creates of one new SKU, PUT during a purchase, conditional PUTs, reads, deadlocks, several instances);
+    - the two accepted races that change only the error text (§2 purchase, §8 conditional PUT);
+    - the limits: a hot SKU serializes; pool starvation under the Hikari and Tomcat defaults (nothing set in application.yaml); no lock_timeout or statement_timeout; no load test;
+    - hardening without a broker (flash-sale option 1) and where a queue starts to help (option 3).
+  - Test names checked against src/test before writing. Added to the open docs PR #84. No code, test, migration or build change.
+  - Accepted: the owner's request to record the concurrency analysis in both places. Rejected: nothing.

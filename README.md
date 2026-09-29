@@ -153,6 +153,19 @@ The spec leaves these open; V2 keeps the first build's answers ([`DECISIONS.md`]
 - A read is always the last committed count; there is no cache (DESIGN-V2 §9).
 - The app is published on 0.0.0.0:18080 with no authentication (G10) so reviewers can reach it; Postgres is on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
 
+## Designed, not built
+
+Both are deferred future improvements, recorded with their reasons, revisit triggers and proposed approach. Neither changes the API described above.
+
+- **Store a domain outcome instead of the HTTP response against an Idempotency-Key** ([#83](https://github.com/kgtech/nuuly-take-home/issues/83), A35, [`DESIGN-V2.md`](DESIGN-V2.md) §11). Not built because every keyed caller today is the HTTP controller, so it would change no behaviour. It would also trade byte-for-byte replays (Y4) for re-rendered ones, and it needs a two-format migration on a table whose rows are never purged (R9).
+- **Messaging: an outbox to Kafka for ERP sync, high throughput and flash sales** ([#85](https://github.com/kgtech/nuuly-take-home/issues/85), A36, [`DESIGN-V2.md`](DESIGN-V2.md) §11). Not built because:
+  - the spec's operations answer synchronously with fixed status codes (G10), so a queue in front of writes would change the contract;
+  - the no-oversell decision and exactly-once already hold in one Postgres transaction, and a broker would add a dual write plus at-least-once delivery that still needs the idempotency claim;
+  - no ERP or other consumer exists in this scope;
+  - hot-SKU throughput has not been measured.
+
+  The first step when it is picked up is a load test. After that, events go out through a transactional outbox with no contract change; ERP adjustments come in through a consumer keyed by message ID (after #83); and flash-sale options are applied from least to most contract change.
+
 ## AI use
 
 V2 was built in one autonomous run by the Fable model from a warm-start package produced by a retrospective of the first build: [`PROMPT.md`](PROMPT.md) (the instructions), [`spec/`](spec/), [`DECISIONS.md`](DECISIONS.md), [`CLAUDE.md`](CLAUDE.md), [`issues.md`](issues.md), [`lessons.md`](lessons.md). The run's own records are [`.fable/log.md`](.fable/log.md), [`.fable/current-implementation.md`](.fable/current-implementation.md), [`.fable/plan.md`](.fable/plan.md), [`DESIGN-V2.md`](DESIGN-V2.md), [`DECISIONS-ADDED.md`](DECISIONS-ADDED.md), [`DEVIATIONS.md`](DEVIATIONS.md), [`frontend/DECISIONS.md`](frontend/DECISIONS.md), the self-critique in `.fable/critique.md` and `.fable/interview-defense.md`, and [`FABLE_REPORT.md`](FABLE_REPORT.md).

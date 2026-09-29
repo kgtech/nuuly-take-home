@@ -1,6 +1,6 @@
 # DESIGN-V2: stock in Postgres rows
 
-(§1–§6 describe the design as first built, with a Redis count cache and replay copy; §9 records their removal. Where they disagree, §9 wins. §10 replaces the idempotency advice with an explicit call.)
+(§1–§6 describe the design as first built, with a Redis count cache and replay copy; §9 records their removal. Where they disagree, §9 wins. §10 replaces the idempotency advice with an explicit call. §11 lists what is designed but deliberately not built.)
 
 V2 keeps the API contract of `spec/` and `openapi.yaml` unchanged, including the optional `Idempotency-Key` header, the status codes and the text/plain errors. It replaces the storage design underneath: `main` derives every balance from a SERIALIZABLE `SUM` over an append-only ledger and retries serialization failures; V2 keeps a current balance per SKU as a row, updates it conditionally at READ COMMITTED, still appends every change to the ledger, and uses Redis for two things only: a cache of the most-read stock counts, and a cache of completed idempotent responses.
 
@@ -189,6 +189,75 @@ The explicit call puts the order of checks in one method a reader can follow.
 
 **Rejected alternatives.**
 - **Keep the advice with `REQUIRED`.** That fixes the propagation but keeps the positional contract, the reflection check and the double skuId check.
-- **Store a domain outcome instead of an HTTP response.** That would drop `content_type` and the status CHECK, so it needs a migration and a new replay format (Y4). It is left for a follow-up.
+- **Store a domain outcome instead of an HTTP response.** That would drop `content_type` and the status CHECK, so it needs a migration and a new replay format (Y4). **Deferred as a future improvement, #83** (owner decision, A35; §11). Why it waits: every keyed caller today is the HTTP controller, so it changes no behaviour; it trades Y4's byte-for-byte replay for re-rendered replays; and it needs a two-format migration on a table whose rows are never purged (R9), including the A18 tombstone rule and the README clean-up. #83 names the triggers for revisiting it (a non-HTTP caller needing keyed writes, a response-format change replays should follow, measured lock-hold cost from rendering inside the transaction) and the proposed approach: decisions first; an additive V4 migration with outcome columns and a two-format CHECK; a domain outcome codec behind `IdempotencyStore.run`; rendering after the transaction; and a legacy read path kept for 24 hours.
 
 **Superseded by this section.** The §2 wording "advice around the service method (Z1 kept)", the §7 Z1 row as first written, the §9 phrase "the `@Idempotent` interceptor claims and replays", A10 and A29 (the `Fingerprinted` contract; the canonical form it defined stays).
+
+
+## 11. Designed, not built: future improvements
+
+Two changes are deferred on purpose. Each has an issue holding the full reasons, the triggers for revisiting it, the proposed approach and acceptance criteria. Neither changes anything above.
+
+**Store a domain outcome instead of the HTTP response (#83, A35).** Summarised in §10's rejected alternatives.
+- **Why it waits:** every keyed caller today is HTTP; it would trade Y4's byte-for-byte replay for re-rendered replays; and it needs a two-format migration on a never-purged table, including the A18 tombstone rule and the README clean-up.
+- **Approach:** decisions first; an additive V4 migration; a domain outcome codec behind `IdempotencyStore.run`; rendering after the transaction; and a 24 h legacy read path.
+
+**Messaging: an outbox to Kafka for ERP sync, high throughput and flash sales (#85, A36).**
+
+*Why there is no broker.*
+- **The contract is synchronous.** The spec's operations return the final outcome with fixed codes (G10); there is no `202` and no status resource, and a `GET` right after a `POST` must show the change.
+- **Correctness is one transaction.** The claim, the conditional `UPDATE` and the ledger row commit together (§2, §10), so a broker in the write path would be a dual write.
+- **Idempotency stays.** A consumer that changes Postgres is at-least-once and still needs the `idempotency_keys` claim.
+- **No consumer exists.** Nothing in this scope reads stock events.
+- **The §9 lesson applies.** A second system with no correctness benefit costs more to run than it returns.
+
+*Concurrency.* Postgres coordinates every concurrent write, so a queue would not fix a correctness problem. What holds today, each backed by a test at 8 threads:
+
+| Scenario | Mechanism | Result | Test |
+|---|---|---|---|
+| Purchases of one SKU | Conditional `UPDATE` waits on the row lock, then re-checks `quantity >= :q` on the new row version (§2); `CHECK` backs it | Never oversells | `InventoryConcurrencyTest`, `InventoryHttpConcurrencyTest` `concurrentPurchasesNeverOversell` |
+| Adds to one SKU | Same row lock | No lost update | `concurrentAddsAreNeverLost` (both classes) |
+| Writes to different SKUs | Different rows, no shared lock | Run in parallel | `CrossSkuConcurrencyTest` |
+| One Idempotency-Key, sent twice at once | The second claim blocks on the primary key until the first commits, then replays or rejects (§10) | One stock change | `IdempotencyHttpConcurrencyTest` |
+| Creates of one new SKU | `INSERT … ON CONFLICT` on the primary key (§8) | One 201; the rest 409, or a concurrent spec add lands on the created SKU | `SkuDetailsConcurrencyTest` |
+| PUT during a purchase | The PUT's KEY SHARE is compatible with the purchase's FOR NO KEY UPDATE (§8) | Neither waits | `aPutCompletesWhileAPurchaseHoldsTheRowLock` |
+| Conditional PUTs | `version = ANY(:expected)` in one statement | Exactly one applies | `concurrentConditionalPutsApplyExactlyOne` |
+| Reads | MVCC snapshot at autocommit (§9) | Never wait on a writer | `findNeverWaitsOnAWriterHoldingTheRowLock` |
+| Deadlocks | One lock order in every transaction (§2) | None possible | By construction |
+| Several app instances | The app keeps no state; Postgres coordinates | Same guarantees | `DurabilityAcrossServiceInstancesTest` (durability only, not concurrent cross-instance writes) |
+
+Two accepted races change only which error text is returned, never the stock: the purchase's "Insufficient inventory" versus "SKU not found" around a concurrent create (§2), and a conditional PUT's 404 versus 412 (§8).
+
+The limits are throughput, not correctness:
+- **A hot SKU serializes.** Its writes run one at a time, so its throughput is roughly 1 / lock-hold time. A keyed write holds the lock longer, because the response is rendered and stored inside the transaction (#83 would move rendering out).
+- **Pool starvation.** `application.yaml` sets no pool or thread sizes, so the defaults apply: Hikari has 10 connections with a 30 s `connectionTimeout`, and Tomcat has 200 threads. Writers waiting on a hot SKU's lock hold connections, so requests for other SKUs wait up to 30 s for one and then fail with 500.
+- **No bounded wait.** There is no `lock_timeout` or `statement_timeout`, so a waiter waits as long as the lock holder takes.
+- **Unmeasured.** The concurrency tests prove correctness at 8 threads; there is no load test.
+
+Hardening that needs no broker and no contract change is flash-sale option 1 below: size the pool and its timeout on purpose, set `lock_timeout` and `statement_timeout` so overload answers with a quick 500 instead of a 30 s wait, and add a load test. A queue helps only past that point: one consumer per skuId partition applies purchases in order with no lock wait and can batch them into one transaction, at the price of an asynchronous contract (option 3).
+
+*Where it would help.*
+- **ERP integration.** Outbound, stock-change events come from the append-only ledger, with `sku.version` as a per-SKU ordering token. Inbound, adjustments arrive as messages keyed by message ID, which needs #83. Two things must come first: deciding which system owns stock, and a reconciliation report.
+- **High throughput.** Writes to different SKUs already run in parallel. Writes to one SKU serialize on its row lock, and waiting writers hold Hikari's default 10 connections. Nothing has been measured, so a load test comes first.
+- **Flash sales.** Oversell stays impossible and sold-out rejections are cheap, but purchases of the hot SKU queue on one lock. The options, from least to most contract change:
+  1. shorten the lock hold (#83's rendering move, pool sizing, `lock_timeout`);
+  2. shard the SKU's stock across bucket rows with `SKIP LOCKED`;
+  3. an admission queue with reservations, as a new versioned `202` endpoint with batched per-partition decrements (v1 unchanged);
+  4. a waiting room at the edge.
+
+*Tradeoffs.* A broker brings:
+- eventual consistency for consumers;
+- an outbox or CDC, to avoid dual writes;
+- at-least-once delivery plus deduplication;
+- per-partition ordering only;
+- new failure modes: broker down, consumer lag, poison messages;
+- brokers, schemas and Testcontainers Kafka to operate and test.
+
+In return it gives fan-out, decoupling and batching.
+
+*Approach.*
+1. Measure first.
+2. Record the decisions: source of truth, event schema, and any async endpoint as a new API version.
+3. Publish events out through a transactional outbox (or CDC on `inventory_ledger`) to an `inventory.stock-changed` topic keyed by skuId, with no contract change.
+4. Take events in through an idempotent consumer with a DLQ, after #83.
+5. Apply the flash-sale options only if the measurements call for them.
