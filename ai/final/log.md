@@ -65,3 +65,4 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T20:25:16Z [frontend] PR8 tests fixed (248/248 unit x2). One unexplained flake seen once in EditSkuPage.test 'loads GET /v2 and prefills every field' (passes alone 15/15 and in the next 2 full runs): tracked for the critique (tests area). PR8 committed locally; opens after #111 merges.
 - 2026-09-29T20:26:16Z [service] PR #111 merged (state verified) after round-2 review clean; #95 and #100 closed. Follow-ups 11-12 recorded.
 - 2026-09-29T20:27:45Z [frontend] PR8 merged with final (one conflict in IfMatch.java from the abandoned earlier base, resolved to final's version; only frontend differs), gate --e2e green: 248 unit, 34 e2e; PR opened.
+- 2026-09-29T20:28:01Z [frontend] PR #112 reviewer launched (afd5320fe6a4050ca).
