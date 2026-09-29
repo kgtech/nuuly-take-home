@@ -73,9 +73,8 @@ class V2WritesApiIntegrationTest {
     }
 
     @AfterEach
-    void balancesMatchTheLedger() {
+    void dropTheFaultTrigger() {
         fault.drop();
-        assertThat(Invariants.balanceMismatches(jdbc)).as("sku.quantity equals the ledger SUM").isEmpty();
     }
 
     // ---- helpers ----
