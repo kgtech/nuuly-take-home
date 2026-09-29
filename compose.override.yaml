@@ -5,6 +5,8 @@ services:
     ports:
       # Host port 8080 (main's port, H13); override with APP_PORT if it is taken. The container listens on 8080.
       - "${APP_PORT:-8080}:8080"
+    # M-01: a bound for the JVM's MaxRAMPercentage, so a memory spike cannot take the host.
+    mem_limit: 768m
     depends_on:
       postgres:
         condition: service_healthy

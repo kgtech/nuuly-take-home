@@ -121,6 +121,8 @@ class RequestGuardTomcatIntegrationTest {
 
     private static final String QUANTITY_BODY = "{\"quantity\":1";
     private static final String DETAILS_BODY = "{\"name\":\"n\"";
+    /** The pad that makes a quantity body exactly 4096 bytes: prefix (14) + ,"pad":" (8) + pad + "} (2). */
+    private static final int AT_THE_CAP = 4096 - QUANTITY_BODY.length() - 8 - 2;
 
     static Stream<Arguments> chunkedBodies() {
         return Stream.of(
@@ -130,13 +132,21 @@ class RequestGuardTomcatIntegrationTest {
                 Arguments.of("POST /v2/inventory/ABC-1/purchase", QUANTITY_BODY, 5_000, 400),
                 Arguments.of("PUT /v2/inventory/CH-1/details", DETAILS_BODY, 40_000, 201),
                 Arguments.of("PUT /v2/inventory/CH-1/details", DETAILS_BODY, 70_000, 400),
-                // frozen, not changed (A19): an unversioned chunked body is not capped while read
-                Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, 70_000, 200));
+                // M-01 thawed A19: the unversioned POSTs count a chunked body while it is read, 4096 bytes like Content-Length
+                Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, 2_000, 200),
+                Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, AT_THE_CAP, 200),
+                Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, AT_THE_CAP + 1, 400),
+                Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, 5_000, 400),
+                Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, 70_000, 400),
+                Arguments.of("POST /inventory/ABC-1/purchase", QUANTITY_BODY, 2_000, 200),
+                Arguments.of("POST /inventory/ABC-1/purchase", QUANTITY_BODY, 5_000, 400),
+                Arguments.of("POST /inventory/ABC-1/purchase", QUANTITY_BODY, 70_000, 400));
     }
 
     /**
-     * Review R-01, F-04: a chunked body (no Content-Length) is counted as it is read on every v2 write route: 4096 bytes
-     * on the two POSTs, 65,536 on the details PUT; one within the cap is accepted.
+     * Review R-01, F-04, M-01: a chunked body (no Content-Length) is counted as it is read on every write route of both
+     * versions: 4096 bytes on the four POSTs (a body of exactly 4096 passes, one byte more is 400), 65,536 on the
+     * details PUT; one within the cap is accepted and one over it writes nothing.
      */
     @ParameterizedTest(name = "chunked {0} of about {2} bytes → {3}")
     @MethodSource("chunkedBodies")
@@ -160,9 +170,11 @@ class RequestGuardTomcatIntegrationTest {
             assertThat(response.body()).isEqualTo("Invalid request");
             assertThat(Tables.counts(jdbc)).isEqualTo(before);
         } else {
-            // the add creates CH-1 with 1; the details PUT creates it at 0
-            assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'CH-1'").query(Long.class).single())
-                    .isEqualTo(requestLine.contains("/details") ? 0 : 1);
+            // the add creates CH-1 with 1; the details PUT creates it at 0; a purchase takes 1 of ABC-1's 5
+            String sku = requestLine.contains("ABC-1") ? "ABC-1" : "CH-1";
+            long expected = requestLine.contains("/details") ? 0 : requestLine.contains("/purchase") ? 4 : 1;
+            assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = ?").param(sku).query(Long.class).single())
+                    .isEqualTo(expected);
         }
     }
 

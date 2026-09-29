@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -21,8 +22,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import com.tngtech.archunit.core.domain.JavaAccess;
 import com.tngtech.archunit.core.domain.JavaCall;
 import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaCodeUnitReference;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaFieldAccess;
+import com.tngtech.archunit.core.domain.JavaMember;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -142,8 +145,8 @@ class ArchitectureTest {
     }
 
     /**
-     * L31, invariant 5: the service methods behind the spec's operations, and every method of the service they call,
-     * reach no type of the idempotency package. The keyed writes are addV2 and purchaseV2.
+     * L31, invariant 5: the service methods behind the spec's operations, and every method of the service they call or
+     * reference (calls, method references, constructor references), reach no type of the idempotency package. The keyed writes are addV2 and purchaseV2.
      */
     @Test
     void unversionedServiceMethodsReachNoIdempotencyType() {
@@ -160,18 +163,29 @@ class ArchitectureTest {
             }
             method.getRawParameterTypes().forEach(type -> flagIdempotency(method, type, violations));
             flagIdempotency(method, method.getRawReturnType(), violations);
-            for (JavaAccess<?> access : method.getAccessesFromSelf()) {
+            // M-22: method and constructor references (InventoryService::ok, StoredResponse::new) are edges too
+            List<JavaAccess<?>> edges = new ArrayList<>(method.getAccessesFromSelf());
+            edges.addAll(method.getMethodReferencesFromSelf());
+            edges.addAll(method.getConstructorReferencesFromSelf());
+            for (JavaAccess<?> access : edges) {
                 flagIdempotency(method, access.getTargetOwner(), violations);
                 if (access instanceof JavaFieldAccess field) {
                     flagIdempotency(method, field.getTarget().getRawType(), violations);
                 }
-                if (access instanceof JavaCall<?> call && access.getTargetOwner().equals(service)) {
-                    call.getTarget().resolveMember().filter(JavaMethod.class::isInstance).map(JavaMethod.class::cast)
-                            .ifPresent(todo::add);
+                if (access.getTargetOwner().equals(service)) {
+                    if (access instanceof JavaCall<?> call) {
+                        followMethod(call.getTarget().resolveMember(), todo);
+                    } else if (access instanceof JavaCodeUnitReference<?> reference) {
+                        followMethod(reference.getTarget().resolveMember(), todo);
+                    }
                 }
             }
         }
         assertThat(violations).as("unversioned service methods reaching the idempotency package").isEmpty();
+    }
+
+    private static void followMethod(Optional<? extends JavaMember> member, Deque<JavaMethod> todo) {
+        member.filter(JavaMethod.class::isInstance).map(JavaMethod.class::cast).ifPresent(todo::add);
     }
 
     /** add, purchase, find, list and the synthetic lambda$add$0-style methods compiled from their lambdas. */

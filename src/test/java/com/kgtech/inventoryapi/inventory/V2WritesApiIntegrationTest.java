@@ -277,7 +277,8 @@ class V2WritesApiIntegrationTest {
     static Stream<Arguments> invalidBodies() {
         return Stream.of(Op.values()).flatMap(op -> Stream.of("{\"quantity\":0}", "{\"quantity\":-1}",
                 "{\"quantity\":2147483648}", "{\"quantity\":\"5\"}", "{\"quantity\":1.5}", "{\"quantity\":null}", "{}",
-                "[]", "{\"quantity\":", "").map(body -> Arguments.of(op, body)));
+                "[]", "{\"quantity\":", "", "{\"quantity\":1,\"quantity\":2}" /* M-11 */)
+                .map(body -> Arguments.of(op, body)));
     }
 
     @ParameterizedTest(name = "{0} body [{1}]")

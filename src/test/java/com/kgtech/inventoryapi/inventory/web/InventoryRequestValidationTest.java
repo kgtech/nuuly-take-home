@@ -128,6 +128,8 @@ class InventoryRequestValidationTest {
             new String[] {"array quantity", MediaType.APPLICATION_JSON_VALUE, "{\"quantity\":[5]}"},
             new String[] {"JSON null body", MediaType.APPLICATION_JSON_VALUE, "null"},
             new String[] {"malformed JSON", MediaType.APPLICATION_JSON_VALUE, "{\"quantity\":"},
+            // M-11: a duplicate property name is ambiguous, not "last one wins"
+            new String[] {"duplicate quantity", MediaType.APPLICATION_JSON_VALUE, "{\"quantity\":1,\"quantity\":2}"},
             new String[] {"empty string body", MediaType.APPLICATION_JSON_VALUE, ""},
             new String[] {"form-urlencoded", MediaType.APPLICATION_FORM_URLENCODED_VALUE, "quantity=5"});
 

@@ -160,6 +160,7 @@ class SkuDetailsApiIntegrationTest {
                 Arguments.of("non-ascii image url", "{\"name\":\"n\",\"images\":[\"https://x/\u00fc.jpg\"]}"),
                 Arguments.of("currency without amount", "{\"name\":\"n\",\"cost\":{\"currency\":\"USD\"}}"),
                 Arguments.of("details wrapped in an object", "{\"details\":{\"name\":\"n\"}}"),
+                Arguments.of("duplicate name (M-11)", "{\"name\":\"a\",\"name\":\"b\"}"),
                 Arguments.of("malformed json", "{\"name\":"),
                 Arguments.of("empty body", ""));
     }

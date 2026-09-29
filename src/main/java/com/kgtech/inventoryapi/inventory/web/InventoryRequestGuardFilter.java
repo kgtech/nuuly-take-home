@@ -32,7 +32,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * <li>a write whose most specific Accept range matching JSON has q=0 is 400 (U2, Y1, RFC 9110 section 12.5.1), which
  * the produces condition alone accepts;
  * <li>a write with a Content-Length over its cap is 400 (A19);
- * <li>on the /v2 writes, a chunked body is counted as it is read, with the same cap (R-01).
+ * <li>on every write, a chunked body is counted as it is read, with the same cap (R-01, M-01 thawed A19).
  * </ol>
  * The path is the routed one from {@link RoutedPath} (decoded segments, as Spring matches), so an encoded prefix cannot
  * bypass it. HEAD is guarded like GET (Spring serves HEAD through the GET handler). The filter runs before argument
@@ -98,12 +98,11 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
             write(response, TextErrors.invalidRequest()); // larger than any body the contract describes
             return;
         }
-        if (rule.write() && path.v2()) {
-            // A chunked body has no Content-Length: count it as it is read (review R-01).
+        if (rule.write()) {
+            // A chunked body has no Content-Length: count it as it is read (review R-01, M-01).
             chain.doFilter(new CappedBodyRequest(request, rule.cap()), response);
             return;
         }
-        // Frozen, not changed (A19): an unversioned chunked body is not counted while read, only capped by Content-Length.
         chain.doFilter(request, response);
     }
 
@@ -140,10 +139,6 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
     }
 
     private static void write(HttpServletResponse response, ResponseEntity<String> error) throws IOException {
-        response.setStatus(error.getStatusCode().value());
-        response.setContentType(MediaType.TEXT_PLAIN_VALUE);
-        response.setCharacterEncoding("UTF-8");
-        response.getWriter().write(String.valueOf(error.getBody()));
-        response.flushBuffer();
+        TextErrors.write(response, error);
     }
 }
