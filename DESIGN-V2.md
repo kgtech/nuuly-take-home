@@ -1,6 +1,6 @@
 # DESIGN-V2: stock in Postgres rows
 
-(§1–§6 describe the design as first built, with a Redis count cache and replay copy; §9 records their removal. Where they disagree, §9 wins. §10 replaces the idempotency advice with an explicit call.)
+(§1–§6 describe the design as first built, with a Redis count cache and replay copy; §9 records their removal. Where they disagree, §9 wins. §10 replaces the idempotency advice with an explicit call. §11 lists what is designed but deliberately not built.)
 
 V2 keeps the API contract of `spec/` and `openapi.yaml` unchanged, including the optional `Idempotency-Key` header, the status codes and the text/plain errors. It replaces the storage design underneath: `main` derives every balance from a SERIALIZABLE `SUM` over an append-only ledger and retries serialization failures; V2 keeps a current balance per SKU as a row, updates it conditionally at READ COMMITTED, still appends every change to the ledger, and uses Redis for two things only: a cache of the most-read stock counts, and a cache of completed idempotent responses.
 
@@ -189,6 +189,50 @@ The explicit call puts the order of checks in one method a reader can follow.
 
 **Rejected alternatives.**
 - **Keep the advice with `REQUIRED`.** That fixes the propagation but keeps the positional contract, the reflection check and the double skuId check.
-- **Store a domain outcome instead of an HTTP response.** That would drop `content_type` and the status CHECK, so it needs a migration and a new replay format (Y4). **Deferred as a future improvement, #83** (owner decision). Why it waits: every keyed caller today is the HTTP controller, so it changes no behaviour; it trades Y4's byte-for-byte replay for re-rendered replays; and it needs a two-format migration on a table whose rows are never purged (R9), including the A18 tombstone rule and the README clean-up. #83 names the triggers for revisiting it (a non-HTTP caller needing keyed writes, a response-format change replays should follow, measured lock-hold cost from rendering inside the transaction) and the proposed approach: decisions first; an additive V4 migration with outcome columns and a two-format CHECK; a domain outcome codec behind `IdempotencyStore.run`; rendering after the transaction; and a legacy read path kept for 24 hours.
+- **Store a domain outcome instead of an HTTP response.** That would drop `content_type` and the status CHECK, so it needs a migration and a new replay format (Y4). **Deferred as a future improvement, #83** (owner decision, A35; §11). Why it waits: every keyed caller today is the HTTP controller, so it changes no behaviour; it trades Y4's byte-for-byte replay for re-rendered replays; and it needs a two-format migration on a table whose rows are never purged (R9), including the A18 tombstone rule and the README clean-up. #83 names the triggers for revisiting it (a non-HTTP caller needing keyed writes, a response-format change replays should follow, measured lock-hold cost from rendering inside the transaction) and the proposed approach: decisions first; an additive V4 migration with outcome columns and a two-format CHECK; a domain outcome codec behind `IdempotencyStore.run`; rendering after the transaction; and a legacy read path kept for 24 hours.
 
 **Superseded by this section.** The §2 wording "advice around the service method (Z1 kept)", the §7 Z1 row as first written, the §9 phrase "the `@Idempotent` interceptor claims and replays", A10 and A29 (the `Fingerprinted` contract; the canonical form it defined stays).
+
+
+## 11. Designed, not built: future improvements
+
+Two changes are deferred on purpose. Each has an issue holding the full reasons, the triggers for revisiting it, the proposed approach and acceptance criteria. Neither changes anything above.
+
+**Store a domain outcome instead of the HTTP response (#83, A35).** Summarised in §10's rejected alternatives.
+- **Why it waits:** every keyed caller today is HTTP; it would trade Y4's byte-for-byte replay for re-rendered replays; and it needs a two-format migration on a never-purged table, including the A18 tombstone rule and the README clean-up.
+- **Approach:** decisions first; an additive V4 migration; a domain outcome codec behind `IdempotencyStore.run`; rendering after the transaction; and a 24 h legacy read path.
+
+**Messaging: an outbox to Kafka for ERP sync, high throughput and flash sales (#85, A36).**
+
+*Why there is no broker.*
+- **The contract is synchronous.** The spec's operations return the final outcome with fixed codes (G10); there is no `202` and no status resource, and a `GET` right after a `POST` must show the change.
+- **Correctness is one transaction.** The claim, the conditional `UPDATE` and the ledger row commit together (§2, §10), so a broker in the write path would be a dual write.
+- **Idempotency stays.** A consumer that changes Postgres is at-least-once and still needs the `idempotency_keys` claim.
+- **No consumer exists.** Nothing in this scope reads stock events.
+- **The §9 lesson applies.** A second system with no correctness benefit costs more to run than it returns.
+
+*Where it would help.*
+- **ERP integration.** Outbound, stock-change events come from the append-only ledger, with `sku.version` as a per-SKU ordering token. Inbound, adjustments arrive as messages keyed by message ID, which needs #83. Two things must come first: deciding which system owns stock, and a reconciliation report.
+- **High throughput.** Writes to different SKUs already run in parallel. Writes to one SKU serialize on its row lock, and waiting writers hold Hikari's default 10 connections. Nothing has been measured, so a load test comes first.
+- **Flash sales.** Oversell stays impossible and sold-out rejections are cheap, but purchases of the hot SKU queue on one lock. The options, from least to most contract change:
+  1. shorten the lock hold (#83's rendering move, pool sizing, `lock_timeout`);
+  2. shard the SKU's stock across bucket rows with `SKIP LOCKED`;
+  3. an admission queue with reservations, as a new versioned `202` endpoint with batched per-partition decrements (v1 unchanged);
+  4. a waiting room at the edge.
+
+*Tradeoffs.* A broker brings:
+- eventual consistency for consumers;
+- an outbox or CDC, to avoid dual writes;
+- at-least-once delivery plus deduplication;
+- per-partition ordering only;
+- new failure modes: broker down, consumer lag, poison messages;
+- brokers, schemas and Testcontainers Kafka to operate and test.
+
+In return it gives fan-out, decoupling and batching.
+
+*Approach.*
+1. Measure first.
+2. Record the decisions: source of truth, event schema, and any async endpoint as a new API version.
+3. Publish events out through a transactional outbox (or CDC on `inventory_ledger`) to an `inventory.stock-changed` topic keyed by skuId, with no contract change.
+4. Take events in through an idempotent consumer with a DLQ, after #83.
+5. Apply the flash-sale options only if the measurements call for them.

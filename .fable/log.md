@@ -101,3 +101,14 @@ Model: claude-fable-5-1. Start checkout: .claude/worktrees/fable-retro-step-6-54
   - Filed #83 (labels v2, future-improvement): today's design with references at 5bf4dc8, the technical reasons to defer (no behaviour gain while every keyed caller is HTTP; trades Y4's byte-for-byte replay for re-rendered replays; a two-format migration on a never-purged table, with A18 and the README clean-up to rework), the triggers to revisit, the proposed approach (decisions first, additive V4 migration, domain outcome codec, rendering after the transaction, 24 h legacy read path) and acceptance criteria.
   - DESIGN-V2 §10's rejected-alternative entry now points to #83, with the reasons to defer and the approach in brief. No code, test, migration or build change.
   - Accepted: the owner's "hold off; mark it as a future improvement", recorded in both places. Rejected: nothing.
+- 2026-09-29T13:16:59Z [messaging-future-improvement] Owner asked why the design uses a synchronous Postgres core instead of Kafka or a queue, and when a queue would make sense; then asked to record messaging (flash sales, high throughput, ERP, tradeoffs) as a future improvement, with why it was not built.
+  - Filed #85 (labels v2, future-improvement):
+    - why there is no broker: a synchronous contract with fixed codes (G10); one-transaction correctness; a broker would be a dual write, and consumers would still need the idempotency claim; no consumer exists; the §9 lesson;
+    - where it would help: ERP outbound and inbound, the source-of-truth decision and reconciliation; high throughput (per-SKU row lock, Hikari's default of 10 connections, all unmeasured); flash-sale options from least to most contract change;
+    - a tradeoff table, triggers, a phased approach (measure; decide; outbox out; idempotent consumer in after #83; flash-sale options) and acceptance criteria.
+  - Documented both deferred items (#83, #85):
+    - README "Designed, not built" (CLAUDE.md T6);
+    - DESIGN-V2 §11, with the header's section guide updated;
+    - DECISIONS-ADDED A35 (#83) and A36 (#85).
+  - Added to the open docs PR #84. No code, test, migration or build change.
+  - Accepted: the owner's request to record messaging as a future improvement, with the reasons. Rejected: nothing.
