@@ -105,8 +105,7 @@ async function call<T>(url: URL, init: RequestInit, timeoutMs: number): Promise<
 const JSON_HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json, text/plain' } as const;
 
 function post(body: unknown, key: string): RequestInit {
-  const headers: Record<string, string> = { ...JSON_HEADERS };
-  if (key !== null) headers[IDEMPOTENCY_KEY] = key;
+  const headers: Record<string, string> = { ...JSON_HEADERS, [IDEMPOTENCY_KEY]: key };
   return { method: 'POST', headers, body: JSON.stringify(body) };
 }
 

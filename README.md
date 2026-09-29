@@ -57,7 +57,7 @@ export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 ```bash
 cd frontend
 npm ci
-npm run dev          # http://localhost:5173, proxies /inventory and /v2 to http://localhost:8080 (start the service first; VITE_PORT and API_URL override)
+npm run dev          # http://localhost:5173, proxies /v2 to http://localhost:8080 (start the service first; VITE_PORT and API_URL override)
 npm run lint && npm run typecheck && npm test && npm run build
 npm run test:e2e     # Playwright against the real service on :8080 (add then purchase; a double submit changes stock once)
 ```
