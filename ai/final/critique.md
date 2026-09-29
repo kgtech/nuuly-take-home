@@ -251,3 +251,61 @@ Spot-checked cheap MINORs: M-11/F-3-04, M-13/F-5-03, M-16/F-3-03, M-17/F-8-04, M
 4. M-01: CappedBodyRequest on the unversioned writes and `mem_limit` in compose.
 5. Docs batch (no code): M-07, M-08, M-09, M-10 card rewordings, M-30, M-33, M-34, M-16 OpenAPI sentence.
 6. M-13 and M-12 front-end text changes; M-14 two config lines; M-11 one property.
+
+---
+
+# Outcomes (written after the fixes; the run's decisions without the owner are marked)
+
+Fix PRs: service #118, front end #117, records (this PR). Round-1 and round-2 reviews on each are in the PR threads. The per-area findings files are in [`critique-areas/`](critique-areas/); the simplification patches (proven building green in a scratch copy, not applied) are in [`critique-patches/`](critique-patches/).
+
+Outcome vocabulary: **fixed** (with PR), **recorded** (card or doc line), **won't fix** (reason), **rejected**, **owner decision needed**.
+
+| ID | Sev. | Outcome |
+|---|---|---|
+| M-01 | MAJOR | **fixed** #118: every write route counts a chunked body while it is read (4096 on the POSTs, 65536 on the details PUT) and the app has `mem_limit: 768m`; re-run of the 30 x 19 MB scenario: 30 x 400, RSS about 290 MiB. Thaws the frozen A19 behaviour (a MAJOR permits it): **decision made without the owner**, recorded on A19/H11, README, DESIGN §7. |
+| M-02 | MAJOR | **fixed** #118: `ErrorPathFilter` answers `/error` (any method or Accept) with 404 text/plain and renders Tomcat's error dispatch through `TextErrors`; library paths keep Boot's behaviour (69-request matrix identical to before except the intended rows). Cards G10, S6, C1, Z3. |
+| M-03 | MAJOR | **fixed** #117 (two rounds): wrapping rules for headings, links, code, alerts, success blocks, flex children; Playwright at 375 and 1280 px for the SKU, Edit, list, Create 412, Add/Purchase success and page-not-found pages. |
+| M-04 | MAJOR | **fixed** #118 (test): four stale `If-Match` rows on a stocked, detail-less SKU; the mutant now dies. |
+| M-05 | MINOR | **DECISION CHALLENGE, recorded**: strong ETag = details version (Target API); RFC 9110 §8.8.1/§9.3.4 deviation on card A27, DESIGN §2, README. |
+| M-06 | MINOR | **DECISION CHALLENGE, recorded**: phantom SKU from an unconditional PUT to a typo'd id, no delete (G5); card H7, README. |
+| M-07 | MINOR | **recorded**: real reason for one 400, IETF draft -07 and Stripe comparison with sources (G14, T1, DESIGN §5). |
+| M-08 | MINOR | **recorded**: versioning rationale, comparison, "compatible" defined, deprecation line (H1, DESIGN §2). |
+| M-09 | MINOR | **recorded**: G9-D drawback reworded, accepted risk on G9/H4, both deviations on README line 3. |
+| M-10 | MINOR | **recorded**: concurrency design history (D4, V1, W1, DESIGN §4). |
+| M-11 | MINOR | **fixed** #118: strict duplicate JSON name detection (one new check refining G13: **decision without the owner**, one property to revert). |
+| M-12 | MINOR | front end **fixed** #117 (Create shows only its own sentence); service text **DECISION CHALLENGE, recorded** (H8). |
+| M-13 | MINOR | **fixed** #117. |
+| M-14 | MINOR | **fixed** #118: Hikari connection timeout 3 s, `lock_timeout` 5 s (card H17); measured: lock waits 500 at about 5 s, pool starvation about 3 s, some writes up to about 10 s in a 300-writer burst. |
+| M-15 | MINOR | **won't fix**: `Content-Disposition: inline;filename=f.txt` on dotted skuIds is Spring's reflected-file-download guard, not a body or status change; not worth a response wrapper on the frozen filter path. Known. |
+| M-16 | MINOR | **recorded**: integer-valued floats refused on purpose (G13, README). |
+| M-17 | MINOR | **recorded**: Link built from the request's Host (README); a configured base URL is an owner decision. |
+| M-18 | MINOR | **recorded**: `text/plain` vs `text/plain;charset=UTF-8` (README Assumptions, C1/S5 note). |
+| M-19 | MINOR | **won't fix**: `Cache-Control: no-store` is not documented in `openapi-v2.yaml`; adding it changes only the export, and the unversioned reads deliberately get no header (rejected fix). |
+| M-20 | MINOR | **recorded**: Tomcat-rejected paths answer 400 even on GET item (README, C1). |
+| M-21 | MINOR | **DECISION CHALLENGE, recorded**: unversioned `GET /inventory` 400 for any undecodable query (Z3 wording "every path that reads its query"). |
+| M-22 | MINOR | **fixed** #118: ArchUnit L31 follows method and constructor references. |
+| M-23 | MINOR | **won't fix**: the mock drifts from Java in three unreachable ways (`limit=+5`, quantity above int32, no 24 h expiry). |
+| M-24 | MINOR | **fixed** #117 (test proven against its mutant). |
+| M-25 | MINOR | **fixed** #118 (deterministic two-connection interleaving; kills the `WHERE TRUE` mutant). |
+| M-26 | NIT | **recorded**: matrices repeat across layers (each has a home; README test note). |
+| M-27 | MINOR | **won't fix**: `sku.version` is written and never read; dropping it needs a V5 migration and V1–V4 are never edited. |
+| M-28 | MINOR | **DECISION CHALLENGE, recorded**: OD-4 against RFC 9110 §6.3; counter-argument and UUID/tab-lifetime notes (H3, README). |
+| M-29 | MINOR | **DECISION CHALLENGE, recorded**: H9/H10 protect databases nobody is claimed to have (premise now on the cards). |
+| M-30 | MINOR | **fixed** #117 (`frontend/DECISIONS.md`). |
+| M-31 | MINOR | **recorded**: what the tests protect and skip (README). |
+| M-32 | MINOR | **fixed**: a working board export command in the README (verified byte for byte). |
+| M-33 | MINOR | **fixed**: README examples use `$API` (APP_PORT aware), process phrases removed. |
+| M-34 | MINOR | **recorded**: CI parked (deviation D-1); last green gate on the final tip in the README. |
+| M-35 | NIT | **recorded**: replayed bodies are point-in-time snapshots (README). |
+| M-36 | NIT | **recorded**: append-only against the API, not the DB owner (E3, DESIGN §4). |
+| M-37 | MINOR | **won't fix now** (late refactor for no behaviour change; two of three need board-rule edits); patches kept in `critique-patches/`. **Owner decision needed** if wanted. |
+| M-38 | NIT | **fixed** #118 (dead sealed interfaces removed). |
+| M-39 | NIT | **recorded**: `@AllowsBalanceMismatch` is the documented opt-out and is unused today; the rest is noise. |
+| M-40 | NIT | **fixed** #117 (route parsing) for the trailing slash and slash ids; the dev-only StrictMode focus nit is left. |
+| M-41 | NIT | **recorded** (README deployment lines; no security headers on spec paths). |
+| M-42 | NIT | **recorded** (Z3 wording, README). |
+| M-43 | — | **rejected** by the verifier (NUL in `after` has no observable effect). |
+
+**Round-2 check after the fixes:** the reviewers of #117 and #118 re-ran their probes on the fix heads (all overflow places at 188/375/640/1280 px; the 69-request error matrix, the chunked-cap cases, lock and pool timeouts, mutations); no blocker or regression remained. A last verifier pass over the fixed findings is in [`critique-recheck.md`](critique-recheck.md) and summarised in `report.md` §7.
+
+**Open owner decisions** (unchanged from the list above): M-05, M-06, M-12 (service text), M-17, M-21, M-28, M-29, M-37, and the two decisions made for the owner in this critique (M-01 thaw, M-11 new check), which are one-line reverts if unwanted.

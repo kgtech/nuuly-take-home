@@ -1,8 +1,9 @@
 {
   "choice": "E",
-  "notes": "Owner OD-5",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "notes": "Owner OD-5. Accepted risk (critique M-09): a client that ignores Link sees 250 of N SKUs with no truncation signal; the cap is disclosed in openapi.yaml and the README.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
-    "B": "Superseded by OD-5: opt-in limit on the unversioned list is now a /v2 extension; the unversioned page is fixed at 250."
+    "B": "Superseded by OD-5: opt-in limit on the unversioned list is now a /v2 extension; the unversioned page is fixed at 250.",
+    "D": "Superseded by OD-5: a default page size is what OD-5 now does on GET /inventory (fixed 250, after only). It was rejected earlier because a spec client would no longer get every SKU; it is accepted now because an unbounded list ran out of memory at 1M SKUs (C-02)."
   }
 }

@@ -1,8 +1,9 @@
 {
-  "choice": "D",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "E",
+  "notes": "Class names follow the code.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
-    "A": "Superseded: the code keeps the advice, the valve and the container settings in inventory.web; moving them buys nothing, and the rules follow the real layout."
+    "A": "Superseded: the code keeps the advice, the valve and the container settings in inventory.web; moving them buys nothing, and the rules follow the real layout.",
+    "D": "Superseded: the class is OpenApiGroups, and RouteKind and RoutedPath exist."
   }
 }

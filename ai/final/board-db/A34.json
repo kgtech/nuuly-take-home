@@ -1,8 +1,9 @@
 {
-  "choice": "D",
-  "notes": "Owner OD-4",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "E",
+  "notes": "Test names follow the code (grep of src/test).",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
-    "A": "Superseded by OD-4: the single order for both POSTs is split into an unversioned order and a /v2 order."
+    "A": "Superseded by OD-4: the single order for both POSTs is split into an unversioned order and a /v2 order.",
+    "D": "Superseded: the test line named IdempotencyHeaderOrderTest and IdempotencyApiIntegrationTest, which no longer exist."
   }
 }

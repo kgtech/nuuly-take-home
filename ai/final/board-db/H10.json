@@ -1,7 +1,7 @@
 {
   "choice": "A",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "notes": "Approved at the plan gate (2026-09-29) Premise (critique M-29, decision challenge): defensive. No build v2 database is claimed to exist, and E3 says there is no in-place upgrade; the \"v2\" prefix keeps a key stored by an unversioned request from replaying on /v2. Removing it would change behaviour for a migrated database, so it stays.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
     "B": "A key stored by build v2's unversioned POST would replay an InventoryItem body on /v2."
   }

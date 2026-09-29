@@ -1,8 +1,9 @@
 {
-  "choice": "A",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "C",
+  "notes": "Critique M-01 (MAJOR): the prompt's freeze of build v2's unversioned chunked behaviour is lifted for this one item, and the service PR that implements the cap merges first. Both POSTs of both versions: 4096 bytes; PUT details: 65536; chunked bodies counted while read. The app service in compose.override.yaml has mem_limit 768m (MaxRAMPercentage 75 follows it; a plain docker run has no cap).",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
+    "A": "Superseded by critique M-01 (MAJOR, confirmed): an unversioned chunked POST had no cap, and 30 concurrent 19 MB chunked bodies took the app from 367 MiB to 3.16 GiB. The prompt froze that behaviour unless the critique rates it MAJOR or worse; it did.",
     "B": "A huge body would be parsed."
   }
 }

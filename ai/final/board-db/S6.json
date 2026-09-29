@@ -1,6 +1,8 @@
 {
-  "choice": "A",
-  "notes": "",
-  "updatedAt": "2026-09-24T17:28:49.211Z",
-  "why": {}
+  "choice": "E",
+  "notes": "Follow-up 13 and critique M-42.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "A": "Superseded by follow-up 13 and critique M-42: the code covers /v3/api-docs.yaml/**, an unknown group is 404 with Boot's JSON body, and the query rule is not literally \"every path\"."
+  }
 }

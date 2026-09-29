@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Critique M-14 (fix): configuration, one line each.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "B": "The 30 s default lets one stalled lock or a database outage hold requests and then the whole pool (critique M-14).",
+    "C": "It does not bound the wait for a pooled connection, and one value must fit the slowest legitimate statement."
+  }
+}

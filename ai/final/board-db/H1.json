@@ -1,8 +1,9 @@
 {
-  "choice": "A",
-  "notes": "Owner OD-2",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "E",
+  "notes": "Owner OD-2. Rationale (critique M-08): the spec's URLs stay byte for byte what the assessment fixes, and every extension is additive under /v2. Comparison (critique area 8; vendor wording is close, not letter-exact): Google AIP-185 puts the major version first in the URI path (https://google.aip.dev/185); Shopify puts it in the URL, quarterly, with 12 months' support (https://shopify.dev/docs/api/usage/versioning); GitHub uses the X-GitHub-Api-Version header, date-based, default 2022-11-28 when absent, prior version supported 24 months (https://docs.github.com/en/rest/about-the-rest-api/api-versions); Stripe uses the Stripe-Version header, monthly non-breaking releases and twice-yearly breaking majors (https://docs.stripe.com/api/versioning). This build matches AIP-185 and Shopify on the mechanism and differs from GitHub and Stripe on purpose, because the spec's paths cannot change. Deprecation: no schedule; a /v2 operation goes only by an owner decision. \"Compatible\" means additive response fields and new optional inputs only.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
+    "A": "Superseded by critique M-08: same decision, now with the definition of \"compatible\" and the deprecation line.",
     "B": "A header is invisible in a URL, a curl line and the Swagger UI, and needs a default for callers that send none.",
     "C": "Same visibility problem as a header, and caches key on the URL.",
     "D": "The spec's four operations would carry behaviour the spec does not list (idempotency keys, limit, details)."

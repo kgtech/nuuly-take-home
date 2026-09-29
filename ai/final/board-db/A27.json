@@ -1,8 +1,9 @@
 {
-  "choice": "A",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "C",
+  "notes": "Critique M-05: the /v2 strong ETag is the details version only (Target API). Recorded as a known RFC 9110 deviation; no code change.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
+    "A": "Superseded by critique M-05 (decision challenge, not fixable by us): the ETag deviation is now recorded on the card.",
     "B": "It adds a second store with no measured need (A30)."
   }
 }
