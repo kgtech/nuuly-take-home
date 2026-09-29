@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -309,8 +310,26 @@ class IdempotencyStoreTest {
     }
 
     /**
+     * A33: when joined, a write failure marks the caller's transaction rollback-only, so the caller cannot commit even
+     * if it catches the exception (PROPAGATION_NESTED would roll back only to a savepoint and let the caller commit).
+     */
+    @Test
+    void joinedWriteFailureMarksTheCallerRollbackOnly() {
+        UUID key = UUID.randomUUID();
+
+        assertThatThrownBy(() -> transaction.executeWithoutResult(status -> {
+            assertThatThrownBy(() -> execute(add(key, "widget", 5), () -> {
+                throw new IllegalStateException("boom");
+            })).hasMessage("boom");
+            assertThat(status.isRollbackOnly()).as("caller marked rollback-only").isTrue();
+        })).isInstanceOf(UnexpectedRollbackException.class);
+        assertThat(rows()).isZero();
+    }
+
+    /**
      * A33: joining a stricter caller would run the claim at its isolation, where a concurrent claim of the same key
-     * fails with 40001 instead of replaying, so run refuses it before any I/O.
+     * fails with 40001 instead of replaying, so run refuses it before any I/O and without joining. The checks run
+     * inside the caller: after the caller rolls back, a claim written before the refusal would be gone too.
      */
     @ParameterizedTest
     @ValueSource(ints = {TransactionDefinition.ISOLATION_REPEATABLE_READ, TransactionDefinition.ISOLATION_SERIALIZABLE})
@@ -319,12 +338,14 @@ class IdempotencyStoreTest {
         TransactionTemplate outer = new TransactionTemplate(transactionManager);
         outer.setIsolationLevel(isolation);
 
-        assertThatThrownBy(() -> outer.executeWithoutResult(status -> execute(add(key, "widget", 5), OK)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("IdempotencyStore.run joins only a READ COMMITTED transaction");
-
+        outer.executeWithoutResult(status -> {
+            assertThatThrownBy(() -> execute(add(key, "widget", 5), OK))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("IdempotencyStore.run joins only a READ COMMITTED transaction");
+            assertThat(rows()).as("no claim, seen from inside the caller").isZero();
+            assertThat(status.isRollbackOnly()).as("refused before joining").isFalse();
+        });
         assertThat(actionRuns).hasValue(0);
-        assertThat(rows()).isZero();
     }
 
     private long currentTransactionId() {
