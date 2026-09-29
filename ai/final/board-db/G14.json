@@ -1,8 +1,9 @@
 {
   "choice": "D",
-  "notes": "Owner OD-3 and OD-4",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "notes": "Owner OD-3 and OD-4. One 400, like the spec (critique M-07): a reused key with a different request and an expired key both answer 400 \"Invalid request\", because the spec's POSTs list one client-error code; an in-flight duplicate does not answer an error at all, it waits on the first request's row and replays its response (the draft's 409 is not used). Accepted cost: the client cannot tell mismatch and expiry apart. The old reason for rejecting 409/422 (\"adds status codes the spec does not list\") no longer holds, because /v2 also answers 412. Comparison: IETF draft-ietf-httpapi-idempotency-key-header revision -07 (2025-10-15, \"Expired & archived\"; https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) says SHOULD reply 422 for a different payload, 409 for an in-flight duplicate and 400 for a missing key; it is not a standard and has expired. Stripe (https://docs.stripe.com/api/idempotent_requests) answers a reused key with different parameters with a 400-class idempotency error.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
-    "A": "Superseded by OD-3: only /v2 writes touch the table."
+    "A": "Superseded by OD-3: only /v2 writes touch the table.",
+    "B": "The real reason is one 400 for every request problem, like the spec's single client-error code; the client cannot tell mismatch and expiry apart (accepted); an in-flight duplicate waits and replays instead of answering 409. The earlier reason (status codes the spec does not list) fails because /v2 answers 412 too. Draft revision -07 (expired and archived) says 422 for a different payload, 409 for an in-flight duplicate, 400 for a missing key; Stripe answers a mismatched reuse with a 400-class idempotency error (critique M-07)."
   }
 }

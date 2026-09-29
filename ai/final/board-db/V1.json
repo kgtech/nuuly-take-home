@@ -1,6 +1,6 @@
 {
   "choice": "C",
-  "notes": "This will help bring this system into closer alignment with shopify https://shopify.engineering/scaling-inventory-reservations\n\nClaim: When payment succeeds, we permanently deduct quantity from the inventory ledger (source of truth).\n\n\nThey use a reserve and claim process but we're eschewing reserve for now.",
-  "updatedAt": "2026-09-29T19:12:01.427Z",
+  "notes": "This will help bring this system into closer alignment with shopify https://shopify.engineering/scaling-inventory-reservations\n\nClaim: When payment succeeds, we permanently deduct quantity from the inventory ledger (source of truth).\n\n\nThey use a reserve and claim process but we're eschewing reserve for now. Concurrency design history (critique M-10): the ledger-SUM design with SERIALIZABLE transactions and retries was built first (V1-C, W1-B, D4-D); #26 showed 40001 serialization failures on writes to different SKUs; it was replaced by a balance row plus the append-only ledger at READ COMMITTED (E1). The old \"about 4h more\" cost note is cleared.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {}
 }

@@ -1,7 +1,7 @@
 {
   "choice": "A",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "notes": "Approved at the plan gate (2026-09-29) Premise (critique M-29, decision challenge): defensive. No build v2 database is claimed to exist, and E3 says there is no in-place upgrade; the NOT VALID narrowing protects databases nobody is said to have. It stays because migrations V1-V3 are frozen and dropping V4 would leave the schema wider than the API.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
     "B": "It leaves the schema saying the API can store what it cannot.",
     "C": "It fails on a database that holds an old row."

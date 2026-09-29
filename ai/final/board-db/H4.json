@@ -1,7 +1,7 @@
 {
   "choice": "A",
-  "notes": "Owner OD-5",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "notes": "Owner OD-5. Accepted risk (critique M-09): a client that ignores Link sees 250 of N SKUs with no truncation signal.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
     "B": "Page-size control is an extension, and extensions live under /v2.",
     "C": "An unbounded list failed with OutOfMemoryError at 1M SKUs (C-02)."

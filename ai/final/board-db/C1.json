@@ -1,8 +1,9 @@
 {
-  "choice": "E",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "F",
+  "notes": "Critique M-02 (MAJOR): /error answered 500 with Boot's JSON or Whitelabel HTML, and a bad chunk size answered 400 application/json; both now answer text/plain. M-42: the undecodable-query rule says \"every path that reads its query\". Follow-up 5: \"add\", not \"create\". Reviewer nit: the guard filter, interceptor and Tomcat valve write text/plain;charset=UTF-8 while the advice writes text/plain (same media type, charset parameter differs; S5).",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
-    "A": "Superseded: the classes live in inventory.web (A37), and /v2 paths are named."
+    "A": "Superseded: the classes live in inventory.web (A37), and /v2 paths are named.",
+    "E": "Superseded by critique M-02 (MAJOR): a direct /error request and malformed chunk framing answered Boot's JSON or HTML with 500 or 400; and by M-42 and follow-up 5 (wording)."
   }
 }

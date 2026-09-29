@@ -1,8 +1,9 @@
 {
-  "choice": "A",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "C",
+  "notes": "Critique M-01 lifts the unversioned chunked exemption: every write route counts a chunked body while it is read.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
+    "A": "Superseded by critique M-01: unversioned chunked bodies are capped like every other write body.",
     "B": "The next new route can repeat L21."
   }
 }

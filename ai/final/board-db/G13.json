@@ -1,8 +1,9 @@
 {
-  "choice": "D",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "E",
+  "notes": "Critique M-11: the last of two duplicate names won ({\"quantity\":1,\"quantity\":2} added 2), so a parser differential could change the amount; strict detection is adopted as a new check. Critique M-16: refusing 5.0 and 1e2 is deliberate (the spec's quantity is an integer written as digits).",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
-    "A": "Superseded: the rule now names the /v2 bodies and the details body."
+    "A": "Superseded: the rule now names the /v2 bodies and the details body.",
+    "D": "Superseded by critique M-11 and M-16: duplicate names were accepted (last one won), and the refusal of 5.0 and 1e2 was undocumented."
   }
 }

@@ -1,8 +1,9 @@
 {
-  "choice": "E",
-  "notes": "Approved at the plan gate (2026-09-29)",
-  "updatedAt": "2026-09-29T21:00:00Z",
+  "choice": "F",
+  "notes": "Critique M-36: append-only by trigger holds against the API, not against the DB owner.",
+  "updatedAt": "2026-09-29T23:00:00Z",
   "why": {
-    "A": "Superseded: build v2 rewrote V1, so there is no V3 backfill and no MigrationUpgradeTest, and no in-place upgrade from main."
+    "A": "Superseded: build v2 rewrote V1, so there is no V3 backfill and no MigrationUpgradeTest, and no in-place upgrade from main.",
+    "E": "Superseded by critique M-36: the limit of the trigger guarantee is now stated."
   }
 }

@@ -1,6 +1,8 @@
 {
-  "choice": "A",
-  "notes": "Square recommends starting with an alphanumeric character and not including punctuation. \n\nSKUs:\n\nEach SKU should be unique for accurate inventory tracking. Avoid duplicate SKUs, even if it’s a variation of the same product.\nDo not use special characters or punctuation; only use numbers and letters from the alphabet.\nKeep it concise and logical. The first few letters should represent the highest category of importance depending on your business (for example, brand, make, then model).\nAlways starting with a letter can help employees easily identify product categories.\nMaintain consistency in your SKU format across all products to streamline your inventory management. This consistency makes it easier for employees to understand and manage the SKUs.\nPeriodically review and update your SKU system to ensure it remains relevant and efficient, especially as your product assortments evolve.\n\nhttps://squareup.com/us/en/the-bottom-line/operating-your-business/stock-keeping-unit\n\n",
-  "updatedAt": "2026-09-24T16:10:25.486Z",
-  "why": {}
+  "choice": "D",
+  "notes": "Follow-up 5: \"add\", not \"create\".",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "A": "Superseded by follow-up 5: \"POST create\" no longer exists after OD-6."
+  }
 }
