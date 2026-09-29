@@ -112,3 +112,11 @@ Model: claude-fable-5-1. Start checkout: .claude/worktrees/fable-retro-step-6-54
     - DECISIONS-ADDED A35 (#83) and A36 (#85).
   - Added to the open docs PR #84. No code, test, migration or build change.
   - Accepted: the owner's request to record messaging as a future improvement, with the reasons. Rejected: nothing.
+- 2026-09-29T14:02:15Z [concurrency-analysis] Owner asked "What about concurrency?", then asked to add the answer to #85 and DESIGN-V2.
+  - Added a "Concurrency" section to #85's body and a *Concurrency.* subsection to DESIGN-V2 §11 under the #85 entry:
+    - what holds today, each row naming its mechanism and its test (same-SKU purchases and adds, different SKUs, one key sent twice at once, creates of one new SKU, PUT during a purchase, conditional PUTs, reads, deadlocks, several instances);
+    - the two accepted races that change only the error text (§2 purchase, §8 conditional PUT);
+    - the limits: a hot SKU serializes; pool starvation under the Hikari and Tomcat defaults (nothing set in application.yaml); no lock_timeout or statement_timeout; no load test;
+    - hardening without a broker (flash-sale option 1) and where a queue starts to help (option 3).
+  - Test names checked against src/test before writing. Added to the open docs PR #84. No code, test, migration or build change.
+  - Accepted: the owner's request to record the concurrency analysis in both places. Rejected: nothing.

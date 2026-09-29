@@ -211,6 +211,31 @@ Two changes are deferred on purpose. Each has an issue holding the full reasons,
 - **No consumer exists.** Nothing in this scope reads stock events.
 - **The §9 lesson applies.** A second system with no correctness benefit costs more to run than it returns.
 
+*Concurrency.* Postgres coordinates every concurrent write, so a queue would not fix a correctness problem. What holds today, each backed by a test at 8 threads:
+
+| Scenario | Mechanism | Result | Test |
+|---|---|---|---|
+| Purchases of one SKU | Conditional `UPDATE` waits on the row lock, then re-checks `quantity >= :q` on the new row version (§2); `CHECK` backs it | Never oversells | `InventoryConcurrencyTest`, `InventoryHttpConcurrencyTest` `concurrentPurchasesNeverOversell` |
+| Adds to one SKU | Same row lock | No lost update | `concurrentAddsAreNeverLost` (both classes) |
+| Writes to different SKUs | Different rows, no shared lock | Run in parallel | `CrossSkuConcurrencyTest` |
+| One Idempotency-Key, sent twice at once | The second claim blocks on the primary key until the first commits, then replays or rejects (§10) | One stock change | `IdempotencyHttpConcurrencyTest` |
+| Creates of one new SKU | `INSERT … ON CONFLICT` on the primary key (§8) | One 201; the rest 409, or a concurrent spec add lands on the created SKU | `SkuDetailsConcurrencyTest` |
+| PUT during a purchase | The PUT's KEY SHARE is compatible with the purchase's FOR NO KEY UPDATE (§8) | Neither waits | `aPutCompletesWhileAPurchaseHoldsTheRowLock` |
+| Conditional PUTs | `version = ANY(:expected)` in one statement | Exactly one applies | `concurrentConditionalPutsApplyExactlyOne` |
+| Reads | MVCC snapshot at autocommit (§9) | Never wait on a writer | `findNeverWaitsOnAWriterHoldingTheRowLock` |
+| Deadlocks | One lock order in every transaction (§2) | None possible | By construction |
+| Several app instances | The app keeps no state; Postgres coordinates | Same guarantees | `DurabilityAcrossServiceInstancesTest` (durability only, not concurrent cross-instance writes) |
+
+Two accepted races change only which error text is returned, never the stock: the purchase's "Insufficient inventory" versus "SKU not found" around a concurrent create (§2), and a conditional PUT's 404 versus 412 (§8).
+
+The limits are throughput, not correctness:
+- **A hot SKU serializes.** Its writes run one at a time, so its throughput is roughly 1 / lock-hold time. A keyed write holds the lock longer, because the response is rendered and stored inside the transaction (#83 would move rendering out).
+- **Pool starvation.** `application.yaml` sets no pool or thread sizes, so the defaults apply: Hikari has 10 connections with a 30 s `connectionTimeout`, and Tomcat has 200 threads. Writers waiting on a hot SKU's lock hold connections, so requests for other SKUs wait up to 30 s for one and then fail with 500.
+- **No bounded wait.** There is no `lock_timeout` or `statement_timeout`, so a waiter waits as long as the lock holder takes.
+- **Unmeasured.** The concurrency tests prove correctness at 8 threads; there is no load test.
+
+Hardening that needs no broker and no contract change is flash-sale option 1 below: size the pool and its timeout on purpose, set `lock_timeout` and `statement_timeout` so overload answers with a quick 500 instead of a 30 s wait, and add a load test. A queue helps only past that point: one consumer per skuId partition applies purchases in order with no lock wait and can batch them into one transaction, at the price of an asynchronous contract (option 3).
+
 *Where it would help.*
 - **ERP integration.** Outbound, stock-change events come from the append-only ledger, with `sku.version` as a per-SKU ordering token. Inbound, adjustments arrive as messages keyed by message ID, which needs #83. Two things must come first: deciding which system owns stock, and a reconciliation report.
 - **High throughput.** Writes to different SKUs already run in parallel. Writes to one SKU serialize on its row lock, and waiting writers hold Hikari's default 10 connections. Nothing has been measured, so a load test comes first.
