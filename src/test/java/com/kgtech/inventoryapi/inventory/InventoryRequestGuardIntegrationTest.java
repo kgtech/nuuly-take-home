@@ -4,8 +4,10 @@ import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 
+import java.net.URI;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -17,6 +19,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
@@ -25,7 +28,12 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.kgtech.inventoryapi.Tables;
 import com.kgtech.inventoryapi.IntegrationTest;
 
-/** Issue #23 (C-04, C-34): a raw ';' in the SKU segment and an Accept that excludes JSON write nothing. */
+/**
+ * Issue #23 (C-04, C-34), F-04 (H11, L21): the request guard's rules hold on every write route of both versions: a raw
+ * ';' (or %3B) in the SKU segment, an Accept that excludes JSON, and a body over the cap write nothing. The routes
+ * are the spec's, build v2's, and the ones F-04 adds a guard for (v2 purchase and details); the guard answers before
+ * routing, so a route that does not exist yet still gets its frozen answer. The filter runs before @Valid (H-M13).
+ */
 @IntegrationTest
 @AutoConfigureMockMvc
 class InventoryRequestGuardIntegrationTest {
@@ -36,11 +44,37 @@ class InventoryRequestGuardIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    private Map<String, Long> seeded;
+
     @BeforeEach
     void seed() {
         Tables.reset(jdbc);
         Tables.seed(jdbc, "ABC-1", 5);
+        seeded = Tables.counts(jdbc);
     }
+
+    private static final String QUANTITY = "{\"quantity\":1";
+    private static final String DETAILS = "{\"name\":\"n\"";
+    private static final String V2_CREATE = "{\"details\":{\"name\":\"n\"},\"initialQuantity\":1";
+
+    /** A write route of either version: method, path with the SKU ABC-1, and a valid body's JSON without its closing brace. */
+    private record Route(HttpMethod method, String path, String body, int cap) {
+
+        @Override
+        public String toString() {
+            return method + " " + path;
+        }
+    }
+
+    // The v2 item POST (create) cap is temporary: that route is repurposed later, and its cap follows the new route.
+    private static final Route POST_ITEM = new Route(HttpMethod.POST, "/inventory/ABC-1", QUANTITY, 4096);
+    private static final Route POST_PURCHASE = new Route(HttpMethod.POST, "/inventory/ABC-1/purchase", QUANTITY, 4096);
+    private static final Route V2_POST_ITEM = new Route(HttpMethod.POST, "/v2/inventory/ABC-1", V2_CREATE, 65_536);
+    private static final Route V2_POST_PURCHASE = new Route(HttpMethod.POST, "/v2/inventory/ABC-1/purchase", QUANTITY, 4096);
+    private static final Route V2_PUT_ITEM = new Route(HttpMethod.PUT, "/v2/inventory/ABC-1", DETAILS, 65_536);
+    private static final Route V2_PUT_DETAILS = new Route(HttpMethod.PUT, "/v2/inventory/ABC-1/details", DETAILS, 65_536);
+    private static final Route[] WRITE_ROUTES =
+            {POST_ITEM, POST_PURCHASE, V2_POST_ITEM, V2_POST_PURCHASE, V2_PUT_ITEM, V2_PUT_DETAILS};
 
     private MockHttpServletResponse send(MockHttpServletRequestBuilder request) throws Exception {
         return mvc.perform(request).andReturn().getResponse();
@@ -52,8 +86,17 @@ class InventoryRequestGuardIntegrationTest {
 
     /** One Accept header exactly: the value under test. */
     private static MockHttpServletRequestBuilder jsonPost(String path, String accept) {
-        return post(path).contentType(APPLICATION_JSON).header(HttpHeaders.ACCEPT, accept).content("{\"quantity\":1}")
-                .header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+        return write(HttpMethod.POST, path, "{\"quantity\":1}", accept);
+    }
+
+    /** A well-formed write with a valid Idempotency-Key. The path is a URI, so %3B reaches the guard undecoded. */
+    private static MockHttpServletRequestBuilder write(HttpMethod method, String path, String body, String accept) {
+        return request(method, URI.create(path)).contentType(APPLICATION_JSON).header(HttpHeaders.ACCEPT, accept)
+                .content(body).header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+    }
+
+    private static MockHttpServletRequestBuilder write(Route route, String path, String accept) {
+        return write(route.method(), path, route.body() + "}", accept);
     }
 
     static Stream<Arguments> matrixSegments() {
@@ -62,7 +105,38 @@ class InventoryRequestGuardIntegrationTest {
                 Arguments.of("purchase", jsonPost("/inventory/ABC-1;x/purchase"), 404, "SKU not found"),
                 Arguments.of("get", get("/inventory/ABC-1;x=y").accept(APPLICATION_JSON), 404, "SKU not found"),
                 Arguments.of("purchase, matrix on the base segment", jsonPost("/inventory;v=1/ABC-1;x/purchase"), 404,
-                        "SKU not found"));
+                        "SKU not found"),
+                Arguments.of("create, %3B", jsonPost("/inventory/ABC-1%3Blot=7"), 400, "Invalid request"),
+                Arguments.of("purchase, %3B", jsonPost("/inventory/ABC-1%3Bx/purchase"), 404, "SKU not found"),
+                // the filter runs before @Valid (H-M13): a ';' SKU with a bad body gets the SKU answer
+                Arguments.of("purchase, ';' and a bad body",
+                        write(HttpMethod.POST, "/inventory/ABC-1;x/purchase", "{\"quantity\":0}", "application/json"), 404,
+                        "SKU not found"),
+                // F-04: the same rules on every /v2 route
+                Arguments.of("v2 get", get("/v2/inventory/ABC-1;x=y").accept(APPLICATION_JSON), 404, "SKU not found"),
+                Arguments.of("v2 get, %3B", get(URI.create("/v2/inventory/ABC-1%3Bx")).accept(APPLICATION_JSON), 404,
+                        "SKU not found"),
+                Arguments.of("v2 create", write(V2_POST_ITEM, "/v2/inventory/ABC-1;lot=7", "application/json"), 400,
+                        "Invalid request"),
+                Arguments.of("v2 create, %3B", write(V2_POST_ITEM, "/v2/inventory/ABC-1%3Blot=7", "application/json"),
+                        400, "Invalid request"),
+                Arguments.of("v2 put item", write(V2_PUT_ITEM, "/v2/inventory/ABC-1;lot=7", "application/json"), 400,
+                        "Invalid request"),
+                Arguments.of("v2 purchase", write(V2_POST_PURCHASE, "/v2/inventory/ABC-1;x/purchase", "application/json"),
+                        404, "SKU not found"),
+                Arguments.of("v2 purchase, %3B",
+                        write(V2_POST_PURCHASE, "/v2/inventory/ABC-1%3Bx/purchase", "application/json"), 404,
+                        "SKU not found"),
+                Arguments.of("v2 purchase, ';' and a bad body",
+                        write(HttpMethod.POST, "/v2/inventory/ABC-1;x/purchase", "{\"quantity\":0}", "application/json"),
+                        404, "SKU not found"),
+                Arguments.of("v2 purchase, matrix on the literal segments",
+                        write(V2_POST_PURCHASE, "/v2;a=b/inventory;v=1/ABC-1;x/purchase;y", "application/json"), 404,
+                        "SKU not found"),
+                Arguments.of("v2 details", write(V2_PUT_DETAILS, "/v2/inventory/ABC-1;x/details", "application/json"),
+                        400, "Invalid request"),
+                Arguments.of("v2 details, %3B", write(V2_PUT_DETAILS, "/v2/inventory/ABC-1%3Bx/details",
+                        "application/json"), 400, "Invalid request"));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -84,16 +158,18 @@ class InventoryRequestGuardIntegrationTest {
                 Arguments.of("xml only", "application/xml"),
                 Arguments.of("json refused, wildcard accepted (RFC 9110: the specific range wins)",
                         "application/json;q=0, */*;q=0.1"),
-                Arguments.of("same, other order", "*/*;q=0.1, application/json;q=0"));
+                Arguments.of("same, other order", "*/*;q=0.1, application/json;q=0"),
+                // equally specific ranges: the first listed decides (M-13 tie-break, replaces C3's "highest q")
+                Arguments.of("tie, first listed refuses", "application/json;q=0, application/json;q=1"));
     }
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("jsonExcluded")
     void postWhoseAcceptExcludesJsonIs400AndWritesNothing(String what, String accept) throws Exception {
-        for (String path : new String[] {"/inventory/ABC-1", "/inventory/ABC-1/purchase"}) {
-            MockHttpServletResponse response = send(jsonPost(path, accept));
+        for (Route route : WRITE_ROUTES) {
+            MockHttpServletResponse response = send(write(route, route.path(), accept));
 
-            assertThat(response.getStatus()).as(path).isEqualTo(400);
+            assertThat(response.getStatus()).as(route.toString()).isEqualTo(400);
             assertThat(response.getContentType()).startsWith("text/plain");
             assertThat(response.getContentAsString()).isEqualTo("Invalid request");
         }
@@ -106,7 +182,10 @@ class InventoryRequestGuardIntegrationTest {
         assertThat(send(jsonPost("/inventory/ABC-1", "application/*;q=0.5")).getStatus()).isEqualTo(200);
         assertThat(send(jsonPost("/inventory/ABC-1", "application/json;q=0.5")).getStatus()).isEqualTo(200);
         assertThat(send(jsonPost("/inventory/ABC-1", "text/plain, application/json")).getStatus()).isEqualTo(200);
-        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(9);
+        // equally specific ranges: the first listed decides
+        assertThat(send(jsonPost("/inventory/ABC-1", "application/json;q=1, application/json;q=0")).getStatus())
+                .isEqualTo(200);
+        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(10);
     }
 
     /** All Accept lines count: a refusal on a second line still refuses. */
@@ -118,11 +197,46 @@ class InventoryRequestGuardIntegrationTest {
         assertNothingWritten();
     }
 
+    /** A valid JSON body of exactly {@code bytes} bytes: the route's body plus an ignored property (G13). */
+    private static String padded(Route route, int bytes) {
+        String head = route.body() + ",\"pad\":\"";
+        return head + "d".repeat(bytes - head.length() - 2) + "\"}";
+    }
+
+    /** A body over the cap is 400 by Content-Length alone (A19, H11): 4 KB on the spec's routes, 64 KB on /v2 writes. */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("capRoutes")
+    void bodyOverTheCapIs400AndWritesNothing(Route route) throws Exception {
+        MockHttpServletResponse response = send(
+                write(route.method(), route.path(), padded(route, route.cap() + 1), "application/json"));
+
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThat(response.getContentType()).startsWith("text/plain");
+        assertThat(response.getContentAsString()).isEqualTo("Invalid request");
+        assertNothingWritten();
+    }
+
+    static Stream<Route> capRoutes() {
+        return Stream.of(WRITE_ROUTES);
+    }
+
+    /** The cap itself passes the filter: the spec's routes at 4096 bytes reach the write. */
+    @Test
+    void bodyAtTheCapPassesTheGuard() throws Exception {
+        assertThat(send(write(POST_PURCHASE.method(), POST_PURCHASE.path(), padded(POST_PURCHASE, 4096),
+                "application/json")).getStatus()).isEqualTo(200);
+        assertThat(send(write(POST_ITEM.method(), POST_ITEM.path(), padded(POST_ITEM, 4096), "application/json"))
+                .getStatus()).isEqualTo(200);
+        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
+        // v2 create: temporary, follows the route's repurposing
+        Route create = new Route(HttpMethod.POST, "/v2/inventory/AT-CAP", V2_CREATE, 65_536);
+        assertThat(send(write(create.method(), create.path(), padded(create, 65_536), "application/json"))
+                .getStatus()).isEqualTo(201);
+    }
+
     private void assertNothingWritten() {
         assertThat(jdbc.sql("SELECT quantity, version FROM sku WHERE sku_id = 'ABC-1'").query().singleRow())
                 .containsEntry("quantity", 5L).containsEntry("version", 1L);
-        assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isEqualTo(1);
-        assertThat(jdbc.sql("SELECT count(*) FROM inventory_ledger").query(Long.class).single()).isEqualTo(1);
-        assertThat(jdbc.sql("SELECT count(*) FROM idempotency_keys").query(Long.class).single()).isZero();
+        assertThat(Tables.counts(jdbc)).isEqualTo(seeded);
     }
 }

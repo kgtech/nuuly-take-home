@@ -1,0 +1,8 @@
+{
+  "choice": "A",
+  "notes": "Owner OD-6",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "It mixes stock and details in one request, so a retry could double the stock or overwrite details."
+  }
+}

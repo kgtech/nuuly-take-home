@@ -7,7 +7,7 @@ Routes (hash router): `#/` list, `#/new` create a SKU with details (v2), `#/sku/
 ## Run
 
     npm install
-    npm run dev          # http://localhost:15173, proxies /inventory and /v2 to http://localhost:18080 (override: VITE_PORT, API_URL)
+    npm run dev          # http://localhost:5173, proxies /inventory and /v2 to http://localhost:8080 (override: VITE_PORT, API_URL)
 
 Start the service first (`docker compose up --build` in the repo root).
 

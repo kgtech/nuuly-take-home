@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-// Runs against the real service (API_URL, default :18080) through the Vite dev proxy (VITE_PORT, default 15173).
+// Runs against the real service (API_URL, default :8080) through the Vite dev proxy (VITE_PORT, default 5173).
 const sku = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 

@@ -1,0 +1,8 @@
+{
+  "choice": "D",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded: V3 adds sku_details, whose rows are never deleted either."
+  }
+}

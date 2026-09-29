@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Owner OD-4",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "A caller who sends a key believes the write is retry-safe, and it is not.",
+    "C": "The spec never had the key."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "choice": "C",
+  "notes": "This will help bring this system into closer alignment with shopify https://shopify.engineering/scaling-inventory-reservations\n\nClaim: When payment succeeds, we permanently deduct quantity from the inventory ledger (source of truth).\n\n\nThey use a reserve and claim process but we're eschewing reserve for now.",
+  "updatedAt": "2026-09-29T19:12:01.427Z",
+  "why": {}
+}
