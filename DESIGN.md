@@ -30,7 +30,7 @@ Postgres is the only data store. There is no cache, no queue and no second copy 
 | `sku_details` | `sku_id` primary key (references `sku`), name, description, cost, image URLs, `version` | Details are never columns on `sku` (A22): the stock UPDATE rewrites its row under a lock, so a wide row would tax every purchase. Rows are never deleted. |
 | `idempotency_keys` | `idempotency_key uuid` primary key, `operation`, `sku_id`, `request_hash bytea(32)`, `status`, `content_type`, `body`, `created_at` | Only `/v2` writes touch it (invariant 5). All-NULL or all-set response columns by CHECK (Y4). Rows are never purged (R9); validity is 24 h by the database clock (T1). |
 
-The recorded invariant (3): for every SKU, `sku.quantity` equals the sum of its ledger deltas. Tests assert it after every test that writes.
+The recorded invariant (3): for every SKU, `sku.quantity` equals the sum of its ledger deltas. `BalancesRecordedExtension` asserts it after every `@IntegrationTest` test (an explicit `@AllowsBalanceMismatch(reason)` is the only opt-out; none is used).
 
 Migrations V1–V3 are published on `v2` and never edited. `V4__idempotency_checks.sql` (H9, approved) narrows the idempotency CHECKs that V3 widened for build v2's create route: `operation IN ('add','purchase')` and `status IN (200,400,404)`, both `NOT VALID`. `NOT VALID` enforces them for new rows without scanning old ones, so a database that still holds a `create`, 201 or 409 row migrates and keeps reading it (rows are never purged); such a key fails as a different operation (400).
 

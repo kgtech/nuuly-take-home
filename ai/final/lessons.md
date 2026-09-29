@@ -9,8 +9,6 @@ Where the evidence comes from:
 
 **Guard** means the lesson must become a test or an ArchUnit rule, and the run writes the test's name into the last column.
 
-<!-- Enforced-by mapping written by the docs PR (F-14). `VersionParityIntegrationTest` and `BalancesRecordedExtension` come with the invariants PR #114 and may not be merged yet. -->
-
 ## Process
 
 | # | Lesson | Evidence | Enforced by |
@@ -45,7 +43,7 @@ Where the evidence comes from:
 | L23 | A claim-first idempotency row needs nullable response columns with an all-or-none CHECK, a stored Content-Type, and a retention decision. | Y4 vs R2; C-16. | Kept from build v2 (schema tests) |
 | L24 | A mechanism can outlive its reason; remove it when the reason goes. | The AOP interceptor existed to sit between the retry and each SERIALIZABLE attempt. Once SERIALIZABLE and the retry were gone, it had no job; the explicit call cut the idempotency code from 472 to 218 lines (A33, #81). | `DESIGN.md` "what changed and why"; critique area 9 |
 | L25 | Don't add infrastructure without a measured need, and make no performance claim without a benchmark. | v2 added Redis, then removed it. No benchmark was ever run, and every guarantee already held in Postgres (A30). | Rules: scope |
-| L26 | Enforce operator-visible rules in the database and the compose file. **Guard:** the existing schema tests. | C-10 (append-only ledger, now a trigger, A11); C-12 (Postgres on loopback). | Kept from build v2; `SchemaTest`, `SkuDetailsSchemaTest`, `ComposeFilesTest`, `BalancesRecordedExtension` |
+| L26 | Enforce operator-visible rules in the database and the compose file. **Guard:** the existing schema tests. | C-10 (append-only ledger, now a trigger, A11); C-12 (Postgres on loopback). | Kept from build v2; `SchemaTest`, `SkuDetailsSchemaTest`, `ComposeFilesTest` |
 | L27 | Share one Postgres container and one test annotation. **Guard:** ArchUnit requires every `@SpringBootTest` class to use `@IntegrationTest`, and no test class may declare its own container. | v1 started 6 containers and 7 contexts for 788 tests; one static container cut the suite by about a third (C-20 to C-22, C-30). | Rules: move tests, don't copy them; `ArchitectureTest.onlyIntegrationTestIsAnnotatedWithSpringBootTest`, `onlyTestcontainersConfigurationTouchesTestcontainers` |
 | L28 | Don't repeat one validation matrix at every layer. | PIT showed the removed duplicate rows killed 0 unique mutants (C-23 to C-28). v2 #61 cut the tests from 670 to 612, and #82 trimmed the matrices from 104 cases to 35. | Rules: move tests, don't copy them |
 | L29 | The front end keeps its idempotency key on 0, 408, 429 and 5xx responses. **Guard:** the existing front-end test. | v2 V-01, a BLOCKER: a proxy 502 led to a new key and a double charge. | Front end (FE9); `useIdempotentSubmit.test.tsx`, `StockForm.test.tsx` |

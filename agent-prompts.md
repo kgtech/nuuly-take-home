@@ -1159,3 +1159,38 @@ Tool: Claude Code (cloud session). One orchestrator plus four read-only subagent
 - Round 2: only `after` on /inventory; keep and retarget the front end to /v2; plan gate, then autonomous; board stays source of truth.
 - Round 3: new board artifact for final.
 - Round 4, after the review: support If-None-Match: *.
+
+
+## 31. The final build: harmonized API with path versioning (2026-09-29)
+
+**Prompt**
+> The whole of [`ai/final/PROMPT.md`](ai/final/PROMPT.md) (the run's prompt, written in session 30), then two owner messages during the run: "approve" at the plan gate, and "Use the ports that main is using." (mid-run, during preflight).
+
+Tool: Claude Code (desktop app). One orchestrator; per PR a test subagent (tests first, red for the right reason), an implementer subagent (never edits the test tree) and a fresh reviewer subagent, two rounds where round 1 found anything; one research spike (springdoc groups) before planning on it; a board subagent for the decision cards; a docs subagent; then the self-critique (see the report).
+
+**Output summary**
+- **Part 1 (to the plan gate):** `final` created from `origin/v2`; build v2's records moved to `ai/v2/`, main's board and prompts and #87's exports brought in; preflight (all tools, baseline green: 747 service and 227 front-end tests; blockers: no GitHub `workflow` scope, port 18080 taken); board dump reproduced #87's exports byte for byte; study of the tip by three reviewers; `DESIGN.md`, board cards, issues and plan.
+- **Part 2 (14 issues, #91 to #104):** board PR (#107: final's own artifact, 25 cards added, 50 changed, exports regenerated); CI workflow parked because the token lacks the `workflow` scope (#105, deviation D-1) with a local gate script; ports 8080 and 5173 plus ArchUnit (#106); guard filter driven by route kind (#108, fixes the `/v2` purchase gap of lesson L21); `PUT /v2/inventory/{skuId}/details` (#109); front end Create and Edit on the details PUT (#110); `/v2` add and purchase with required keys, versioned hash, removal of build v2's create and PUT-item, V4 (#111); stock forms on `/v2` (#112); unversioned POSTs reject the key and the list is a fixed page of 250 (#113); invariant guards with mutation proof (#114); two OpenAPI groups and the spec conformance test (#115); docs (#116).
+- **Order changed from the plan:** `POST /v2/inventory/{skuId}` was build v2's create and is now add-stock at the same path, so "add /v2 add first, remove create later" was impossible; the details PUT and the front end's move to it went first, then one combined PR replaced create with add and purchase.
+- **What the reviewers found and the fixes:** a malformed `If-Match` beside `If-None-Match: *` created the SKU (fixed, PR 109); a lost create response made the retry's 412 say "already exists" and silently drop the initial stock (fixed with a distinct message, PR 110); false description text, weak route-enumeration and 20-of-620 parity sampling (fixed, PRs 113, 114); details in `ai/final/critique.md`.
+
+**Accepted**
+- Reviewer findings that changed behaviour or tests (each in the PR threads and `ai/final/log.md`), the plan reorder above, the spike's facts (group YAML URL `/v3/api-docs.yaml/{group}`, `@OpenAPIDefinition` leaking into every group, unknown group 500 mapped back to 404).
+- Every owner recommendation at the gate (version in the request hash, V4 `NOT VALID`, unconditional PUT creates, `If-None-Match` values other than `*` are 400).
+
+**Rejected**
+- A reviewer MAJOR that asked for ports 18080 and 15173 (the owner had asked for main's ports).
+- Reviewer MINORs left recorded, not fixed: L31 ArchUnit rule bypassable by a helper, dead 5-argument `IdempotencyStore.run` (tests still call it), typed `WriteResult<O>` (card A38 follows the code); see `ai/final/board-followups.md`.
+- Working around the missing `workflow` scope with another credential (recorded as D-1).
+
+**My response**
+- "approve" (plan gate, 2026-09-29): treated as approval of every recommendation in `ai/final/board-cards.md`.
+- "Use the ports that main is using." (mid-run): app 8080, Vite 5173, card H13.
+
+## 32. Build v2 runs (2026-09-27 to 2026-09-28), pointer
+
+The prompts and outcomes of the two runs on branch `v2` are recorded there, not repeated here: the run prompt [`ai/v2/PROMPT.md`](ai/v2/PROMPT.md) and lessons [`ai/v2/lessons.md`](ai/v2/lessons.md); the run's log, plan, critique and interview defense in [`ai/v2/run-records/`](ai/v2/run-records/); the outcome in [`ai/v2/REPORT.md`](ai/v2/REPORT.md) (first V2 run 2026-09-27; the v2 details run and the Redis removal 2026-09-28); decisions in [`ai/v2/DECISIONS-ADDED.md`](ai/v2/DECISIONS-ADDED.md) and [`ai/v2/DEVIATIONS.md`](ai/v2/DEVIATIONS.md). Its hand-edited `CLAUDE.md` and `DECISIONS.md` are kept as `ai/v2/CLAUDE-v2.md` and `ai/v2/DECISIONS-v2.md`.
+
+## 33. Issue #87: align v1 with v2 (2026-09-29), pointer
+
+The run that aligned main's storage and layout with build v2 (balance row at READ COMMITTED, explicit Idempotency-Key call, JdbcClient, v2 layout) is pull request #90 on branch `feat/issue-87-align-with-v2` (commit "Align v1 with v2 … (#87)"). Its record is the pull request and issue threads; its decision-board update and exports are the files this build started from: [`ai/decision-board.html`](ai/decision-board.html), [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md) (copied at setup, then regenerated by this run's board PR).
