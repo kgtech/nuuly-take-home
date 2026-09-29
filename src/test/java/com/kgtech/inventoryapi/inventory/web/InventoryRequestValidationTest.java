@@ -30,8 +30,8 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
-import com.kgtech.inventoryapi.inventory.InventoryPage;
 import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.Page;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 
@@ -60,9 +60,11 @@ class InventoryRequestValidationTest {
 
         void stubOk(InventoryService service, String skuId, int quantity) {
             if (this == CREATE) {
-                when(service.add(skuId, quantity, null)).thenReturn(new StockOutcome.Ok(quantity));
+                when(service.add(skuId, quantity, null))
+                        .thenReturn(new WriteResult.Done<>(new StockOutcome.Ok(quantity)));
             } else {
-                when(service.purchase(skuId, quantity, null)).thenReturn(new StockOutcome.Ok(quantity));
+                when(service.purchase(skuId, quantity, null))
+                        .thenReturn(new WriteResult.Done<>(new StockOutcome.Ok(quantity)));
             }
         }
 
@@ -196,7 +198,7 @@ class InventoryRequestValidationTest {
     @ParameterizedTest
     @MethodSource("invalidSkuIds")
     void createPassesInvalidSkuIdToServiceAndReturns400(String skuId) throws Exception {
-        when(service.add(skuId, 5, null)).thenReturn(new WriteResult.InvalidRequest());
+        when(service.add(skuId, 5, null)).thenReturn(new WriteResult.InvalidRequest<>());
 
         expectInvalidRequest(mvc.perform(jsonPost(Post.CREATE, skuId, VALID_BODY)));
         verify(service).add(skuId, 5, null);
@@ -215,7 +217,7 @@ class InventoryRequestValidationTest {
     @ParameterizedTest
     @MethodSource("invalidSkuIds")
     void purchasePassesInvalidSkuIdToServiceAndReturns404(String skuId) throws Exception {
-        when(service.purchase(skuId, 5, null)).thenReturn(new StockOutcome.NotFound());
+        when(service.purchase(skuId, 5, null)).thenReturn(new WriteResult.Done<>(new StockOutcome.NotFound()));
 
         expectText(mvc.perform(jsonPost(Post.PURCHASE, skuId, VALID_BODY)), 404, "SKU not found");
         verify(service).purchase(skuId, 5, null);
@@ -237,7 +239,7 @@ class InventoryRequestValidationTest {
 
     @Test
     void purchaseInvalidBodyOnMissingSkuReturns400() throws Exception {
-        when(service.purchase("missing", 0, null)).thenReturn(new StockOutcome.NotFound());
+        when(service.purchase("missing", 0, null)).thenReturn(new WriteResult.Done<>(new StockOutcome.NotFound()));
 
         expectInvalidRequest(mvc.perform(jsonPost(Post.PURCHASE, "missing", "{\"quantity\":0}")));
         verifyNoInteractions(service);
@@ -271,7 +273,7 @@ class InventoryRequestValidationTest {
     void getIgnoresAcceptHeader(String path, String accept, String expectedJson) throws Exception {
         when(service.find(SKU)).thenReturn(Optional.of(new InventoryItem(SKU, 3)));
         when(service.list(null, null))
-                .thenReturn(new InventoryPage(List.of(new InventoryItem(SKU, 3)), Optional.empty()));
+                .thenReturn(new Page<>(List.of(new InventoryItem(SKU, 3)), Optional.empty()));
 
         mvc.perform(get(path).header(ACCEPT, accept))
                 .andExpect(status().isOk())

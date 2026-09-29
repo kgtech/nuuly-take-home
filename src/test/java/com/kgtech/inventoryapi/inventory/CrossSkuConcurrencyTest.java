@@ -42,10 +42,10 @@ class CrossSkuConcurrencyTest {
             String sku = "sku-" + next.getAndIncrement();
             int notOk = 0;
             for (int i = 0; i < ROUNDS; i++) {
-                if (!(service.add(sku, 3, null) instanceof StockOutcome.Ok)) {
+                if (!(service.add(sku, 3, null) instanceof WriteResult.Done(StockOutcome.Ok _))) {
                     notOk++;
                 }
-                if (!(service.purchase(sku, 2, null) instanceof StockOutcome.Ok)) {
+                if (!(service.purchase(sku, 2, null) instanceof WriteResult.Done(StockOutcome.Ok _))) {
                     notOk++;
                 }
             }

@@ -64,7 +64,8 @@ class InventoryConcurrencyTest {
         String sku = newSku("race-buy");
         Tables.seed(jdbc, sku, stock);
 
-        List<WriteResult> outcomes = runTogether(() -> service.purchase(sku, 1, null));
+        List<StockOutcome.Purchase> outcomes =
+                runTogether(() -> ((WriteResult.Done<StockOutcome.Purchase>) service.purchase(sku, 1, null)).outcome());
 
         assertThat(outcomes).filteredOn(StockOutcome.Ok.class::isInstance).hasSize(stock);
         assertThat(outcomes).filteredOn(StockOutcome.Insufficient.class::isInstance).hasSize(THREADS - stock);
@@ -80,7 +81,8 @@ class InventoryConcurrencyTest {
     void concurrentAddsAreNeverLost() throws InterruptedException {
         String sku = newSku("race-add");
 
-        List<WriteResult> outcomes = runTogether(() -> service.add(sku, 1, null));
+        List<StockOutcome.Add> outcomes =
+                runTogether(() -> ((WriteResult.Done<StockOutcome.Add>) service.add(sku, 1, null)).outcome());
 
         assertThat(outcomes).hasSize(THREADS).allMatch(StockOutcome.Ok.class::isInstance);
         assertThat(outcomes).extracting(o -> ((StockOutcome.Ok) o).quantity())

@@ -32,9 +32,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
-import com.kgtech.inventoryapi.inventory.InventoryPage;
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.Page;
+import com.kgtech.inventoryapi.inventory.Page.Next;
 
 /**
  * G9, R4, C2: GET /inventory passes limit and after to the service as raw strings, answers a bare JSON array and,
@@ -56,7 +56,7 @@ class InventoryListPagingTest {
     InventoryService service;
 
     private void stub(String limit, String after, Optional<Next> next) {
-        when(service.list(limit, after)).thenReturn(new InventoryPage(ITEMS, next));
+        when(service.list(limit, after)).thenReturn(new Page<>(ITEMS, next));
     }
 
     private static URI linkTarget(String link) {
@@ -187,7 +187,7 @@ class InventoryListPagingTest {
     /** G9: the body stays the spec's bare array whether or not there is a next page. */
     @Test
     void emptyPageIsBareEmptyArray() throws Exception {
-        when(service.list("2", "zzz")).thenReturn(new InventoryPage(List.of(), Optional.empty()));
+        when(service.list("2", "zzz")).thenReturn(new Page<>(List.of(), Optional.empty()));
 
         mvc.perform(get("/inventory?limit=2&after=zzz"))
                 .andExpect(status().isOk())

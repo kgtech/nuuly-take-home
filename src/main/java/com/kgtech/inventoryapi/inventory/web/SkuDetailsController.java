@@ -70,19 +70,18 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.CreateSku;
-import com.kgtech.inventoryapi.inventory.DetailsOutcome.AlreadyExists;
-import com.kgtech.inventoryapi.inventory.DetailsOutcome.Created;
+import com.kgtech.inventoryapi.inventory.DetailsOutcome;
 import com.kgtech.inventoryapi.inventory.DetailsPrecondition;
 import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.Page;
 import com.kgtech.inventoryapi.inventory.ReplaceResult;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.NotFound;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.Replaced;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.VersionMismatch;
 import com.kgtech.inventoryapi.inventory.SkuDetails;
 import com.kgtech.inventoryapi.inventory.SkuItem;
-import com.kgtech.inventoryapi.inventory.SkuPage;
-import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
+import com.kgtech.inventoryapi.inventory.WriteResult.Done;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 import com.kgtech.inventoryapi.web.TextErrors;
@@ -195,7 +194,7 @@ class SkuDetailsController {
         if (Paging.repeatsAfter(request)) {
             return TextErrors.invalidRequest(); // Z3
         }
-        SkuPage page = service.listSkus(limit, after);
+        Page<SkuItem> page = service.listSkus(limit, after);
         return page.next()
                 .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, Paging.nextLink(V2_BASE_PATH, next))
                         .header(CACHE_CONTROL, NO_STORE).body(page.items()))
@@ -210,16 +209,15 @@ class SkuDetailsController {
     }
 
     /**
-     * One mapping for every create result: a details outcome is rendered through the same OutcomeResponses.toStored a
-     * keyed request stores, so unkeyed and replayed responses are byte-identical (Y4); a 201 carries the ETag of
-     * version 1 whether first or replayed.
+     * One mapping for every create result (A38): a details outcome is rendered through the same
+     * OutcomeResponses.toStored a keyed request stores, so unkeyed and replayed responses are byte-identical (Y4); a
+     * 201 carries the ETag of version 1 whether first or replayed.
      */
-    private ResponseEntity<?> toResponse(String skuId, WriteResult result) {
+    private ResponseEntity<?> toResponse(String skuId, WriteResult<DetailsOutcome> result) {
         return switch (result) {
-            case Stored stored -> render(stored.response());
-            case InvalidRequest _ -> TextErrors.invalidRequest();
-            case Created _, AlreadyExists _ -> render(outcomes.toStored(skuId, result));
-            case StockOutcome _ -> throw new IllegalStateException("not a create outcome: " + result);
+            case Done<DetailsOutcome>(DetailsOutcome outcome) -> render(outcomes.toStored(skuId, outcome));
+            case Stored<DetailsOutcome>(StoredResponse response) -> render(response);
+            case InvalidRequest<DetailsOutcome> _ -> TextErrors.invalidRequest();
         };
     }
 

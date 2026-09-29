@@ -42,7 +42,7 @@ class InventoryServiceReadTest {
         org.mockito.Mockito.verifyNoInteractions(details, transactions);
     }
 
-    private InventoryPage list(String limit, String after) {
+    private Page<InventoryItem> list(String limit, String after) {
         when(stock.page(anyString(), anyLong())).thenReturn(List.of());
         return service.list(limit, after);
     }
@@ -91,12 +91,12 @@ class InventoryServiceReadTest {
     void listReturnsNextCursorOnlyWhenAnExtraRowExists() {
         when(stock.page("", 3L)).thenReturn(List.of(new InventoryItem("a", 1), new InventoryItem("b", 2),
                 new InventoryItem("c", 3)));
-        InventoryPage page = service.list("2", null);
+        Page<InventoryItem> page = service.list("2", null);
         assertThat(page.items()).extracting(InventoryItem::skuId).containsExactly("a", "b");
-        assertThat(page.next()).isEqualTo(Optional.of(new InventoryPage.Next(2, "b")));
+        assertThat(page.next()).isEqualTo(Optional.of(new Page.Next(2, "b")));
 
         when(stock.page("b", 3L)).thenReturn(List.of(new InventoryItem("c", 3)));
-        InventoryPage last = service.list("2", "b");
+        Page<InventoryItem> last = service.list("2", "b");
         assertThat(last.items()).extracting(InventoryItem::skuId).containsExactly("c");
         assertThat(last.next()).isEmpty();
     }

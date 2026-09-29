@@ -7,7 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
+import com.kgtech.inventoryapi.inventory.Page.Next;
 
 /**
  * The paging rules both list endpoints share (GET /inventory and GET /v2/inventory, A37): the repeated-after check

@@ -49,24 +49,26 @@ class InventoryServiceWriteChecksTest {
      * result from the stubs in setUp (create adds its 7 through the stubbed add, so its quantity is 12 too).
      */
     enum Write {
-        ADD(Operation.ADD, new WriteResult.InvalidRequest(), "7", new StockOutcome.Ok(12)),
-        PURCHASE(Operation.PURCHASE, new StockOutcome.NotFound(), "7", new StockOutcome.Ok(3)),
-        CREATE(Operation.CREATE, new WriteResult.InvalidRequest(), CREATE_REQUEST.fingerprint(),
-                new DetailsOutcome.Created(new SkuItem("widget", 12, Optional.of(CREATE_REQUEST.details()), 0)));
+        ADD(Operation.ADD, new WriteResult.InvalidRequest<>(), "7", new WriteResult.Done<>(new StockOutcome.Ok(12))),
+        PURCHASE(Operation.PURCHASE, new WriteResult.Done<>(new StockOutcome.NotFound()), "7",
+                new WriteResult.Done<>(new StockOutcome.Ok(3))),
+        CREATE(Operation.CREATE, new WriteResult.InvalidRequest<>(), CREATE_REQUEST.fingerprint(),
+                new WriteResult.Done<>(new DetailsOutcome.Created(
+                        new SkuItem("widget", 12, Optional.of(CREATE_REQUEST.details()), 0))));
 
         final Operation operation;
-        final WriteResult malformedSkuId;
+        final WriteResult<?> malformedSkuId;
         final String canonicalRequest;
-        final WriteResult unkeyed;
+        final WriteResult<?> unkeyed;
 
-        Write(Operation operation, WriteResult malformedSkuId, String canonicalRequest, WriteResult unkeyed) {
+        Write(Operation operation, WriteResult<?> malformedSkuId, String canonicalRequest, WriteResult<?> unkeyed) {
             this.operation = operation;
             this.malformedSkuId = malformedSkuId;
             this.canonicalRequest = canonicalRequest;
             this.unkeyed = unkeyed;
         }
 
-        WriteResult call(InventoryService service, String skuId, String key) {
+        WriteResult<?> call(InventoryService service, String skuId, String key) {
             return switch (this) {
                 case ADD -> service.add(skuId, 7, key);
                 case PURCHASE -> service.purchase(skuId, 7, key);
@@ -89,7 +91,8 @@ class InventoryServiceWriteChecksTest {
         when(stock.add("widget", 7)).thenReturn(Optional.of(new Balance(12, 2)));
         when(stock.purchase("widget", 7)).thenReturn(Optional.of(new Balance(3, 2)));
         when(details.claimSku("widget")).thenReturn(true);
-        when(responses.toStored(any(), any())).thenReturn(STORED);
+        when(responses.toStored(any(), any(StockOutcome.class))).thenReturn(STORED);
+        when(responses.toStored(any(), any(DetailsOutcome.class))).thenReturn(STORED);
     }
 
     /** The store claims and runs the write once, as for a first keyed request. */
@@ -110,7 +113,7 @@ class InventoryServiceWriteChecksTest {
     @ParameterizedTest
     @EnumSource(Write.class)
     void absentKeyRunsTheWriteInTheServicesTransaction(Write write) {
-        WriteResult result = write.call(service, "widget", null);
+        WriteResult<?> result = write.call(service, "widget", null);
 
         assertThat(result).isEqualTo(write.unkeyed);
         ArgumentCaptor<TransactionDefinition> definition = ArgumentCaptor.forClass(TransactionDefinition.class);
@@ -131,7 +134,7 @@ class InventoryServiceWriteChecksTest {
     @ParameterizedTest(name = "{0} {1}")
     @MethodSource("malformedKeys")
     void malformedKeyIsInvalidRequestBeforeAnything(Write write, String key) {
-        assertThat(write.call(service, "widget", key)).isEqualTo(new WriteResult.InvalidRequest());
+        assertThat(write.call(service, "widget", key)).isEqualTo(new WriteResult.InvalidRequest<>());
 
         assertNothingTouched();
     }
@@ -139,7 +142,7 @@ class InventoryServiceWriteChecksTest {
     /** U3: the key is checked before the skuId, so a bad key wins with 400 over purchase's 404. */
     @Test
     void badKeyWinsOverBadSkuId() {
-        assertThat(service.purchase("-bad", 7, "nope")).isEqualTo(new WriteResult.InvalidRequest());
+        assertThat(service.purchase("-bad", 7, "nope")).isEqualTo(new WriteResult.InvalidRequest<>());
 
         assertNothingTouched();
     }
@@ -184,7 +187,7 @@ class InventoryServiceWriteChecksTest {
     void firstRunStoresTheRenderedOutcome() {
         storeRunsTheWrite();
 
-        assertThat(service.add("widget", 7, KEY)).isEqualTo(new WriteResult.Stored(STORED));
+        assertThat(service.add("widget", 7, KEY)).isEqualTo(new WriteResult.Stored<>(STORED));
 
         verify(stock).add("widget", 7);
         verify(responses).toStored("widget", new StockOutcome.Ok(12));
@@ -196,7 +199,7 @@ class InventoryServiceWriteChecksTest {
         StoredResponse notFound = new StoredResponse(404, "text/plain", "SKU not found");
         when(idempotency.run(any(), any(), any(), any(), any())).thenReturn(new Keyed.Response(notFound));
 
-        assertThat(service.purchase("widget", 7, KEY)).isEqualTo(new WriteResult.Stored(notFound));
+        assertThat(service.purchase("widget", 7, KEY)).isEqualTo(new WriteResult.Stored<>(notFound));
 
         verifyNoInteractions(stock, details, responses, transactions);
     }
@@ -206,7 +209,7 @@ class InventoryServiceWriteChecksTest {
     void invalidReuseIsInvalidRequest() {
         when(idempotency.run(any(), any(), any(), any(), any())).thenReturn(new Keyed.Invalid());
 
-        assertThat(service.add("widget", 7, KEY)).isEqualTo(new WriteResult.InvalidRequest());
+        assertThat(service.add("widget", 7, KEY)).isEqualTo(new WriteResult.InvalidRequest<>());
 
         verifyNoInteractions(stock, details, responses, transactions);
     }

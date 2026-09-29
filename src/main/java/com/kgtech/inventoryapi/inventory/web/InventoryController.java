@@ -57,15 +57,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.kgtech.inventoryapi.inventory.DetailsOutcome;
+import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.InventoryItem;
-import com.kgtech.inventoryapi.inventory.InventoryPage;
 import com.kgtech.inventoryapi.inventory.InventoryService;
-import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
-import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
-import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
-import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
+import com.kgtech.inventoryapi.inventory.Page;
+import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
+import com.kgtech.inventoryapi.inventory.WriteResult.Done;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 import com.kgtech.inventoryapi.web.TextErrors;
@@ -157,7 +155,7 @@ class InventoryController {
         if (Paging.repeatsAfter(request)) {
             return TextErrors.invalidRequest();
         }
-        InventoryPage page = service.list(limit, after);
+        Page<InventoryItem> page = service.list(limit, after);
         return page.next()
                 .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, Paging.nextLink(BASE_PATH, next))
                         .body(page.items()))
@@ -165,16 +163,14 @@ class InventoryController {
     }
 
     /**
-     * One mapping for every write result (C-17, issue #28): a stock outcome is rendered through the same
+     * One mapping for both stock writes' results (C-17, issue #28, A38): an outcome is rendered through the same
      * OutcomeResponses.toStored that a keyed request stores, so unkeyed and replayed responses are byte-identical (Y4).
      */
-    private ResponseEntity<?> toResponse(String skuId, WriteResult result) {
+    private <O extends StockOutcome> ResponseEntity<?> toResponse(String skuId, WriteResult<O> result) {
         return switch (result) {
-            case Stored stored -> StoredResponses.toResponseEntity(stored.response());
-            case InvalidRequest _ -> TextErrors.invalidRequest();
-            case Ok _, NotFound _, Insufficient _, Overflow _ ->
-                    StoredResponses.toResponseEntity(outcomes.toStored(skuId, result));
-            case DetailsOutcome _ -> throw new IllegalStateException("not a stock outcome: " + result);
+            case Done<O>(O outcome) -> StoredResponses.toResponseEntity(outcomes.toStored(skuId, outcome));
+            case Stored<O>(StoredResponse response) -> StoredResponses.toResponseEntity(response);
+            case InvalidRequest<O> _ -> TextErrors.invalidRequest();
         };
     }
 }
