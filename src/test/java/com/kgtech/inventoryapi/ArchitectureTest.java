@@ -38,6 +38,7 @@ import com.kgtech.inventoryapi.inventory.CreateSku;
 import com.kgtech.inventoryapi.inventory.DetailsOutcome;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 import com.kgtech.inventoryapi.inventory.KeyedResponses;
+import com.kgtech.inventoryapi.inventory.Page;
 import com.kgtech.inventoryapi.inventory.SkuCost;
 import com.kgtech.inventoryapi.inventory.SkuDetails;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
@@ -46,8 +47,10 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
+import com.tngtech.archunit.core.domain.JavaParameterizedType;
 import com.tngtech.archunit.core.domain.properties.CanBeAnnotated;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -349,14 +352,19 @@ class ArchitectureTest {
                 .anyMatch(m -> Stream.of(m.getParameterTypes()).anyMatch(DetailsOutcome.class::isAssignableFrom));
     }
 
-    /** A38: the spec list and the v2 list share one generic page type, Page of their item type. */
+    /**
+     * A38: the spec list and the v2 list share one generic page type, Page of their item type. Nested types count
+     * too, and a page is recognised by its cursor: a no-argument method returning Optional that is named next or
+     * returns Optional of Page.Next.
+     */
     @Test
     void inventoryHasOnePageType() {
-        DescribedPredicate<JavaClass> pageType = describe("have a next-page cursor (Optional next())",
-                c -> c.getMethods().stream().anyMatch(m -> m.getName().equals("next")
-                        && m.getRawParameterTypes().isEmpty()
-                        && m.getRawReturnType().isEquivalentTo(Optional.class)));
-        classes().that().resideInAPackage(INVENTORY).and().areTopLevelClasses().and(pageType)
+        DescribedPredicate<JavaClass> pageType = describe(
+                "have a next-page cursor (Optional next(), or any accessor returning Optional<Page.Next>)",
+                c -> c.getMethods().stream().anyMatch(m -> m.getRawParameterTypes().isEmpty()
+                        && m.getRawReturnType().isEquivalentTo(Optional.class)
+                        && (m.getName().equals("next") || returnsOptionalOf(m, Page.Next.class))));
+        classes().that().resideInAPackage(INVENTORY).and(pageType)
                 .should().containNumberOfElements(equalTo(1))
                 .andShould(new ArchCondition<JavaClass>("be generic in the item type") {
                     @Override
@@ -393,6 +401,14 @@ class ArchitectureTest {
         return JavaClass.Predicates.resideInAPackage(packageIdentifier)
                 .and(DescribedPredicate.not(JavaClass.Predicates.resideInAPackage(allowedIdentifier)))
                 .as("reside in %s except %s", packageIdentifier, allowedIdentifier);
+    }
+
+    /** Whether {@code method} returns {@code Optional<type>}, read from its generic signature. */
+    private static boolean returnsOptionalOf(JavaMethod method, Class<?> type) {
+        return method.getReturnType() instanceof JavaParameterizedType returned
+                && returned.toErasure().isEquivalentTo(Optional.class)
+                && returned.getActualTypeArguments().size() == 1
+                && returned.getActualTypeArguments().getFirst().toErasure().isEquivalentTo(type);
     }
 
     private static ArchCondition<JavaCodeUnit> beAccessedFromAnotherPackage() {
