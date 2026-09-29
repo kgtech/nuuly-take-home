@@ -97,3 +97,7 @@ Model: claude-fable-5-1. Start checkout: .claude/worktrees/fable-retro-step-6-54
     3. PR description: D10 and S11 do not cite DESIGN-V2 §7 (S11 cites §2), and 733bcb5 came before e6362da, not after it.
   - Checks: ./gradlew cleanTest build green, 747 tests, 0 failures. The diff against fb8c859 touches only .fable/interview-defense.md and this log.
   - Accepted: the substance of both review-3 fixes. Rejected: nothing.
+- 2026-09-29T13:00:19Z [idempotency-future-improvement] Owner decision after PR #82 merged: hold off on storing a domain outcome instead of the HTTP response against an Idempotency-Key, and record it as a future improvement.
+  - Filed #83 (labels v2, future-improvement): today's design with references at 5bf4dc8, the technical reasons to defer (no behaviour gain while every keyed caller is HTTP; trades Y4's byte-for-byte replay for re-rendered replays; a two-format migration on a never-purged table, with A18 and the README clean-up to rework), the triggers to revisit, the proposed approach (decisions first, additive V4 migration, domain outcome codec, rendering after the transaction, 24 h legacy read path) and acceptance criteria.
+  - DESIGN-V2 §10's rejected-alternative entry now points to #83, with the reasons to defer and the approach in brief. No code, test, migration or build change.
+  - Accepted: the owner's "hold off; mark it as a future improvement", recorded in both places. Rejected: nothing.
