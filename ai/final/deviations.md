@@ -9,3 +9,9 @@ Approved decisions or prompt rules that turned out unworkable, and what was done
 - **Consequence:** "CI on final is green" in Done means can't be shown; the local gate replaces it in the report.
 - **Not run:** the parked workflow has never executed on GitHub, so it is untested there; issue #92's "green on the PR" criterion is unmet, not replaced. The issue stays open until the owner moves the file and a run is green.
 - **Ports:** the gate uses main's ports (8080, 5173) by the owner's instruction (card H13); it fails fast if either is busy.
+
+## D-2: one force-push of a pull-request branch (prompt "Merge": "Never force-push")
+- **What:** `final-invariants` (PR #114) was rebased onto the newer `final` after its first push and pushed with `--force`. `final` itself and every other branch were untouched; no one else had the branch.
+- **Why it happened:** the branch had been rebased once already before opening the PR (to drop a squashed dependency) and I rebased again to include a later merge instead of merging `final` into it.
+- **What I did instead afterwards:** pushed branches are only updated by merge commits or new commits. The other rebases (PRs 9, 11 and 12's first) happened before the branch was first pushed.
+- **Consequence:** the review comments already posted on #114 refer to SHAs dd5bcb8 (before) and c3c0e17 (after); the content is the same plus the review fixes.
