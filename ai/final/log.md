@@ -72,3 +72,4 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T20:35:04Z [service] PR9 committed locally (943 tests green with test-tree fixes); must merge AFTER PR8 (front end still sent keys to unversioned add/purchase); then rebase onto final.
 - 2026-09-29T20:35:43Z [service] PR11 (OpenAPI groups + conformance) test agent ac0abf8761c43d144 in wt-p11 (branch final-openapi on the PR9 commit; rebase onto final later), based on the spike recipe. PR8 round-2 review pending (afd5320fe6a4050ca).
 - 2026-09-29T20:36:48Z [frontend] PR #112 merged (state verified) after round-2 review clean; #96 closed. Front end now calls only /v2.
+- 2026-09-29T20:38:20Z [service] PR9 rebased onto final (clean), gate --e2e green: 943 service, 248 unit, 34 e2e; PR opened.
