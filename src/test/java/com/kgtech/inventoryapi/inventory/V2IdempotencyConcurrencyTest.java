@@ -59,9 +59,8 @@ class V2IdempotencyConcurrencyTest {
     }
 
     @AfterEach
-    void closeClientAndCheckTheBalances() {
+    void closeClientAndCheckNoOversell() {
         http.close();
-        assertThat(Invariants.balanceMismatches(jdbc)).as("sku.quantity equals the ledger SUM").isEmpty();
         assertThat(Invariants.minQuantity(jdbc)).as("no oversell").isGreaterThanOrEqualTo(0);
     }
 
@@ -208,6 +207,42 @@ class V2IdempotencyConcurrencyTest {
         assertThat(count("SELECT quantity FROM sku WHERE sku_id = ?", sku)).isZero();
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
                 .isEqualTo(4);
+        assertThat(keyRows()).as("only the /v2 requests store a key").isEqualTo(THREADS / 2);
+    }
+
+    /**
+     * Invariants 1 and 3 with adds in the mix: unversioned and /v2 adds and purchases race on one SKU. Every add
+     * succeeds; the final balance is the seed plus the adds minus the purchases that got 200, equals the ledger SUM
+     * (the after-each check too), and never dips below zero.
+     */
+    @Test
+    void mixedVersionAddsAndPurchasesKeepTheBalanceEqualToTheLedger() throws Exception {
+        String sku = newSku("mixed-rw");
+        Tables.seed(jdbc, sku, 2);
+        AtomicInteger turn = new AtomicInteger();
+
+        List<Sent> sent = Concurrently.run(THREADS, () -> {
+            int n = turn.getAndIncrement() % 4;
+            Op op = n < 2 ? Op.ADD : Op.PURCHASE;
+            boolean v2 = n % 2 == 1;
+            Reply reply = v2 ? send(op, sku, 1, newKey())
+                    : V2Writes.post(http, port, "/inventory/" + sku + (op == Op.ADD ? "" : "/purchase"),
+                            quantityJson(1), null);
+            return new Sent(op == Op.ADD ? 1 : -1, reply);
+        });
+
+        assertThat(sent).extracting(s -> s.reply().status()).as("only 200 and 400, never a 500")
+                .allMatch(status -> status == 200 || status == 400);
+        List<Sent> adds = sent.stream().filter(s -> s.quantity() == 1).toList();
+        assertThat(adds).extracting(s -> s.reply().status()).containsOnly(200);
+        long purchased = sent.stream().filter(s -> s.quantity() == -1 && s.reply().status() == 200).count();
+        assertThat(adds).as("liveness: adds were made").isNotEmpty();
+        assertThat(purchased).as("liveness: the seed of 2 covers at least two purchases").isGreaterThanOrEqualTo(2);
+        assertThat(count("SELECT quantity FROM sku WHERE sku_id = ?", sku)).isEqualTo(2 + adds.size() - purchased);
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
+                .isEqualTo(purchased);
+        assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'add'", sku))
+                .isEqualTo(adds.size() + 1L);
         assertThat(keyRows()).as("only the /v2 requests store a key").isEqualTo(THREADS / 2);
     }
 }

@@ -119,9 +119,11 @@ class LibraryPathErrorsIntegrationTest {
         assertThat(afterWarning).as(output.getAll()).noneMatch(line -> line.startsWith("\tat "));
     }
 
-    @Test
-    void apiDocsWithXmlAcceptIsNotInventoryText() throws IOException {
-        Response response = send("GET", "/v3/api-docs", APPLICATION_XML_VALUE);
+    /** H12: the group JSON and group YAML paths (/v3/api-docs.yaml/{group}) are library paths too. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/v3/api-docs/inventory", "/v3/api-docs.yaml/inventory"})
+    void apiDocsWithXmlAcceptIsNotInventoryText(String path) throws IOException {
+        Response response = send("GET", path, APPLICATION_XML_VALUE);
 
         assertThat(response.status()).as(response.toString()).isEqualTo(406);
         assertThat(isTextPlain(response)).as(response.toString()).isFalse();
@@ -132,10 +134,46 @@ class LibraryPathErrorsIntegrationTest {
     @CsvSource({
         "POST, /actuator/health, 405",
         "GET, /v3/api-docs/nope, 404",
+        "GET, /v3/api-docs.yaml/nope, 404",
+        "POST, /v3/api-docs/inventory, 405",
+        "POST, /v3/api-docs.yaml/inventory, 405",
         "GET, /swagger-ui/nope.js, 404"
     })
     void otherLibraryErrorsUseBootErrorJson(String method, String path, int status) throws IOException {
-        assertBootJson(send(method, path, APPLICATION_JSON_VALUE), status, path);
+        assertBootJson(send(method, path, acceptFor(path)), status, path);
+    }
+
+    /** The YAML endpoint only produces application/vnd.oai.openapi, so JSON there is a 406 before the lookup: use any. */
+    private static String acceptFor(String path) {
+        return path.startsWith("/v3/api-docs.yaml/") ? MediaType.ALL_VALUE : APPLICATION_JSON_VALUE;
+    }
+
+    /**
+     * H12: springdoc's unknown-group exception is rethrown like any library error, but Boot maps it to 500; the
+     * truthful 404 must come back, still with Boot's JSON body (not text/plain), for both URL forms.
+     */
+    @ParameterizedTest(name = "GET {0} → 404 Boot JSON, no ERROR log")
+    @ValueSource(strings = {"/v3/api-docs/nope", "/v3/api-docs.yaml/nope"})
+    void unknownDocsGroupIs404WithoutErrorLog(String path, CapturedOutput output) throws IOException {
+        assertBootJson(send("GET", path, acceptFor(path)), 404, path);
+
+        assertThat(output.getAll().lines()).noneMatch(line -> line.contains(" ERROR "));
+    }
+
+    /** H12: swagger-config (Swagger UI's dropdown) lists both groups, and both URLs it gives are served. */
+    @Test
+    void swaggerConfigListsBothGroups() throws IOException {
+        Response config = send("GET", "/v3/api-docs/swagger-config", APPLICATION_JSON_VALUE);
+
+        assertThat(config.status()).as(config.toString()).isEqualTo(200);
+        List<String> names = JsonPath.read(config.body(), "$.urls[*].name");
+        List<String> urls = JsonPath.read(config.body(), "$.urls[*].url");
+        assertThat(names).containsExactlyInAnyOrder("inventory", "inventory-v2");
+        assertThat(urls).containsExactlyInAnyOrder("/v3/api-docs/inventory", "/v3/api-docs/inventory-v2");
+        for (String url : urls) {
+            Response docs = send("GET", url, APPLICATION_JSON_VALUE);
+            assertThat(docs.status()).as(docs.toString()).isEqualTo(200);
+        }
     }
 
     /** AC5 controls: the inventory contract is unchanged on /inventory/** and unknown paths (look-alikes too). */

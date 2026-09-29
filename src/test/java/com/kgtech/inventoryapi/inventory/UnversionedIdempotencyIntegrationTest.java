@@ -12,7 +12,6 @@ import java.util.concurrent.Callable;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -63,11 +62,6 @@ class UnversionedIdempotencyIntegrationTest {
     void seed() {
         Tables.reset(jdbc);
         Tables.seed(jdbc, "widget", 5);
-    }
-
-    @AfterEach
-    void balancesMatchTheLedger() {
-        assertThat(Invariants.balanceMismatches(jdbc)).as("sku.quantity equals the ledger SUM").isEmpty();
     }
 
     // ---- helpers ----

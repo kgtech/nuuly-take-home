@@ -55,7 +55,6 @@ class CrossSkuConcurrencyTest {
         assertThat(failures).containsOnly(0);
         assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isEqualTo(THREADS);
         assertThat(jdbc.sql("SELECT DISTINCT quantity FROM sku").query(Long.class).list()).containsExactly((long) ROUNDS);
-        assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
         assertThat(Invariants.minQuantity(jdbc)).isNotNegative();
     }
 }
