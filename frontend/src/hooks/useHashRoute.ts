@@ -14,8 +14,8 @@ export function parseRoute(hash: string): Route {
   if (path === '/add') return { name: 'add' };
   if (path === '/new') return { name: 'new' };
   // An id never contains '/', raw or as %2F, so a trailing slash or an extra segment is not a SKU route (M-40).
-  const edit = /^\/sku\/([^/]+)\/edit$/.exec(path);
-  const sku = /^\/sku\/([^/]+)$/.exec(path);
+  const edit = /^\/sku\/(.+)\/edit$/.exec(path);
+  const sku = /^\/sku\/(.+)$/.exec(path);
   const match = edit ?? sku;
   if (match?.[1]) {
     const skuId = safeDecode(match[1]);

@@ -354,3 +354,61 @@ test('a 118-character unbroken name and a 64-character SKU id never scroll sidew
     await overflow('list page');
   }
 });
+
+async function makeLongSku(page: Page): Promise<{ skuId: string; id: string }> {
+  const skuId = `M${Date.now()}${Math.floor(Math.random() * 1e6)}`.padEnd(64, 'Y');
+  expect(skuId).toHaveLength(64);
+  const id = encodeURIComponent(skuId);
+  const made = await page.request.put(`/v2/inventory/${id}/details`, {
+    headers: { 'If-None-Match': '*' },
+    data: { name: 'Long id', description: '', images: [] },
+  });
+  expect(made.status()).toBe(201);
+  return { skuId, id };
+}
+
+async function expectNoSidewaysScroll(page: Page, label: string) {
+  const m = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+  expect(m.scroll, `${label} at ${m.inner}px`).toBeLessThanOrEqual(m.inner);
+}
+
+for (const width of [375, 1280]) {
+  test.describe(`no sideways scroll at ${width} px (M-03)`, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+    });
+
+    test('Create over an existing 64-character id: the 412 alert with its "Open {skuId}" link', async ({ page }) => {
+      const { skuId, id } = await makeLongSku(page);
+      await page.goto('/#/new');
+      await page.getByLabel('SKU ID').fill(skuId);
+      await fillDetails(page, 'Second');
+      await page.getByRole('button', { name: 'Create SKU' }).click();
+      await expect(page.getByRole('alert').locator(`a[href="#/sku/${id}/edit"]`)).toBeVisible();
+      await expectNoSidewaysScroll(page, 'Create 412 alert');
+    });
+
+    test('Add stock and Purchase success blocks (item and Idempotency-Key) on a 64-character id', async ({ page }) => {
+      const { skuId, id } = await makeLongSku(page);
+      await page.goto(`/#/sku/${id}`);
+      await expect(page.getByRole('heading', { level: 1, name: skuId })).toBeVisible();
+      const addForm = page.getByRole('form', { name: 'Add stock' });
+      await addForm.getByLabel('Quantity').fill('2');
+      await addForm.getByRole('button', { name: 'Add stock' }).click();
+      await expect(page.getByRole('status')).toContainText(`Added 2 to ${skuId}`);
+      await expect(page.getByRole('status').locator('details')).toContainText(/Idempotency-Key [0-9a-f-]{36}/);
+      await expectNoSidewaysScroll(page, 'Add stock success');
+      const buyForm = page.getByRole('form', { name: 'Purchase' });
+      await buyForm.getByLabel('Quantity').fill('1');
+      await buyForm.getByRole('button', { name: 'Purchase' }).click();
+      await expect(page.getByRole('status')).toContainText(`Purchased 1 of ${skuId}`);
+      await expectNoSidewaysScroll(page, 'Purchase success');
+    });
+
+    test('page not found with a 150-character path', async ({ page }) => {
+      await page.goto(`/#/does/not/exist/${'p'.repeat(150)}`);
+      await expect(page.getByText(/page not found/i)).toBeVisible();
+      await expectNoSidewaysScroll(page, 'page not found');
+    });
+  });
+}
