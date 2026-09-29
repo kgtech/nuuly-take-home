@@ -2,3 +2,4 @@
 *.bat text eol=crlf
 *.jar binary
 openapi.yaml text eol=lf
+openapi-v2.yaml text eol=lf
