@@ -19,11 +19,22 @@ final class InventoryApi {
     static final String LIMIT = "limit";
     static final String AFTER = "after";
 
-    static final String API_TITLE = "Inventory API";
-    static final String API_VERSION = "1.0.0";
     static final String TAG = "inventory";
 
     static final String GET_SUMMARY = "Get inventory for a SKU";
+    static final String GET_DESCRIPTION = "Returns the current quantity on hand for the specified SKU. "
+            + "Returns 404 if the SKU does not exist.";
+    static final String CREATE_DESCRIPTION = "Adds stock for the specified SKU. If the SKU does not yet exist in "
+            + "inventory, it is created with the given quantity. If it already exists, the quantity is added to the "
+            + "current stock. Returns the updated inventory state for the SKU.";
+    static final String PURCHASE_DESCRIPTION = "Deducts the requested quantity from inventory for the specified SKU. "
+            + "The purchase is only allowed if the current stock is sufficient to fulfill the full requested "
+            + "quantity. Returns 404 if the SKU does not exist. Returns 400 if there is insufficient inventory. "
+            + "On success, returns the remaining inventory for the SKU.";
+    /** The spec's skuId examples (plain "type: string", H12). */
+    static final String SKU_EXAMPLE = "CW-XYCS-BM-01";
+    static final String SKU_EXAMPLE_PURCHASE = "widget";
+    static final String ERROR_EXAMPLE = "Insufficient inventory";
     static final String GET_OK_DESCRIPTION = "Current inventory state for the sku";
     static final String SKU_NOT_FOUND_DESCRIPTION = "SKU not found";
     static final String CREATE_SUMMARY = "Create or update inventory for a SKU";

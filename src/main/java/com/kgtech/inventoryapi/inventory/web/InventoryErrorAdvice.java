@@ -1,13 +1,16 @@
 package com.kgtech.inventoryapi.inventory.web;
 
 import io.swagger.v3.oas.annotations.Hidden;
+import java.io.IOException;
 import java.util.List;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.apache.tomcat.util.http.InvalidParameterException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springdoc.api.OpenApiResourceNotFoundException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -36,7 +39,7 @@ class InventoryErrorAdvice {
 
     /** Paths that keep library behaviour (S6, G10); /error is not one of them. */
     private static final List<PathPattern> LIBRARY_PATHS = List.of(
-            "/actuator/**", "/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui.html", "/swagger-ui/**")
+            "/actuator/**", "/v3/api-docs/**", "/v3/api-docs.yaml/**", "/swagger-ui.html", "/swagger-ui/**")
             .stream()
             .map(PathPatternParser.defaultInstance::parse)
             .toList();
@@ -59,6 +62,15 @@ class InventoryErrorAdvice {
     ResponseEntity<String> undecodableQuery(HttpServletRequest request) {
         log.warn("Undecodable query string on {} {}", request.getMethod(), request.getRequestURI());
         return TextErrors.invalidRequest();
+    }
+
+    /**
+     * springdoc's unknown group (/v3/api-docs/nope, /v3/api-docs.yaml/nope) is a 404 with Boot's own error body, not
+     * the 500 Boot would map the exception to (H12). Never text/plain: it is a library path (S6).
+     */
+    @ExceptionHandler(OpenApiResourceNotFoundException.class)
+    void unknownDocsGroup(HttpServletResponse response) throws IOException {
+        response.sendError(HttpStatus.NOT_FOUND.value());
     }
 
     /** A POST or PUT whose Accept excludes JSON is a client error on the spec's and v2's write operations (U2, Y1). */

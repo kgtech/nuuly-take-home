@@ -132,7 +132,7 @@ class InventoryErrorAdviceTest {
      */
     @ParameterizedTest
     @ValueSource(strings = {"/actuator/nope", "/actuator", "/v3/api-docs/nope", "/v3/api-docs.yaml",
-        "/swagger-ui.html", "/swagger-ui/nope.js"})
+        "/v3/api-docs.yaml/nope", "/swagger-ui.html", "/swagger-ui/nope.js"})
     void libraryPathErrorsAreLeftToSpring(String path) throws Exception {
         mvc.perform(get(path).accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotFound())
@@ -141,7 +141,7 @@ class InventoryErrorAdviceTest {
 
     /** S6, C1: paths that only look like library paths keep the text/plain contract. */
     @ParameterizedTest
-    @ValueSource(strings = {"/actuatorx", "/v3/api-docsx", "/v3/api-docs.yaml/x", "/swagger-uix",
+    @ValueSource(strings = {"/actuatorx", "/v3/api-docsx", "/v3/api-docs.yamlx", "/swagger-uix",
         "/swagger-ui.htmlx"})
     void lookalikePathsKeepTextPlain(String path) throws Exception {
         expectText(mvc.perform(get(path).accept(MediaType.APPLICATION_JSON)), 404, "Not Found");
