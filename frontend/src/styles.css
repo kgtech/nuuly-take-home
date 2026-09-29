@@ -42,6 +42,7 @@ body {
 h1,
 h2,
 h3 {
+  overflow-wrap: anywhere;
   font-family: var(--serif);
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -141,6 +142,7 @@ main.narrow {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .back {
   font-weight: 600;
@@ -570,4 +572,12 @@ form.card {
 }
 td.name {
   color: var(--muted);
+}
+
+/* Grid and flex children default to min-width: auto, so an unbroken name or id would widen the page (M-03). */
+.sku-grid > *,
+.page-head,
+.card,
+.page {
+  min-width: 0;
 }

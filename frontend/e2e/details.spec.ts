@@ -241,7 +241,7 @@ test('creating an existing SKU changes nothing: the 412 text and a link to its e
   await page.getByLabel(/^Initial stock/).fill('9');
   await page.getByRole('button', { name: 'Create SKU' }).click();
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('Details changed since you read them. Reload the SKU and retry with its new ETag.');
+  await expect(alert).not.toContainText('Details changed since you read them');
   await expect(alert).toContainText('A SKU with this ID already exists. Open it to edit its details or add stock.');
   await expect(alert.locator(`a[href="#/sku/${id}/edit"]`)).toBeVisible();
   await expect(page).toHaveURL(/#\/new$/);
@@ -314,5 +314,43 @@ test.describe('accessibility and phone width (v2 views)', () => {
       expect(scrollWidth).toBeLessThanOrEqual(width);
       await page.screenshot({ path: `e2e/screenshots/${info.project.name}-${name}.png`, fullPage: true });
     });
+  }
+});
+
+test('a 118-character unbroken name and a 64-character SKU id never scroll sideways at 375 and 1280 px on the SKU, Edit and list pages (M-03)', async ({ page }) => {
+  const stamp = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+  const skuId = `L${stamp}`.padEnd(64, 'X');
+  expect(skuId).toHaveLength(64);
+  const name = 'N'.repeat(118);
+  const id = encodeURIComponent(skuId);
+  const made = await page.request.put(`/v2/inventory/${id}/details`, {
+    headers: { 'If-None-Match': '*' },
+    data: { name, description: 'D'.repeat(300), images: [] },
+  });
+  expect(made.status()).toBe(201);
+  const stocked = await page.request.post(`/v2/inventory/${id}`, {
+    headers: { 'Idempotency-Key': randomUUID() },
+    data: { quantity: 3 },
+  });
+  expect(stocked.status()).toBe(200);
+
+  for (const width of [375, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    const overflow = async (label: string) => {
+      const m = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, inner: window.innerWidth }));
+      expect(m.scroll, `${label} at ${width}px`).toBeLessThanOrEqual(m.inner);
+    };
+    await page.goto(`/#/sku/${id}`);
+    await expect(page.getByRole('heading', { level: 2, name })).toBeVisible();
+    await overflow('SKU page');
+    await page.goto(`/#/sku/${id}/edit`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Edit details' })).toBeVisible();
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue(name);
+    await overflow('Edit page');
+    await page.goto('/#/');
+    await page.getByLabel('After SKU').fill(skuId.slice(0, -1));
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.getByRole('row').filter({ has: page.getByRole('link', { name: skuId }) })).toBeVisible();
+    await overflow('list page');
   }
 });

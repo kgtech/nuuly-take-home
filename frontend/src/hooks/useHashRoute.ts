@@ -13,10 +13,14 @@ export function parseRoute(hash: string): Route {
   if (path === '/') return { name: 'list' };
   if (path === '/add') return { name: 'add' };
   if (path === '/new') return { name: 'new' };
-  const edit = /^\/sku\/(.+)\/edit$/.exec(path);
-  if (edit?.[1]) return { name: 'edit', skuId: safeDecode(edit[1]) };
-  const sku = /^\/sku\/(.+)$/.exec(path);
-  if (sku?.[1]) return { name: 'sku', skuId: safeDecode(sku[1]) };
+  // An id never contains '/', raw or as %2F, so a trailing slash or an extra segment is not a SKU route (M-40).
+  const edit = /^\/sku\/([^/]+)\/edit$/.exec(path);
+  const sku = /^\/sku\/([^/]+)$/.exec(path);
+  const match = edit ?? sku;
+  if (match?.[1]) {
+    const skuId = safeDecode(match[1]);
+    if (!skuId.includes('/')) return { name: edit ? 'edit' : 'sku', skuId };
+  }
   return { name: 'notFound', path };
 }
 

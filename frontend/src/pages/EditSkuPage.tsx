@@ -3,6 +3,7 @@ import { api, type SkuItem } from '../api/client';
 import { DetailsFields, useDetailsForm, valuesFrom } from '../components/DetailsFields';
 import { ArrowLeft } from '../components/Icons';
 import { ErrorText, Hint, Loading, SubmitButton, writeGuidance } from '../components/Messages';
+import { isRetryable } from '../hooks/useIdempotentSubmit';
 import { navigate, NEW_HREF, skuHref } from '../hooks/useHashRoute';
 import { SKU_ID_PATTERN, SKU_NOT_FOUND } from '../validation';
 
@@ -129,6 +130,14 @@ export function EditSkuPage({ skuId }: { skuId: string }) {
                     Reload
                   </button>{' '}
                   to see the current details, then make your change again.
+                </>
+              ) : isRetryable(failure.status) ? (
+                <>
+                  The save may or may not have been applied.{' '}
+                  <button type="button" className="secondary" onClick={reload}>
+                    Reload
+                  </button>{' '}
+                  to see the current details.
                 </>
               ) : (
                 writeGuidance(failure.status)
