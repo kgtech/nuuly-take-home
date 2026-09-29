@@ -1,0 +1,8 @@
+{
+  "choice": "C",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded by H10: the hash now carries the API version, so \"the same bytes as before\" no longer holds, on purpose."
+  }
+}

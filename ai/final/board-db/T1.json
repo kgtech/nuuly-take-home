@@ -1,0 +1,8 @@
+{
+  "choice": "E",
+  "notes": "Owner OD-3 and OD-4",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "D": "Superseded by OD-3: scoped to /v2."
+  }
+}

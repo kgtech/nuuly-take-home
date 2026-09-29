@@ -1,0 +1,5 @@
+{
+  "choice": "A",
+  "notes": "Shopify uses case-sensitive SKUs, and the examples `widget` and `CW-XYCS-BM-01` indicate case sensitivity should be preserved for this project as well.",
+  "why": {}
+}

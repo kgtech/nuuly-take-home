@@ -1,0 +1,8 @@
+{
+  "choice": "D",
+  "notes": "Owner OD-4",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded by OD-4: the single order for both POSTs is split into an unversioned order and a /v2 order."
+  }
+}

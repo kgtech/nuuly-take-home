@@ -14,13 +14,13 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.server.PathContainer;
-import org.springframework.http.server.RequestPath;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.util.ServletRequestPathUtils;
 import org.springframework.web.util.pattern.PathPattern;
 import org.springframework.web.util.pattern.PathPatternParser;
 
@@ -91,8 +91,8 @@ class InventoryErrorAdvice {
      * (DefaultHandlerExceptionResolver and Spring Boot's /error), so those paths keep their own responses (S6, C1).
      */
     private static void leaveLibraryPathsToSpring(Exception ex, HttpServletRequest request) throws Exception {
-        PathContainer path = RequestPath.parse(request.getRequestURI(), request.getContextPath())
-                .pathWithinApplication();
+        // The path Spring routed on (parsed by the DispatcherServlet), not the raw URI (L19)
+        PathContainer path = ServletRequestPathUtils.getParsedRequestPath(request).pathWithinApplication();
         for (PathPattern pattern : LIBRARY_PATHS) {
             if (pattern.matches(path)) {
                 throw ex;

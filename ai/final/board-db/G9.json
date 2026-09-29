@@ -1,0 +1,8 @@
+{
+  "choice": "E",
+  "notes": "Owner OD-5",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "Superseded by OD-5: opt-in limit on the unversioned list is now a /v2 extension; the unversioned page is fixed at 250."
+  }
+}

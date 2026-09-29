@@ -1,0 +1,8 @@
+{
+  "choice": "E",
+  "notes": "Owner instruction: use the ports main uses",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "Superseded by H13: build v2 published 18080."
+  }
+}

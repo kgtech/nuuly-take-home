@@ -1,0 +1,8 @@
+{
+  "choice": "D",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "C": "Superseded: the controllers do not pass the raw segment; the guard filter (C3) rejects \";\" content before them."
+  }
+}

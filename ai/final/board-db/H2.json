@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Owner OD-3, OD-4",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "An optional key makes \"retry-safe\" depend on the caller remembering to send one, and the /v2 contract is the place to say otherwise.",
+    "C": "The spec has no key."
+  }
+}

@@ -6,8 +6,11 @@ import static org.springframework.http.HttpHeaders.CONNECTION;
 import static org.springframework.http.HttpHeaders.CONTENT_LENGTH;
 import static org.springframework.http.HttpHeaders.CONTENT_TYPE;
 import static org.springframework.http.HttpHeaders.HOST;
+import static org.springframework.http.HttpHeaders.TRANSFER_ENCODING;
+import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.UUID;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +64,15 @@ class RequestGuardTomcatIntegrationTest {
                 Arguments.of("PUT /v2/inventory/ABC-1;lot=7", "{\"name\":\"n\"}", null, 400, "Invalid request"),
                 Arguments.of("PUT /v2/%69nventory/A%2FB", "{\"name\":\"n\"}", null, 400, "Invalid request"),
                 Arguments.of("POST /v2/inventory/NEW-9", V2_BODY, "application/json;q=0", 400, "Invalid request"),
+                // F-04: purchase and details are guarded like the other v2 writes
+                Arguments.of("POST /v2/inventory/ABC-1%3Bx/purchase", "{\"quantity\":1}", null, 404, "SKU not found"),
+                Arguments.of("POST /v2;a=b/%69nventory/ABC-1;x/purchase;y", "{\"quantity\":1}", null, 404,
+                        "SKU not found"),
+                Arguments.of("PUT /v2/inventory/ABC-1;x/details", "{\"name\":\"n\"}", null, 400, "Invalid request"),
+                Arguments.of("PUT /v2/inventory/ABC-1%3Bx/details", "{\"name\":\"n\"}", null, 400, "Invalid request"),
+                Arguments.of("POST /v2/inventory/ABC-1/purchase", "{\"quantity\":1}", "application/json;q=0", 400,
+                        "Invalid request"),
+                Arguments.of("PUT /v2/inventory/ABC-1/details", "{\"name\":\"n\"}", "text/html", 400, "Invalid request"),
                 Arguments.of("PUT /v2/inventory/ABC-1", "{\"name\":\"n\"}", "text/html", 400, "Invalid request"));
     }
 
@@ -84,16 +96,35 @@ class RequestGuardTomcatIntegrationTest {
         assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isEqualTo(1);
     }
 
-    /** Review R-01: a chunked v2 body (no Content-Length) is capped as it is read; one within the cap is accepted. */
-    @ParameterizedTest(name = "chunked v2 body of about {0} bytes → {1}")
-    @org.junit.jupiter.params.provider.CsvSource({"40000, 201", "70000, 400"})
-    void chunkedV2BodyIsCappedWhileRead(int padBytes, int status) throws Exception {
+    private static final String QUANTITY_BODY = "{\"quantity\":1";
+    private static final String DETAILS_BODY = "{\"name\":\"n\"";
+
+    static Stream<Arguments> chunkedBodies() {
+        String v2Create = "{\"details\":{\"name\":\"n\"},\"initialQuantity\":1";
+        return Stream.of(
+                Arguments.of("POST /v2/inventory/CH-1", v2Create, 40_000, 201),
+                Arguments.of("POST /v2/inventory/CH-1", v2Create, 70_000, 400),
+                Arguments.of("PUT /v2/inventory/CH-1", DETAILS_BODY, 70_000, 400),
+                // chunked v2 purchase and details rows are added by the PRs that map those routes (details PUT PR, v2 add/purchase PR): a count-while-read cap needs a handler
+                // frozen, not changed (A19): an unversioned chunked body is not capped while read
+                Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, 70_000, 200));
+    }
+
+    /**
+     * Review R-01, F-04: a chunked body (no Content-Length) is counted as it is read on every v2 write route, purchase
+     * and details included; one within the cap is accepted.
+     */
+    @ParameterizedTest(name = "chunked {0} of about {2} bytes → {3}")
+    @MethodSource("chunkedBodies")
+    void chunkedBodyIsCappedWhileRead(String requestLine, String bodyPrefix, int padBytes, int status)
+            throws Exception {
         // The size comes from an ignored property (G13), so only the byte cap can reject the smaller body.
-        String body = "{\"details\":{\"name\":\"n\",\"pad\":\"" + "d".repeat(padBytes) + "\"},\"initialQuantity\":1}";
+        String body = bodyPrefix + ",\"pad\":\"" + "d".repeat(padBytes) + "\"}";
         String chunked = Integer.toHexString(body.length()) + "\r\n" + body + "\r\n0\r\n\r\n";
-        String head = "POST /v2/inventory/CH-1 HTTP/1.1\r\n" + header(HOST, "localhost") + header(CONNECTION, "close")
+        String head = requestLine + " HTTP/1.1\r\n" + header(HOST, "localhost") + header(CONNECTION, "close")
                 + header(CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                + header(org.springframework.http.HttpHeaders.TRANSFER_ENCODING, "chunked");
+                + header(TRANSFER_ENCODING, "chunked") + header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+        java.util.Map<String, Long> before = Tables.counts(jdbc);
 
         RawHttp.Response response = RawHttp.send(port, head, chunked);
 
@@ -101,7 +132,7 @@ class RequestGuardTomcatIntegrationTest {
         if (status == 400) {
             assertThat(response.contentType().isCompatibleWith(MediaType.TEXT_PLAIN)).isTrue();
             assertThat(response.body()).isEqualTo("Invalid request");
-            assertThat(jdbc.sql("SELECT count(*) FROM sku WHERE sku_id = 'CH-1'").query(Long.class).single()).isZero();
+            assertThat(Tables.counts(jdbc)).isEqualTo(before);
         } else {
             assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'CH-1'").query(Long.class).single())
                     .isEqualTo(1);
