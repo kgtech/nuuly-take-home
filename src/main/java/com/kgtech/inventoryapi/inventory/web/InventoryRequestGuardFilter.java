@@ -44,7 +44,7 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
     /** The largest JSON body a spec request needs, with room for whitespace and ignored fields (G13). */
     static final long MAX_BODY_BYTES = 4096;
     /**
-     * DESIGN-V2 section 8: the largest contract-valid v2 body, with every non-ASCII character of the name and
+     * DESIGN-V2 section 8: the largest contract-valid details body, with every non-ASCII character of the name and
      * description written as a six-byte \\uXXXX escape (12,720 bytes) plus ten 2,048-byte ASCII URLs and the structure,
      * is about 33.4 KB; 64 KB leaves room for whitespace and ignored properties (critique F-conc-01).
      */
@@ -70,11 +70,7 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
         boolean post = HttpMethod.POST.matches(method);
         boolean put = HttpMethod.PUT.matches(method) && path.v2();
         return switch (path.kind()) {
-            // The v2 item POST cap is temporary: that route is repurposed to add-stock in a later PR, and its cap
-            // then becomes MAX_BODY_BYTES like the other purchase-shaped writes.
-            case ITEM -> get ? Rule.read()
-                    : post ? new Rule(INVALID, true, path.v2() ? MAX_V2_BODY_BYTES : MAX_BODY_BYTES)
-                    : put ? new Rule(INVALID, true, MAX_V2_BODY_BYTES) : null;
+            case ITEM -> get ? Rule.read() : post ? new Rule(INVALID, true, MAX_BODY_BYTES) : null;
             case PURCHASE -> post ? new Rule(NOT_FOUND, true, MAX_BODY_BYTES) : null;
             case DETAILS -> put ? new Rule(INVALID, true, MAX_V2_BODY_BYTES) : null;
             case LIST, OTHER -> null;

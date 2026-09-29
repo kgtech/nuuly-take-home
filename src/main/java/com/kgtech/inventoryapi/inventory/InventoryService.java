@@ -12,10 +12,12 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.kgtech.inventoryapi.idempotency.ApiVersion;
 import com.kgtech.inventoryapi.idempotency.IdempotencyKey;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
 import com.kgtech.inventoryapi.idempotency.Operation;
+import com.kgtech.inventoryapi.idempotency.StoredResponse;
 
 /**
  * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2); with
@@ -72,26 +74,27 @@ public class InventoryService {
     }
 
     /**
-     * DESIGN-V2 §8 "Create": one READ COMMITTED transaction in lock order sku row → details row → ledger. The SKU
-     * row's INSERT decides create (row back) or 409 (no row); initial stock goes through the spec's add path and
-     * ledger row. A new row at 0 cannot overflow an int32 initial quantity. A malformed skuId is 400.
+     * OD-3, H2: POST /v2/inventory/{skuId}. Like {@link #add}, but the Idempotency-Key is required (a missing one is
+     * 400) and the Ok carries the SKU's details, read in the same transaction as the write.
      */
-    public WriteResult create(String skuId, CreateSku request, String idempotencyKey) {
-        return write(Operation.CREATE, skuId, idempotencyKey, request.fingerprint(), new WriteResult.InvalidRequest(),
-                () -> {
-                    if (!details.claimSku(skuId)) {
-                        return new DetailsOutcome.AlreadyExists();
-                    }
-                    long version = details.insert(skuId, request.details());
-                    long quantity = 0;
-                    if (request.initialQuantity() > 0) {
-                        quantity = stock.add(skuId, request.initialQuantity())
-                                .orElseThrow(() -> new IllegalStateException("a new SKU cannot overflow: " + skuId))
-                                .quantity();
-                    }
-                    return new DetailsOutcome.Created(
-                            new SkuItem(skuId, quantity, Optional.of(request.details()), version));
-                });
+    public WriteResult addV2(String skuId, int quantity, String idempotencyKey) {
+        requirePositive(quantity);
+        return keyed(ApiVersion.V2, Operation.ADD, skuId, idempotencyKey, Integer.toString(quantity),
+                new WriteResult.InvalidRequest(),
+                () -> stock.add(skuId, quantity)
+                        .<WriteResult>map(balance -> okWithDetails(skuId, balance))
+                        .orElseGet(StockOutcome.Overflow::new));
+    }
+
+    /** POST /v2/inventory/{skuId}/purchase: {@link #purchase} with a required key and the details in the Ok. */
+    public WriteResult purchaseV2(String skuId, int quantity, String idempotencyKey) {
+        requirePositive(quantity);
+        return keyed(ApiVersion.V2, Operation.PURCHASE, skuId, idempotencyKey, Integer.toString(quantity),
+                new StockOutcome.NotFound(),
+                () -> stock.purchase(skuId, quantity)
+                        .<WriteResult>map(balance -> okWithDetails(skuId, balance))
+                        .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient()
+                                : new StockOutcome.NotFound()));
     }
 
     /**
@@ -107,35 +110,28 @@ public class InventoryService {
         if (idempotencyKey == null) {
             return SkuId.isValid(skuId) ? transaction.execute(status -> action.get()) : malformedSkuId;
         }
-        Optional<UUID> key = IdempotencyKey.parse(idempotencyKey);
+        return keyed(ApiVersion.UNVERSIONED, operation, skuId, idempotencyKey, canonicalRequest, malformedSkuId, action);
+    }
+
+    /**
+     * The key (S3), then the skuId, then the claim and write. A null key is 400: only /v2 gets here without one.
+     */
+    private WriteResult keyed(ApiVersion version, Operation operation, String skuId, String idempotencyKey,
+            String canonicalRequest, WriteResult malformedSkuId, Supplier<WriteResult> action) {
+        Optional<UUID> key = idempotencyKey == null ? Optional.empty() : IdempotencyKey.parse(idempotencyKey);
         if (key.isEmpty()) {
             return new WriteResult.InvalidRequest();
         }
         if (!SkuId.isValid(skuId)) {
             return malformedSkuId;
         }
-        return switch (idempotency.run(key.get(), operation, skuId, canonicalRequest,
-                () -> responses.toStored(skuId, action.get()))) {
+        Supplier<StoredResponse> stored = () -> responses.toStored(skuId, action.get());
+        return switch (version == ApiVersion.V2
+                ? idempotency.run(key.get(), version, operation, skuId, canonicalRequest, stored)
+                : idempotency.run(key.get(), operation, skuId, canonicalRequest, stored)) {
             case Keyed.Response response -> new WriteResult.Stored(response.response());
             case Keyed.Invalid _ -> new WriteResult.InvalidRequest();
         };
-    }
-
-    /** DESIGN-V2 §8 "Edit": full replacement in one transaction; never touches the balance row or the ledger. */
-    public ReplaceResult replaceDetails(String skuId, SkuDetails replacement, DetailsPrecondition precondition) {
-        if (!SkuId.isValid(skuId)) {
-            return new ReplaceResult.InvalidRequest();
-        }
-        return transaction.execute(status -> details.replace(skuId, replacement, precondition)
-                .<ReplaceResult>map(version -> new ReplaceResult.Replaced(details.find(skuId)
-                        .orElseThrow(() -> new IllegalStateException("replaced details vanished: " + skuId))))
-                .orElseGet(() -> switch (precondition) {
-                    // Unconditional: the only way to get no row is a missing SKU; no probe, so a create that commits
-                    // between the two statements can never turn it into a 412 (review R-03).
-                    case DetailsPrecondition.Any _, DetailsPrecondition.Exists _ -> new ReplaceResult.NotFound();
-                    case DetailsPrecondition.Versions _, DetailsPrecondition.Absent _ -> details.exists(skuId) ? new ReplaceResult.VersionMismatch()
-                            : new ReplaceResult.NotFound();
-                }));
     }
 
     /**
@@ -214,6 +210,11 @@ public class InventoryService {
 
     private static WriteResult ok(Balance balance) {
         return new StockOutcome.Ok(balance.quantity());
+    }
+
+    /** Inside the write's transaction, after the row update: the details the response carries (H6). */
+    private WriteResult okWithDetails(String skuId, Balance balance) {
+        return new StockOutcome.Ok(balance.quantity(), details.find(skuId).flatMap(SkuItem::details));
     }
 
     /** R4, R8, C2: a positive ASCII integer, clamped to 250; blank, non-numeric, zero or negative → 250. */

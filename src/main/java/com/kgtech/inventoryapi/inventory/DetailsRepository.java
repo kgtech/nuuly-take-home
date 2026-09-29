@@ -15,7 +15,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 class DetailsRepository {
 
-    /** §8 "Create" step 1: a row back means this transaction created the SKU; none means it exists. */
+    /** PUT details: a row back means this transaction created the SKU; none means it exists. */
     static final String CLAIM_SKU = "INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING RETURNING sku_id";
 
     /** Images travel as one newline-separated string (a URL cannot contain a newline) and become text[]. */
@@ -68,8 +68,6 @@ class DetailsRepository {
     /** G9 keyset page in COLLATE "C" order, with the details joined. */
     static final String PAGE = ITEM + "WHERE s.sku_id > :after ORDER BY s.sku_id LIMIT :limit";
 
-    static final String EXISTS = "SELECT EXISTS (SELECT 1 FROM sku WHERE sku_id = :id)";
-
     private final JdbcClient jdbc;
 
     DetailsRepository(JdbcClient jdbc) {
@@ -96,10 +94,6 @@ class DetailsRepository {
             case DetailsPrecondition.Versions v -> withDetails(jdbc.sql(REPLACE_IF).param("id", skuId)
                     .param("versions", v.versions()), details).query(Long.class).optional();
         };
-    }
-
-    boolean exists(String skuId) {
-        return jdbc.sql(EXISTS).param("id", skuId).query(Boolean.class).single();
     }
 
     Optional<SkuItem> find(String skuId) {

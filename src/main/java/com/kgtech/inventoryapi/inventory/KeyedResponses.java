@@ -8,6 +8,6 @@ import com.kgtech.inventoryapi.idempotency.StoredResponse;
  */
 public interface KeyedResponses {
 
-    /** Runs inside the claim's transaction; {@code result} is a stock or details outcome. */
+    /** Runs inside the claim's transaction; {@code result} is a stock outcome. */
     StoredResponse toStored(String skuId, WriteResult result);
 }

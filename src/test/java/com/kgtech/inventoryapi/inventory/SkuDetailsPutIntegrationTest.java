@@ -43,7 +43,7 @@ import com.kgtech.inventoryapi.Tables;
  * F-08 (#98), OD-6 and OD-11: {@code PUT /v2/inventory/{skuId}/details} against Postgres. It creates an absent SKU at
  * quantity 0 (201, ETag "1"), replaces the details of an existing one (200), never touches stock, decides
  * If-Match and If-None-Match itself (RFC 9110, 412 text/plain), and ignores Idempotency-Key. Not @Transactional.
- * The old {@code PUT /v2/inventory/{skuId}} keeps its tests in SkuDetailsApiIntegrationTest until it is removed.
+ * The details body matrix is SkuDetailsApiIntegrationTest's.
  */
 @IntegrationTest
 @AutoConfigureMockMvc

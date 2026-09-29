@@ -18,7 +18,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.Tables;
 
-/** Issue #71 AC1: the V3 migration's constraints and trigger, executed against Postgres (S11). */
+/**
+ * Issue #71 AC1: the V3 migration's constraints and trigger, executed against Postgres (S11). The idempotency CHECKs
+ * V3 widened are narrowed again by V4 (H9); IdempotencyChecksMigrationTest covers that.
+ */
 @IntegrationTest
 class SkuDetailsSchemaTest {
 
@@ -55,7 +58,7 @@ class SkuDetailsSchemaTest {
                         + "sku_id, request_hash) VALUES (gen_random_uuid(), 'replace', 's', decode(repeat('00', 32), "
                         + "'hex'))", "23514"),
                 Arguments.of("key status 202", "INSERT INTO idempotency_keys (idempotency_key, operation, sku_id, "
-                        + "request_hash, status, content_type, body) VALUES (gen_random_uuid(), 'create', 's', "
+                        + "request_hash, status, content_type, body) VALUES (gen_random_uuid(), 'add', 's', "
                         + "decode(repeat('00', 32), 'hex'), 202, 'text/plain', 'x')", "23514"));
     }
 
@@ -71,16 +74,11 @@ class SkuDetailsSchemaTest {
     }
 
     @Test
-    void acceptsTheBoundaryValuesAndTheCreateKeyStatuses() {
+    void acceptsTheBoundaryValues() {
         Tables.seed(jdbc, "edge", 1);
         jdbc.sql(INSERT + "('edge', repeat('n', 120), repeat('d', 2000), 0, 'EUR', '{"
                 + "a,b,c,d,e,f,g,h,i,j}')").update();
-        for (int status : new int[] {201, 409}) {
-            jdbc.sql("INSERT INTO idempotency_keys (idempotency_key, operation, sku_id, request_hash, status, "
-                    + "content_type, body) VALUES (gen_random_uuid(), 'create', 'edge', decode(repeat('00', 32), "
-                    + "'hex'), ?, 'text/plain', 'x')").param(status).update();
-        }
-        assertThat(jdbc.sql("SELECT count(*) FROM idempotency_keys").query(Long.class).single()).isEqualTo(2);
+        assertThat(jdbc.sql("SELECT count(*) FROM sku_details").query(Long.class).single()).isEqualTo(2);
     }
 
     /** TRUNCATE (the test reset) must clear details too, and the trigger must not block it. */

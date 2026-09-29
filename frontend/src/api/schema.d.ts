@@ -88,16 +88,12 @@ export interface paths {
         };
         /** Get a SKU with its details */
         get: operations["getSku"];
+        put?: never;
         /**
-         * Replace a SKU's details
-         * @description Replaces the SKU's details (creates them for a SKU that has none). Stock is not changed. With If-Match, the details are replaced only when their current ETag is one of the listed values, else 412.
+         * Add stock to a SKU
+         * @description Adds stock, creating the SKU if needed; like POST /inventory/{skuId}, but the Idempotency-Key is required and the response is a SkuItem. The same key with the same request replays the first response.
          */
-        put: operations["replaceSkuDetails"];
-        /**
-         * Create a SKU with details
-         * @description Creates the SKU with its details and optional initial stock in one transaction; initial stock is recorded in the ledger like an add. A SKU that already exists (including one created by POST /inventory/{skuId}) is 409; set its details with PUT and add stock with POST /inventory/{skuId}.
-         */
-        post: operations["createSku"];
+        post: operations["addStock"];
         delete?: never;
         options?: never;
         head?: never;
@@ -124,19 +120,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/inventory/{skuId}/purchase": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purchase a quantity of a SKU
+         * @description Like POST /inventory/{skuId}/purchase, but the Idempotency-Key is required and the response is a SkuItem. The same key with the same request replays the first response.
+         */
+        post: operations["purchaseStock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        CreateSkuRequest: {
-            details: components["schemas"]["SkuDetails"];
-            /**
-             * Format: int32
-             * @description Stock to record at creation (absent or null means 0), through the same ledger as an add
-             * @default 0
-             */
-            initialQuantity: number;
-        };
         InventoryItem: {
             /** Format: int64 */
             quantity?: number;
@@ -405,12 +412,12 @@ export interface operations {
             };
         };
     };
-    replaceSkuDetails: {
+    addStock: {
         parameters: {
             query?: never;
-            header?: {
-                /** @description Optional strong ETag(s) from a previous response; "*" or absent means unconditional */
-                "If-Match"?: string;
+            header: {
+                /** @description Required UUID. The same key with the same request replays the first response. A missing or malformed key, a different request, or a key older than 24h returns 400. */
+                "Idempotency-Key": string;
             };
             path: {
                 /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
@@ -420,15 +427,13 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SkuDetails"];
+                "application/json": components["schemas"]["InventoryQuantity"];
             };
         };
         responses: {
             /** @description The SKU after the update */
             200: {
                 headers: {
-                    /** @description The details version, a strong validator for If-Match; "0" before any details */
-                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -437,74 +442,6 @@ export interface operations {
             };
             /** @description Invalid request */
             400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/plain": string;
-                };
-            };
-            /** @description SKU not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/plain": string;
-                };
-            };
-            /** @description Details changed since you read them. Reload the SKU and retry with its new ETag. */
-            412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/plain": string;
-                };
-            };
-        };
-    };
-    createSku: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Optional UUID. The same key with the same request replays the first response. A different request, or a key older than 24h, returns 400. */
-                "Idempotency-Key"?: string;
-            };
-            path: {
-                /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
-                skuId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateSkuRequest"];
-            };
-        };
-        responses: {
-            /** @description The created SKU */
-            201: {
-                headers: {
-                    /** @description The details version of a new SKU, always "1" (also on a replayed 201, even after a later PUT) */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SkuItem"];
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/plain": string;
-                };
-            };
-            /** @description SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}. */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -568,6 +505,54 @@ export interface operations {
             };
             /** @description Details changed since you read them. Reload the SKU and retry with its new ETag. */
             412: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+        };
+    };
+    purchaseStock: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Required UUID. The same key with the same request replays the first response. A missing or malformed key, a different request, or a key older than 24h returns 400. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', starting with a letter or digit. Case-sensitive. */
+                skuId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryQuantity"];
+            };
+        };
+        responses: {
+            /** @description Purchase successful; the SKU with its remaining quantity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkuItem"];
+                };
+            };
+            /** @description Insufficient inventory or invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description SKU not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

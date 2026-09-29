@@ -37,6 +37,8 @@ final class InventoryApi {
             + "starting with a letter or digit. Case-sensitive.";
     static final String IDEMPOTENCY_KEY_DESCRIPTION = "Optional UUID. The same key with the same request replays "
             + "the first response. A different request, or a key older than 24h, returns 400.";
+    static final String V2_IDEMPOTENCY_KEY_DESCRIPTION = "Required UUID. The same key with the same request replays "
+            + "the first response. A missing or malformed key, a different request, or a key older than 24h returns 400.";
 
     static final String LIST_SUMMARY = "List all inventory";
     static final String LIST_DESCRIPTION = "Returns SKUs sorted by skuId, at most " + MAX_LIMIT + " per response. "
@@ -58,23 +60,18 @@ final class InventoryApi {
             + ", sorted by skuId";
     static final String V2_GET_SUMMARY = "Get a SKU with its details";
     static final String V2_GET_OK_DESCRIPTION = "The SKU with its quantity and details";
-    static final String V2_CREATE_SUMMARY = "Create a SKU with details";
-    static final String V2_CREATE_DESCRIPTION = "Creates the SKU with its details and optional initial stock in one "
-            + "transaction; initial stock is recorded in the ledger like an add. A SKU that already exists (including "
-            + "one created by POST /inventory/{skuId}) is 409; set its details with PUT and add stock with "
-            + "POST /inventory/{skuId}.";
-    static final String V2_CREATED_DESCRIPTION = "The created SKU";
-    static final String V2_CONFLICT_DESCRIPTION = TextErrors.SKU_EXISTS;
-    static final String V2_REPLACE_SUMMARY = "Replace a SKU's details";
-    static final String V2_REPLACE_DESCRIPTION = "Replaces the SKU's details (creates them for a SKU that has none). "
-            + "Stock is not changed. With If-Match, the details are replaced only when their current ETag is one of "
-            + "the listed values, else 412.";
-    static final String V2_REPLACED_DESCRIPTION = "The SKU after the update";
+    static final String V2_ADD_SUMMARY = "Add stock to a SKU";
+    static final String V2_ADD_DESCRIPTION = "Adds stock, creating the SKU if needed; like POST /inventory/{skuId}, "
+            + "but the Idempotency-Key is required and the response is a SkuItem. The same key with the same request "
+            + "replays the first response.";
+    static final String V2_ADD_OK_DESCRIPTION = "The SKU after the update";
+    static final String V2_PURCHASE_SUMMARY = "Purchase a quantity of a SKU";
+    static final String V2_PURCHASE_DESCRIPTION = "Like POST /inventory/{skuId}/purchase, but the Idempotency-Key is "
+            + "required and the response is a SkuItem. The same key with the same request replays the first response.";
+    static final String V2_PURCHASE_OK_DESCRIPTION = "Purchase successful; the SKU with its remaining quantity";
     static final String V2_PRECONDITION_DESCRIPTION = TextErrors.DETAILS_CHANGED;
     static final String ETAG_DESCRIPTION = "The details version, a strong validator for If-Match; \"0\" before any "
             + "details";
-    static final String CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\" (also on a replayed "
-            + "201, even after a later PUT)";
     static final String PUT_CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\"";
     static final String PUT_DETAILS_SUMMARY = "Create a SKU or replace its details";
     static final String PUT_DETAILS_DESCRIPTION = "Replaces the whole SkuDetails of the SKU. A SKU that does not exist "
@@ -88,8 +85,6 @@ final class InventoryApi {
             + "for any existing SKU; 412 when none matches or the SKU does not exist";
     static final String IF_NONE_MATCH_DESCRIPTION = "Optional; only \"*\" is supported: create only, 412 when the SKU "
             + "already exists. Any other value is 400";
-    static final String IF_MATCH_DESCRIPTION = "Optional strong ETag(s) from a previous response; \"*\" or absent "
-            + "means unconditional";
 
     private InventoryApi() {
     }

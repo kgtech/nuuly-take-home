@@ -69,15 +69,21 @@ public class IdempotencyStore {
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
+    /** {@link #run(UUID, ApiVersion, Operation, String, String, Supplier)} for an unversioned (spec) request. */
+    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+            Supplier<StoredResponse> write) {
+        return run(key, ApiVersion.UNVERSIONED, operation, skuId, canonicalRequest, write);
+    }
+
     /**
      * Claimed → write → store → Response. Not claimed → the stored Response, or Invalid (see
-     * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3). Opens a
-     * READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's transaction and refuses any other
-     * isolation (IllegalStateException, before any I/O); when joined, the caller's now() (T1) and rollback scope apply.
-     * A runtime exception from the write escapes unchanged and rolls the claim back; when joined, it marks the caller's
-     * transaction rollback-only.
+     * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3), prefixed
+     * with the API version for /v2 (H10). Opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT
+     * caller's transaction and refuses any other isolation (IllegalStateException, before any I/O); when joined, the
+     * caller's now() (T1) and rollback scope apply. A runtime exception from the write escapes unchanged and rolls the
+     * claim back; when joined, it marks the caller's transaction rollback-only.
      */
-    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+    public Keyed run(UUID key, ApiVersion version, Operation operation, String skuId, String canonicalRequest,
             Supplier<StoredResponse> write) {
         // null: no transaction, or a caller at ISOLATION_DEFAULT, which is Postgres's READ COMMITTED here.
         Integer joined = TransactionSynchronizationManager.isActualTransactionActive()
@@ -85,7 +91,8 @@ public class IdempotencyStore {
         if (joined != null && joined != TransactionDefinition.ISOLATION_READ_COMMITTED) {
             throw new IllegalStateException("IdempotencyStore.run joins only a READ COMMITTED transaction");
         }
-        byte[] hash = RequestHash.of(operation, skuId, canonicalRequest);
+        byte[] hash = version == ApiVersion.V2 ? RequestHash.ofV2(operation, skuId, canonicalRequest)
+                : RequestHash.of(operation, skuId, canonicalRequest);
         return transaction.execute(status -> {
             if (!claim(key, operation, skuId, hash)) {
                 return replay(key, operation, skuId, hash);

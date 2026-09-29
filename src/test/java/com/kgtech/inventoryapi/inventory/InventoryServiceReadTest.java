@@ -35,10 +35,10 @@ class InventoryServiceReadTest {
 
     /** C3 for v2 (review R-06e): a malformed skuId is answered before any repository or transaction access. */
     @org.junit.jupiter.api.Test
-    void v2ReadAndReplaceWithAMalformedSkuIdTouchNothing() {
+    void v2ReadAndPutWithAMalformedSkuIdTouchNothing() {
         assertThat(service.findSku("bad id")).isEmpty();
-        assertThat(service.replaceDetails("bad id", new SkuDetails("n", "", java.util.Optional.empty(), List.of()),
-                new DetailsPrecondition.Any())).isInstanceOf(ReplaceResult.InvalidRequest.class);
+        assertThat(service.putDetails("bad id", new SkuDetails("n", "", java.util.Optional.empty(), List.of()),
+                new DetailsPrecondition.Any())).isInstanceOf(PutResult.InvalidRequest.class);
         org.mockito.Mockito.verifyNoInteractions(details, transactions);
     }
 

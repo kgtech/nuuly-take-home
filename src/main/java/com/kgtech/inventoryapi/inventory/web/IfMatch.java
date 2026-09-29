@@ -7,24 +7,21 @@ import java.util.Optional;
 import com.kgtech.inventoryapi.inventory.DetailsPrecondition;
 
 /**
- * The If-Match header (RFC 9110 §13.1.1) as a {@link DetailsPrecondition} (DESIGN-V2 §8 "Edit"). Absent or "*" is
- * Any. Otherwise a comma-separated list of entity-tags: strong tags whose content is the details version count;
- * weak tags (W/"…") and non-numeric tags are well-formed but can never match strongly. Anything else is malformed:
- * empty (400).
+ * The If-Match header (RFC 9110 §13.1.1) as a {@link DetailsPrecondition} for PUT .../details. Absent is Any; "*"
+ * is handled by {@link #parsePut}. Otherwise a comma-separated list of entity-tags: strong tags whose content is the
+ * details version count; weak tags (W/"…") and non-numeric tags are well-formed but can never match strongly.
+ * Anything else is malformed: empty (400).
  */
 final class IfMatch {
 
     private IfMatch() {
     }
 
-    static Optional<DetailsPrecondition> parse(List<String> headerValues) {
+    private static Optional<DetailsPrecondition> parse(List<String> headerValues) {
         if (headerValues.isEmpty()) {
             return Optional.of(new DetailsPrecondition.Any());
         }
         String header = String.join(",", headerValues).strip();
-        if (header.equals("*")) {
-            return Optional.of(new DetailsPrecondition.Any());
-        }
         List<Long> versions = new ArrayList<>();
         int i = 0;
         boolean expectTag = true;
