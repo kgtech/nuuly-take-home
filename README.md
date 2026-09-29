@@ -137,7 +137,7 @@ Short version of [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md):
 
 ## API docs
 
-Swagger UI at `/swagger-ui.html`, OpenAPI at `/v3/api-docs` and `/v3/api-docs.yaml`. [`openapi.yaml`](openapi.yaml) is the committed export; `ApiDocsTest` regenerates it and fails when the code and the file differ. The docs list exactly the spec's status codes per operation, with `text/plain` errors, plus `GET /inventory`'s paging parameters and its 400 for an undecodable or repeated `after`.
+Swagger UI at `/swagger-ui.html` lists two documents: the unversioned spec API (`/v3/api-docs/inventory`, or `/v3/api-docs.yaml/inventory` as YAML; committed as [`openapi.yaml`](openapi.yaml)) and `/v2` (`inventory-v2`; [`openapi-v2.yaml`](openapi-v2.yaml)). `OpenApiExportTest` regenerates both and fails when the code and a file differ; `SpecConformanceTest` compares `openapi.yaml` with the spec's YAML and lists each allowed difference. The docs list exactly the spec's status codes per operation, with `text/plain` errors, plus `GET /inventory`'s paging parameter `after`, its Link header and its 400 for an undecodable or repeated `after`.
 
 ## Assumptions
 

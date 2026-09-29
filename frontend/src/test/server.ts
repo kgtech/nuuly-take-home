@@ -4,6 +4,7 @@ import type { components } from '../api/schema';
 
 type Body = components['schemas']['InventoryQuantity'];
 type SkuItem = components['schemas']['SkuItem'];
+type Item = SkuItem;
 type SkuDetails = components['schemas']['SkuDetails'];
 
 export const TEXT = {
