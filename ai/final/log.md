@@ -45,3 +45,4 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T19:48:44Z [service] PR #109 review round 1 (aaf992392eb82be7d): MAJOR parsePut drops a malformed If-Match when If-None-Match:* present (201 create). MINORs: both-header/repeated-line tests, stale 201 ETag description, If-Match * old vs new route. Fix in progress (tests first).
 - 2026-09-29T19:49:08Z [service] PR #109 round-1 fixes applied in wt-p5 (parsePut: malformed If-Match wins; PUT-specific 201 ETag description); waiting for test agent's rows, then build + regenerate openapi/schema.
 - 2026-09-29T19:50:47Z [service] PR #109 round-1 fixes committed d92a6f4 (build green, check:api clean); round-2 review requested from aaf992392eb82be7d. PR6 (FE) waits on #109 merge.
+- 2026-09-29T19:52:44Z [service] PR #109 (details PUT) round-2 review clean (no blocker/regression); gate --e2e green; merged; #98 closed. NIT import order left.
