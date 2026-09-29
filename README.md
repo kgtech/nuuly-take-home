@@ -1,6 +1,6 @@
 # Nuuly Inventory API
 
-Inventory service for the Nuuly Services assessment ([`spec`](docs/NUULY-ASSESSMENT-README-JUL-2026.md)): it receives stock by SKU, processes purchases and lists inventory, backed by PostgreSQL 18 and built with Java 25 and Spring Boot 4.1.x (built with 4.1.1). The spec's four operations are served unversioned at `/inventory`, exactly as the spec describes them plus two recorded deviations (see [Deviations](#deviations)): `GET /inventory` returns a fixed page of 250 SKUs with an `after` cursor, and any `Idempotency-Key` on an unversioned POST is rejected with 400. A client that ignores the `Link` header sees 250 of N SKUs and no other sign that the list was cut; everything the spec did not ask for (idempotency-keyed writes, page-size control, SKU details) lives under `/v2`. Both versions read and write the same stock. A React front end in [`frontend/`](frontend/) uses `/v2` only. The design is in [`DESIGN.md`](DESIGN.md); the decisions behind it are in [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md), which are generated from a decision board (the board is a private artifact, https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG; its database is dumped in [`ai/final/board-db/`](ai/final/board-db/) so the exports can be reproduced with `ai/export-board.mjs`).
+Inventory service for the Nuuly Services assessment ([`spec`](docs/NUULY-ASSESSMENT-README-JUL-2026.md)): it receives stock by SKU, processes purchases and lists inventory, backed by PostgreSQL 18 and built with Java 25 and Spring Boot 4.1.x (built with 4.1.1). The spec's four operations are served unversioned at `/inventory`, exactly as the spec describes them plus two recorded deviations (see [Deviations](#deviations)): `GET /inventory` returns a fixed page of 250 SKUs with an `after` cursor, and any `Idempotency-Key` on an unversioned POST is rejected with 400. A client that ignores the `Link` header sees 250 of N SKUs and no other sign that the list was cut; everything the spec did not ask for (idempotency-keyed writes, page-size control, SKU details) lives under `/v2`. Both versions read and write the same stock. A React front end in [`frontend/`](frontend/) uses `/v2` only. The design is in [`DESIGN.md`](DESIGN.md); the decisions behind it are in [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md), which are generated from a decision board (the board is a private artifact, https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG; its database is dumped in [`ai/final/board-db/`](ai/final/board-db/) so the exports can be reproduced with `ai/export-board.mjs`). No CI has run on GitHub for this branch: the token lacks the `workflow` scope, so the workflow is parked (deviation D-1) and `scripts/gate.sh --e2e` is the record.
 
 ## Prerequisites
 
@@ -65,7 +65,7 @@ cd frontend && npm run test:e2e          # Playwright, with the service running 
 scripts/gate.sh [--e2e]                  # all of the above; --e2e also starts the compose stack and runs Playwright
 ```
 
-**Last green run.** `scripts/gate.sh --e2e` on the final tip on 2026-09-29: 960 service tests, 248 front-end tests and 34 Playwright tests passed. No CI runs it yet: the workflow is parked at [`ai/final/ci-workflow.yml`](ai/final/ci-workflow.yml) until the GitHub token has the `workflow` scope.
+**Last green run.** `scripts/gate.sh --e2e` on the final tip on 2026-09-29: 998 service tests, 257 front-end tests and 48 Playwright tests passed (the code is the tip after the critique fixes #117 and #118; the last commits are docs and board only). No CI runs it yet: the workflow is parked at [`ai/final/ci-workflow.yml`](ai/final/ci-workflow.yml) until the GitHub token has the `workflow` scope.
 
 **What the tests protect, and what they skip.**
 
@@ -240,10 +240,11 @@ From the spec, on the unversioned paths (recorded in [`DECISIONS.md`](DECISIONS.
 From the build process ([`ai/final/deviations.md`](ai/final/deviations.md)):
 
 - **D-1: the CI workflow is not active.** GitHub rejected the push of `.github/workflows/ci.yml` because the token lacks the `workflow` scope. The workflow is parked at `ai/final/ci-workflow.yml` and has never run on GitHub, so it is untested there; the local `scripts/gate.sh --e2e` was the merge gate for every PR instead. **Owner action:** `gh auth refresh -h github.com -s workflow`, then `git mv ai/final/ci-workflow.yml .github/workflows/ci.yml` and push (issue #92 stays open until a run is green).
+- **D-2: one force-push of a pull-request branch.** The prompt says never to force-push; `final-invariants` (PR #114) was rebased after its first push and pushed with `--force` (dd5bcb8 to c3c0e17). `final` and every other branch were untouched. Recorded in [`ai/final/deviations.md`](ai/final/deviations.md).
 
 Known divergences kept frozen from build v2 (recorded, not fixed; changing one is the owner's decision). The critique also found that the unversioned POSTs capped only `Content-Length`, so a chunked body was unbounded; the service fix counts 4096 bytes while reading on both POSTs of both versions, so that is no longer a divergence:
 
-- **M-13:** the request guard runs before `@Valid`, so a `;` SKU with a bad body on purchase answers 404, not 400.
+- **Build v2's M-13:** the request guard runs before `@Valid`, so a `;` SKU with a bad body on purchase answers 404, not 400.
 - **Accept tie-break:** among equally specific Accept ranges the first listed decides (main's C3 amendment says the highest q).
 
 ## Designed, not built

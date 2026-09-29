@@ -80,7 +80,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | A14 | Design | Is quantity = SUM(quantity_delta) kept by the database or asserted by tests? | D: final: asserted by tests after every write test | Yes |
 | A18 | Spec gap | What does a keyed POST get when its key's row is committed without a stored response? | C: final: on /v2, 400 "Invalid request" for a row with no stored response | Yes |
 | A33 | Design | Where does Idempotency-Key handling sit once nothing needs ordering against a retry? | D: final: explicit IdempotencyStore.run on the keyed /v2 entry points only | Yes |
-| A34 | Spec gap | In what order are a POST's body, Idempotency-Key and skuId checked, and where? | D: final: unversioned order rejects the key; /v2 order requires it; each check once in the service | Yes |
+| A34 | Spec gap | In what order are a POST's body, Idempotency-Key and skuId checked, and where? | E: final: unversioned order rejects the key; /v2 order requires it; each check once (tests as they are) | Yes |
 | A37 | Design | Where does app-wide HTTP code live, and which types and members are public? | E: final: HTTP code stays in inventory.web (package-private); web/ holds HttpConstants only; classes as built | Yes |
 | A38 | Design | What does each write return, and how does the controller render it? | E: final: sealed non-generic WriteResult; typed WriteResult<O> and one Page<T> were designed, not built | Yes |
 | A39 | Design | How is the package layout checked on the compiled classes? | D: final: ArchUnit core with the rules that hold on the real layout | Yes |
@@ -574,7 +574,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Choice:** E: final: catch-all → 500 text/plain; library paths keep library behaviour; unknown springdoc group is 404
 - **My reasoning:** Follow-up 13 and critique M-42.
 - **Rejected:**
-  - A: Catch-all → 500 "Internal server error" text/plain; scope G10 to /inventory/**. Superseded by follow-up 13 and critique M-42: the code covers /v3/api-docs.yaml/**, an unknown group is 404, and the query rule is not literally "every path".
+  - A: Catch-all → 500 "Internal server error" text/plain; scope G10 to /inventory/**. Superseded by follow-up 13 and critique M-42: the code covers /v3/api-docs.yaml/**, an unknown group is 404 with Boot's JSON body, and the query rule is not literally "every path".
   - B: Let Boot's /error handle 500s. Drawback noted in research: Breaks D6 (every error text/plain) and R3's text/plain rule for exactly the case clients handle worst: an outage..
   - C: Catch-all → 500 with an empty text/plain body. Drawback noted in research: A client or reviewer sees a bare 500 with nothing to read; an empty body is harder to tell apart from the empty-body bug in S5..
   - D: 503 for database outages, 500 for the rest. Drawback noted in research: Conflicts with G10-D: 503 is not a listed code and G10 allows only 500 for faults. Priority 3 (spec over convention) says no..
@@ -990,12 +990,13 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## A34: In what order are a POST's body, Idempotency-Key and skuId checked, and where?
 
 - **Type:** Spec gap
-- **Choice:** D: final: unversioned order rejects the key; /v2 order requires it; each check once in the service
-- **My reasoning:** Owner OD-4
+- **Choice:** E: final: unversioned order rejects the key; /v2 order requires it; each check once (tests as they are)
+- **My reasoning:** Test names follow the code (grep of src/test).
 - **Rejected:**
   - A: Body → key format → skuId → claim, each checked once in the service. Superseded by OD-4: the single order for both POSTs is split into an unversioned order and a /v2 order.
   - B: skuId before the key format. Drawback noted in research: A malformed key could get 404 on purchase, so S3's 400 would depend on the SKU.
   - C: One SkuId check per Operation. Drawback noted in research: The domain's SkuId depends on idempotency.Operation, a dependency the layout removes (A37).
+  - D: final: unversioned order rejects the key; /v2 order requires it; each check once in the service. Superseded: the test line named IdempotencyHeaderOrderTest and IdempotencyApiIntegrationTest, which no longer exist.
 - **Matched recommendation:** Yes
 
 ## A37: Where does app-wide HTTP code live, and which types and members are public?

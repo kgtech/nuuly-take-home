@@ -37,7 +37,7 @@ Questions a senior interviewer would ask about the non-obvious choices, each wit
 
 ## 8. Why a decision board, and can someone else reproduce your rules? (OD-9, OD-10)
 - **Answer:** the rules in `CLAUDE.md` and `DECISIONS.md` are generated from a board so a decision, its rejected options and its reasoning cannot drift from the rule text. The board's database is dumped in `ai/final/board-db/`; `ai/export-board.mjs` regenerates both files byte for byte (the README has the working command; running it from `ai/` fails because Node resolves `playwright` from the script's directory).
-- **Price:** a 450 KB HTML board and a private artifact; cards that described code that was never built (#87's) had to be rewritten to match the code (E1, E2, E3, A37 to A39).
+- **Price:** a 600 KB HTML board and a private artifact; cards that described code that was never built (#87's) had to be rewritten to match the code (E1, E2, E3, A37 to A39).
 
 ## 9. You replaced SERIALIZABLE ledger sums with a balance row. Where is that story? (D4, V1, W1, E1; `DESIGN.md` §4)
 - **Answer:** the first build derived every balance from a `SUM` over an append-only ledger at SERIALIZABLE with retries; concurrent purchases of different SKUs then hit serialization failures (#26). Build v2 keeps a balance per SKU as a row updated by a conditional `UPDATE … WHERE quantity >= :q` at READ COMMITTED (the second writer re-evaluates the predicate on the committed row: PostgreSQL docs, Read Committed) and still appends every change to the ledger. `DESIGN.md` §4 opens with this history; the older cards carry "superseded by E1".
@@ -46,7 +46,7 @@ Questions a senior interviewer would ask about the non-obvious choices, each wit
 ## 10. Why is the ledger append-only by trigger, and is it really? (G5, A11, E3)
 - **Answer:** a trigger raises `P0001` on `UPDATE` and `DELETE`, so a bug in the API cannot rewrite history. It protects against the API, not against the database owner: the app connects as the owner (the critique confirmed `TRUNCATE` and `DISABLE TRIGGER` work). Privilege separation was weighed and left out of a take-home.
 
-## 11. Why does the guard filter run before `@Valid`, and why "first listed" for equal Accept ranges? (H11, H16 = M-13)
+## 11. Why does the guard filter run before `@Valid`, and why "first listed" for equal Accept ranges? (H11, H16 = build v2's M-13)
 - **Answer:** Spring strips `;matrix` content before binding, so `/inventory/ABC-1;lot=7` would reach SKU `ABC-1`; a filter on the routed path answers it as the malformed id it is, before any binding. The price is that a `;` skuId with a bad body on purchase answers 404 instead of the body's 400. For equally specific Accept ranges the first listed decides (build v2's behaviour, kept; C3's "highest q" text was changed to match).
 - **Route coverage:** the filter is a route table keyed by route kind, and `RouteGuardCoverageTest` fails for any mapped `{skuId}` route the table does not know (lesson L21: build v2's filter skipped `/v2` purchase).
 
@@ -59,7 +59,7 @@ Questions a senior interviewer would ask about the non-obvious choices, each wit
 ## 14. Why is CI not running? (deviation D-1)
 - **Answer:** the GitHub token has no `workflow` scope, so the workflow could not be pushed. It is parked at `ai/final/ci-workflow.yml`, `scripts/gate.sh --e2e` runs the same steps locally, and every PR was merged only after it passed on the branch. The last run on the final tip is recorded in the README. I did not use another credential to get around the scope.
 
-## 15. Why so many tests (about 960 Java tests for 2.7k lines of main code)? (lessons, H15)
+## 15. Why so many tests (about 1,000 Java tests for 2.8k lines of main code)? (lessons, H15)
 - **Answer:** every SQL statement and constraint runs against real Postgres; the ArchUnit rules keep the unversioned path free of idempotency code (L31), keep raw path reads in one class (L19) and keep tests on one container (L27). The critique ran 57 mutations against the Java suite: 52 were killed by behavioural tests, one real survivor was found and fixed (M-04). Duplicate matrices across layers are the known cost (M-26).
 
 ## 16. The Create page is two steps. What if the browser dies between them? (FE33, FE34)

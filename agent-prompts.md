@@ -1182,7 +1182,7 @@ Tool: Claude Code (desktop app). One orchestrator; per PR a test subagent (tests
 **Rejected**
 - A reviewer MAJOR that asked for ports 18080 and 15173 (the owner had asked for main's ports).
 - Reviewer MINORs left recorded, not fixed: L31 ArchUnit rule bypassable by a helper, dead 5-argument `IdempotencyStore.run` (tests still call it), typed `WriteResult<O>` (card A38 follows the code); see `ai/final/board-followups.md`.
-- Working around the missing `workflow` scope with another credential (recorded as D-1).
+- Working around the missing `workflow` scope with another credential (recorded as D-1); one force-push of a PR branch slipped through and is recorded as D-2.
 
 **My response**
 - "approve" (plan gate, 2026-09-29): treated as approval of every recommendation in `ai/final/board-cards.md`.

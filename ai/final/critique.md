@@ -306,6 +306,6 @@ Outcome vocabulary: **fixed** (with PR), **recorded** (card or doc line), **won'
 | M-42 | NIT | **recorded** (Z3 wording, README). |
 | M-43 | — | **rejected** by the verifier (NUL in `after` has no observable effect). |
 
-**Round-2 check after the fixes:** the reviewers of #117 and #118 re-ran their probes on the fix heads (all overflow places at 188/375/640/1280 px; the 69-request error matrix, the chunked-cap cases, lock and pool timeouts, mutations); no blocker or regression remained. A last verifier pass over the fixed findings is recorded in `report.md`.
+**Round-2 check after the fixes:** the reviewers of #117 and #118 re-ran their probes on the fix heads (all overflow places at 188/375/640/1280 px; the 69-request error matrix, the chunked-cap cases, lock and pool timeouts, mutations); no blocker or regression remained. A last verifier pass over the fixed findings is in [`critique-recheck.md`](critique-recheck.md) and summarised in `report.md` §7.
 
 **Open owner decisions** (unchanged from the list above): M-05, M-06, M-12 (service text), M-17, M-21, M-28, M-29, M-37, and the two decisions made for the owner in this critique (M-01 thaw, M-11 new check), which are one-line reverts if unwanted.
