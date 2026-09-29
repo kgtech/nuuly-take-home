@@ -1081,3 +1081,71 @@ Tool: Claude Code (desktop), one orchestrator and 11 subagent runs (including re
 **My response**
 - Queue answers, no reasons given: approve the plan and C3; the interceptor for q=0; revert the test author's departures (option B); add the tie-rule row and keep the Z2 list for #28; leave U3 unchanged (option B); document that a servlet path is not supported; amend C3 rule 3.
 - "done" and "Continue" to move the run on after each set of answers.
+
+## 30. Prompt for the final branch: harmonize builds v1 and v2 with path versioning (2026-09-29)
+
+**Prompt**
+> Analyze the prompts in v1 (main branch) and v2 branches. I want a prompt that can help create a new fork branch (final) that would harmonize the lessons learned. I want the api to follow the versioning pattern in a way that the requirements from the take home instructions do not have a api version identifier but the changes like idempotency and v2 and later api endpoints will appear under a versioned branch ala /v2/inventory/{sku}.
+>
+> Before initiating the work please review the prompt and enhance it. Let me decide any open questions that might conflict.
+
+Tool: Claude Code (cloud session). One orchestrator plus four read-only subagents: three parallel researchers, then one reviewer of the draft prompt.
+
+**Output summary**
+- **Research, three agents in parallel:**
+  - main's prompting record: this file, the Prompt Template, the decision review, the codebase critique, and the #87 branch;
+  - build v2's prompt, lessons, design, deviations, run log and critique loop;
+  - a main-versus-v2 comparison of rules, code, migrations, tests and OpenAPI.
+- **Key finding:** both builds attach every extension to the unversioned spec paths: the optional Idempotency-Key, `limit`/`after`/`Link`, the 400 on `GET /inventory`, and the skuId pattern in the OpenAPI. Build v2's "byte for byte" guard pins those paths to main's *extended* export, not to the spec. Build v2 also has no `/v2` stock writes, and its `POST /v2/inventory/{skuId}` already means "create with details", so the versioning split needed a route decision.
+- **Owner questions:** nine, in three rounds (see My response).
+- **Wrote:**
+  - [`ai/final/PROMPT.md`](ai/final/PROMPT.md): owner decisions OD-1 to OD-10, the target API for both versions, seven invariants, setup, preflight, study, plan gate, build rules, front end, self-critique, done criteria and the final report;
+  - [`ai/final/lessons.md`](ai/final/lessons.md): 31 lessons from both builds, each with its evidence and where the prompt enforces it, 7 of them marked as guards.
+- **Enhancements beyond the two earlier prompts:**
+  - a plan gate before any code;
+  - a preflight that checks CI workflow scope, self-merge and board access before relying on them;
+  - a spec conformance test with an explicit allow-list of deviations, replacing build v2's baseline;
+  - version-parity and no-leak invariants;
+  - lessons turned into test or ArchUnit guards;
+  - reviewers that may run the stack;
+  - a simplification area in the critique;
+  - "move tests, don't copy them";
+  - build v2's run records moved to `ai/v2/`, beside main's `ai/`;
+  - a terminology section that separates builds from API versions.
+
+**Accepted**
+- Owner choices:
+  - fork `final` from the v2 tip;
+  - keep the default page of 250 on the unversioned `GET /inventory`, with only an `after` cursor;
+  - mirror routes plus a details sub-resource on `/v2`;
+  - `/v2` requires the key and unversioned POSTs reject it;
+  - keep the front end and retarget it to `/v2`;
+  - plan gate, then autonomous;
+  - the board stays the source of truth;
+  - a new board artifact for final.
+- Defaults stated in the prompt:
+  - hardening on the spec paths frozen, including M-13 and the q=0 tie-break;
+  - PUT details ignores `Idempotency-Key`, since PUT is idempotent by method;
+  - two OpenAPI files, `openapi.yaml` and `openapi-v2.yaml`;
+  - migrations V4 and later only;
+  - a 5-hour budget after approval.
+
+**Rejected**
+- Recommendations the owner overrode:
+  - streaming every row on the unversioned list;
+  - keeping `limit` and `after` on `/inventory`;
+  - unversioned POSTs ignoring the key.
+- Options not chosen:
+  - the list: returning all rows in memory; a `Link` that hands off to `/v2`;
+  - `/v2` routes: keeping build v2's create-with-details semantics under a `/stock` sub-resource;
+  - key policy: an optional key on `/v2`;
+  - the front end: dropping it;
+  - run mode: fully autonomous, or per-issue owner gates;
+  - decision records: a hand-maintained `DECISIONS.md`, or layered decision files;
+  - the board: the shared artifact.
+
+**My response**
+- Mid-run: "Idempotency should be moved to the versioned endpoints since they were not in line with the original spec document."
+- Round 1: fork from v2 tip; keep default page of 250; mirror + details sub-resource; v2 requires, v1 rejects header.
+- Round 2: only `after` on /inventory; keep and retarget the front end to /v2; plan gate, then autonomous; board stays source of truth.
+- Round 3: new board artifact for final.

@@ -198,3 +198,4 @@ Z1 and Z2 were decided during story 6 and Z3 during story 7, and each was built 
 - [`ai/decision-review.md`](ai/decision-review.md): inconsistencies found by a parallel AI review of the decisions, with how each was resolved.
 - [`ai/github-issues.md`](ai/github-issues.md): the build broken into eight GitHub stories in build order, each tied to its decisions.
 - [`ai/research-sources.md`](ai/research-sources.md): the sources behind each option, including unverified claims and the test that would prove each one.
+- [`ai/final/PROMPT.md`](ai/final/PROMPT.md): the prompt for the `final` branch. It combines this build with the `v2` build and splits the API by path version: the spec's operations stay unversioned, and every extension, idempotency keys included, moves under `/v2`. [`ai/final/lessons.md`](ai/final/lessons.md) lists the lessons from both builds and where the prompt enforces each one.
