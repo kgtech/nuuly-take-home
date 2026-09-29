@@ -15,4 +15,4 @@ Departures that `DESIGN-V2.md` §7 does not cover (those are supersessions, not 
   - `v2`'s `DECISIONS.md` is a pre-C3 snapshot, so the export's byte-for-byte pre-check fails;
   - the shared board also generates `main`'s rules, which still describe `main`'s SERIALIZABLE, retry and advice code.
 
-  What changed: the D4, W1, W2, X1, Y2 and Z1 rules and the SERIALIZABLE/JPA wording of G7, G12, R2, D3, S1, S11 and V1 now state `v2`'s rules, citing DESIGN-V2 §7 and A33/A34 (recorded in `DECISIONS-ADDED.md`). The session is logged in `.fable/log.md` (D0 above).
+  What changed: the D4, W1, W2, X1, Y2 and Z1 rules and the SERIALIZABLE/JPA wording of G7, G12, R2, D1, D3, D5, D10, S1, S11 and V1 now state `v2`'s rules, citing DESIGN-V2 §7 and A33/A34 (recorded in `DECISIONS-ADDED.md`). D5's second rule still lists only `main`'s migration contents; DESIGN-V2 §7 ("D5 (migrations content)") and the migrations govern. The session is logged in `.fable/log.md` (D0 above).
