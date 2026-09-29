@@ -5,17 +5,20 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.annotation.AliasFor;
 
 /**
  * The one Boot test annotation for classes that need Postgres (C-21, issue #29): a full context sharing the JVM-wide
- * container from {@link TestcontainersConfiguration}. Classes with the same attributes share one context.
+ * container from {@link TestcontainersConfiguration}. After every test the balances must still equal the ledger
+ * (invariant 3, {@link BalancesRecordedExtension}). Classes with the same attributes share one context.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @SpringBootTest
+@ExtendWith(BalancesRecordedExtension.class)
 @Import(TestcontainersConfiguration.class)
 public @interface IntegrationTest {
 
