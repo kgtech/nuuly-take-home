@@ -8,7 +8,7 @@ The storage design is V2's own and is documented in [`DESIGN-V2.md`](ai/v2/DESIG
 
 ## Prerequisites
 
-**To run it (reviewers):** Docker with Compose v2 and BuildKit; port 18080 free (or set `APP_PORT`); `curl` and `uuidgen` for the walk-through.
+**To run it (reviewers):** Docker with Compose v2 and BuildKit; port 8080 free (or set `APP_PORT`); `curl` and `uuidgen` for the walk-through.
 
 **To build and test it (developers):** JDK 25 (the Gradle wrapper, Gradle 9.1+, downloads Gradle and finds the toolchain), Docker (Testcontainers starts Postgres), Node 20+ and npm for the front end.
 
@@ -20,19 +20,19 @@ Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), springdoc-openapi 3.1.x
 
 ```bash
 docker compose up --build
-# API:        http://localhost:18080/inventory
-# Swagger UI: http://localhost:18080/swagger-ui.html
-# Health:     http://localhost:18080/actuator/health  (/liveness, /readiness)
+# API:        http://localhost:8080/inventory
+# Swagger UI: http://localhost:8080/swagger-ui.html
+# Health:     http://localhost:8080/actuator/health  (/liveness, /readiness)
 docker compose down -v   # stop and remove the database
 ```
 
-This builds the app image, starts Postgres 18, waits for its health check and starts the app on host port 18080 (`APP_PORT` overrides it; the container listens on 8080). The non-default port keeps `docker compose up` clear of anything else on 8080. Postgres is published on loopback only, on a random host port (`docker compose port postgres 5432`). The app container has a readiness health check and an explicit heap policy (`-XX:MaxRAMPercentage=75.0`).
+This builds the app image, starts Postgres 18, waits for its health check and starts the app on host port 8080 (`APP_PORT` overrides it; the container listens on 8080). If 8080 is taken, set `APP_PORT`. Postgres is published on loopback only, on a random host port (`docker compose port postgres 5432`). The app container has a readiness health check and an explicit heap policy (`-XX:MaxRAMPercentage=75.0`).
 
 To wait until the app is ready:
 
 ```bash
 docker compose up --build -d
-until curl -sf localhost:18080/actuator/health/readiness >/dev/null; do sleep 2; done
+until curl -sf localhost:8080/actuator/health/readiness >/dev/null; do sleep 2; done
 ```
 
 **Development (JDK 25 + Docker):**
@@ -50,16 +50,16 @@ export SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:$(docker compose port 
 export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 ```
 
-`compose.yaml` defines Postgres; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: `bootRun` listens on 8080, the compose app on 18080, but both start the database from compose.yaml.
+`compose.yaml` defines Postgres; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: both want host port 8080 and both start the database from compose.yaml.
 
 **Front end** (see [`frontend/README.md`](frontend/README.md) and [`frontend/DECISIONS.md`](frontend/DECISIONS.md)):
 
 ```bash
 cd frontend
 npm ci
-npm run dev          # http://localhost:15173, proxies /inventory and /v2 to http://localhost:18080 (start the service first; VITE_PORT and API_URL override)
+npm run dev          # http://localhost:5173, proxies /inventory and /v2 to http://localhost:8080 (start the service first; VITE_PORT and API_URL override)
 npm run lint && npm run typecheck && npm test && npm run build
-npm run test:e2e     # Playwright against the real service on :18080 (add then purchase; a double submit changes stock once)
+npm run test:e2e     # Playwright against the real service on :8080 (add then purchase; a double submit changes stock once)
 ```
 
 ## Try it
@@ -67,16 +67,16 @@ npm run test:e2e     # Playwright against the real service on :18080 (add then p
 Start from an empty database (`docker compose down -v && docker compose up --build`). Error bodies are `text/plain`; successful bodies are JSON.
 
 ```bash
-curl -i localhost:18080/inventory                     # 200 []
-curl -i -X POST localhost:18080/inventory/ABC-1 -H 'Content-Type: application/json' \
+curl -i localhost:8080/inventory                     # 200 []
+curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
      -d '{"quantity":5}'                             # 200 {"skuId":"ABC-1","quantity":5}
-curl -i localhost:18080/inventory/ABC-1               # 200 {"skuId":"ABC-1","quantity":5}
-curl -i -X POST localhost:18080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
+curl -i localhost:8080/inventory/ABC-1               # 200 {"skuId":"ABC-1","quantity":5}
+curl -i -X POST localhost:8080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
      -d '{"quantity":2}'                             # 200 {"skuId":"ABC-1","quantity":3}
-curl -i -X POST localhost:18080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
+curl -i -X POST localhost:8080/inventory/ABC-1/purchase -H 'Content-Type: application/json' \
      -d '{"quantity":10}'                            # 400 Insufficient inventory
-curl -i localhost:18080/inventory/NOPE                # 404 SKU not found
-curl -i -X POST localhost:18080/inventory/ABC-1 -H 'Content-Type: application/json' \
+curl -i localhost:8080/inventory/NOPE                # 404 SKU not found
+curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
      -d '{"quantity":0}'                             # 400 Invalid request
 ```
 
@@ -85,7 +85,7 @@ curl -i -X POST localhost:18080/inventory/ABC-1 -H 'Content-Type: application/js
 ```bash
 KEY=$(uuidgen)
 for q in 5 5 6; do
-  curl -i -X POST localhost:18080/inventory/K-1 -H 'Content-Type: application/json' \
+  curl -i -X POST localhost:8080/inventory/K-1 -H 'Content-Type: application/json' \
        -H "Idempotency-Key: $KEY" -d "{\"quantity\":$q}"
 done
 # 200 {"skuId":"K-1","quantity":5}
@@ -96,28 +96,28 @@ done
 **Paging.** `GET /inventory` returns SKUs sorted by SKU ID, at most 250 per response, with a `Link: <url>; rel="next"` header while more follow; `limit` (1–250) sets a smaller page and `after` is the last SKU ID of the previous page:
 
 ```bash
-curl -i 'localhost:18080/inventory?limit=2'
+curl -i 'localhost:8080/inventory?limit=2'
 # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1","quantity":5}]  (Link when more than 2 SKUs exist)
 ```
 
 **v2: a SKU with details.** Three additive operations under `/v2/inventory` ([`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §8) give a SKU a name, description, cost and image URLs. The four operations above are unchanged; stock still changes only through them. Every `SkuItem` response carries an `ETag` (the details version, `"0"` before any details); `PUT` takes an optional `If-Match`. Errors are text/plain like v1, with two new fixed texts (409, 412) that say what to do next:
 
 ```bash
-curl -i -X POST localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
+curl -i -X POST localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
      -d '{"details":{"name":"Linen shirt","description":"Long sleeve","cost":{"amount":12900,"currency":"USD"},
           "images":["https://cdn.example.com/a.jpg"]},"initialQuantity":5}'
 # 201 ETag: "1"  {"skuId":"LN-1","quantity":5,"details":{"name":"Linen shirt",...}}   (one ledger row, reason add)
-curl -i -X POST localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
+curl -i -X POST localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
      -d '{"details":{"name":"Other"}}'
 # 409 SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}.
-curl -i -X PUT localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
+curl -i -X PUT localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
      -d '{"name":"Linen shirt, navy","images":[]}'
 # 200 ETag: "2"  {"skuId":"LN-1","quantity":5,"details":{"name":"Linen shirt, navy","description":"","images":[]}}
-curl -i -X PUT localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
+curl -i -X PUT localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
      -d '{"name":"Stale edit"}'
 # 412 Details changed since you read them. Reload the SKU and retry with its new ETag.
-curl -i localhost:18080/v2/inventory/ABC-1              # 200 ETag: "0"  {"skuId":"ABC-1","quantity":3}   (no details yet)
-curl -i 'localhost:18080/v2/inventory?limit=2'           # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1",...}]  (Link as v1)
+curl -i localhost:8080/v2/inventory/ABC-1              # 200 ETag: "0"  {"skuId":"ABC-1","quantity":3}   (no details yet)
+curl -i 'localhost:8080/v2/inventory?limit=2'           # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1",...}]  (Link as v1)
 ```
 
 `POST /v2/inventory/{skuId}` honours `Idempotency-Key` like the spec POSTs: the whole request (details and initial quantity) is the fingerprint, and 201 and 409 are replayed. Field rules: `name` 1–120 characters, `description` up to 2,000, `cost.amount` an integer in minor units with a three-letter uppercase `cost.currency` (both or neither), up to 10 absolute http(s) `images` URLs of up to 2,048 characters, `initialQuantity` 0 to 2,147,483,647; a body above 64 KB is 400. Details are read from Postgres with the count in one join.
@@ -153,7 +153,7 @@ The spec leaves these open; V2 keeps the first build's answers ([`ai/v2/DECISION
 - The list is sorted by SKU ID with at most 250 per response and a `Link` to the next page built from the request's `Host` (no `X-Forwarded-*` handling); a bad `limit` is ignored, a repeated `after` or an undecodable query is 400 (G9, R4, R8, Z3, C2).
 - No authentication (G10). Requests outside the spec's operations get standard codes with the reason phrase as text; `/actuator/**` and the springdoc paths keep Spring Boot's own responses, except Tomcat-level rejections and undecodable queries, which are text/plain everywhere (S6, T3, C1).
 - A read is always the last committed count; there is no cache (DESIGN-V2 §9).
-- The app is published on 0.0.0.0:18080 with no authentication (G10) so reviewers can reach it; Postgres is on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
+- The app is published on 0.0.0.0:8080 with no authentication (G10) so reviewers can reach it; Postgres is on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
 
 ## Designed, not built
 

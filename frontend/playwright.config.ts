@@ -1,10 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// End-to-end tests run against the real service (API_URL, default :18080) through
-// the Vite dev proxy on VITE_PORT (default 15173): non-default ports so the run
-// never collides with another project (FE24). Start the service first
+// End-to-end tests run against the real service (API_URL, default :8080) through
+// the Vite dev proxy on VITE_PORT (default 5173), main's ports (FE24). Start the service first
 // (docker compose up --build in the repo root).
-const devPort = Number(process.env.VITE_PORT ?? 15173);
+const devPort = Number(process.env.VITE_PORT ?? 5173);
 const baseURL = `http://localhost:${devPort}`;
 
 export default defineConfig({
