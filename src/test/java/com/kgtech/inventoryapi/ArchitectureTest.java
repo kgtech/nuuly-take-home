@@ -68,7 +68,7 @@ class ArchitectureTest {
     private static final String IDEMPOTENCY = ROOT + ".idempotency";
     private static final String INVENTORY = ROOT + ".inventory";
     private static final String INVENTORY_WEB = INVENTORY + ".web";
-    /** The records that are also the wire schema (m5): the only domain types with OpenAPI annotations. */
+    /** The records that are also the wire schema (D7, C2): the only domain types with OpenAPI annotations. */
     private static final String WIRE_RECORDS = "(InventoryItem|SkuItem|SkuDetails|SkuCost|CreateSku)";
     /** The records whose JSON needs Jackson annotations today (absent values omitted, the ETag version hidden). */
     private static final String JACKSON_RECORDS = "(SkuItem|SkuDetails)";
@@ -104,7 +104,7 @@ class ArchitectureTest {
                 .check(MAIN);
     }
 
-    /** m5: the wire records carry OpenAPI annotations (openapi.yaml is generated from them); nothing else does. */
+    /** D7, C2, A39: the wire records carry OpenAPI annotations (openapi.yaml comes from them); nothing else does. */
     @Test
     void openApiAnnotationsInTheDomainOnlyOnWireRecords() {
         CompositeArchRule.of(noClasses().that().resideInAPackage(INVENTORY)
@@ -115,7 +115,7 @@ class ArchitectureTest {
                 .check(MAIN);
     }
 
-    /** m5: Jackson annotations only on the records that use them today; no Jackson API in the domain at all. */
+    /** Z2, A39: Jackson annotations only on the records that use them today; no Jackson API in the domain at all. */
     @Test
     void jacksonAnnotationsInTheDomainOnlyWhereUsedToday() {
         CompositeArchRule.of(noClasses().that().resideInAPackage(INVENTORY)
@@ -129,7 +129,7 @@ class ArchitectureTest {
                 .check(MAIN);
     }
 
-    /** Issue #15 (R3-1), m3: StoredResponse and the rest of idempotency stay free of HTTP and servlet types. */
+    /** Issue #15 (R3-1), Z2, A39: StoredResponse and the rest of idempotency stay free of HTTP and servlet types. */
     @Test
     void idempotencyUsesNoHttpOrServletTypes() {
         noClasses().that().resideInAPackage(IDEMPOTENCY + "..")
