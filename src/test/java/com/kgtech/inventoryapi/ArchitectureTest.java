@@ -46,7 +46,6 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
-import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.domain.properties.CanBeAnnotated;
@@ -303,7 +302,11 @@ class ArchitectureTest {
 
     // ---- result and page types (A38) ----
 
-    /** A38: an outcome is not a WriteResult; WriteResult wraps one, so each write names the family it returns. */
+    /**
+     * A38: an outcome is not a WriteResult; WriteResult wraps one, so each write names the family it returns. With
+     * eachWriteReturnsWriteResultOfItsOwnOutcome this makes a case for another family's outcome a compile error (the
+     * sealed families are disjoint), which is what removed the "not a ..." branches.
+     */
     @Test
     void outcomesAreNotWriteResults() {
         classes().that().areAssignableTo(StockOutcome.class).or().areAssignableTo(DetailsOutcome.class)
@@ -337,16 +340,6 @@ class ArchitectureTest {
                 .anyMatch(m -> Stream.of(m.getParameterTypes()).anyMatch(StockOutcome.class::isAssignableFrom));
         assertThat(renderers).as("KeyedResponses method for details outcomes")
                 .anyMatch(m -> Stream.of(m.getParameterTypes()).anyMatch(DetailsOutcome.class::isAssignableFrom));
-    }
-
-    /** A38: each outcome switch in the web layer is exhaustive over its own type; none throws for the other API's. */
-    @Test
-    void webLayerHasNoUnreachableOutcomeBranch() {
-        noClasses().that().resideInAPackage(INVENTORY_WEB)
-                .should().callConstructorWhere(describe("a target that is an IllegalStateException",
-                        (JavaConstructorCall call) ->
-                                call.getTargetOwner().isEquivalentTo(IllegalStateException.class)))
-                .check(MAIN);
     }
 
     /** A38: the spec list and the v2 list share one generic page type, Page of their item type. */
