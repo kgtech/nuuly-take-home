@@ -6,25 +6,30 @@ export type InventoryQuantity = components['schemas']['InventoryQuantity'];
 export type SkuItem = components['schemas']['SkuItem'];
 export type SkuDetails = components['schemas']['SkuDetails'];
 export type SkuCost = components['schemas']['SkuCost'];
-export type CreateSkuRequest = components['schemas']['CreateSkuRequest'];
 export type ListParams = NonNullable<operations['listSkus']['parameters']['query']>;
 
 type ItemPath = keyof Pick<paths, '/inventory/{skuId}'>;
 type PurchasePath = keyof Pick<paths, '/inventory/{skuId}/purchase'>;
 type SkuListPath = keyof Pick<paths, '/v2/inventory'>;
 type SkuPath = keyof Pick<paths, '/v2/inventory/{skuId}'>;
+type DetailsPath = keyof Pick<paths, '/v2/inventory/{skuId}/details'>;
 
 type Json<T> = T extends { content: { 'application/json': infer J } } ? J : never;
 type AddOk = Json<operations['createInventory']['responses'][200]>;
 type PurchaseOk = Json<operations['purchaseItem']['responses'][200]>;
 type ListOk = Json<operations['listSkus']['responses'][200]>;
 type GetOk = Json<operations['getSku']['responses'][200]>;
-type CreateOk = Json<operations['createSku']['responses'][201]>;
-type ReplaceOk = Json<operations['replaceSkuDetails']['responses'][200]>;
+type DetailsOk = Json<operations['putSkuDetails']['responses'][200]>;
 type IdempotencyHeader = NonNullable<operations['createInventory']['parameters']['header']>;
-type IfMatchHeader = NonNullable<operations['replaceSkuDetails']['parameters']['header']>;
+type DetailsHeader = NonNullable<operations['putSkuDetails']['parameters']['header']>;
 export const IDEMPOTENCY_KEY = 'Idempotency-Key' satisfies keyof IdempotencyHeader;
-export const IF_MATCH = 'If-Match' satisfies keyof IfMatchHeader;
+export const IF_MATCH = 'If-Match' satisfies keyof DetailsHeader;
+export const IF_NONE_MATCH = 'If-None-Match' satisfies keyof DetailsHeader;
+
+export interface DetailsPreconditions {
+  ifMatch?: string;
+  ifNoneMatch?: string;
+}
 
 /** Status 0 means the request never reached the server (network failure). */
 export type ApiFailure = { ok: false; status: number; errorText: string };
@@ -40,10 +45,11 @@ export interface InventoryClient {
   listSkusAt(url: string): Promise<ApiResult<ListOk>>;
   /** GET /v2/inventory/{skuId}: the SKU with its details and ETag. */
   getSku(skuId: string): Promise<ApiResult<GetOk>>;
-  /** POST /v2/inventory/{skuId}: 201 with the created SKU and its ETag; 409 when it exists. */
-  createSku(skuId: string, body: CreateSkuRequest, key: string | null): Promise<ApiResult<CreateOk>>;
-  /** PUT /v2/inventory/{skuId} with If-Match when given: 200, 404, or 412 on a stale tag. */
-  replaceSkuDetails(skuId: string, body: SkuDetails, ifMatch: string | null): Promise<ApiResult<ReplaceOk>>;
+  /**
+   * PUT /v2/inventory/{skuId}/details: replaces the details. 201 creates the SKU at stock 0, 200 replaces;
+   * `ifNoneMatch: '*'` makes it create-only and `ifMatch` makes it a compare-and-swap, both 412 when they fail.
+   */
+  putDetails(skuId: string, body: SkuDetails, preconditions?: DetailsPreconditions): Promise<ApiResult<DetailsOk>>;
   /** POST /inventory/{skuId} (v1): add stock, creating the SKU. */
   addStock(skuId: string, body: InventoryQuantity, key: string | null): Promise<ApiResult<AddOk>>;
   /** POST /inventory/{skuId}/purchase (v1). */
@@ -54,8 +60,9 @@ const ITEM: ItemPath = '/inventory/{skuId}';
 const PURCHASE: PurchasePath = '/inventory/{skuId}/purchase';
 const SKU_LIST: SkuListPath = '/v2/inventory';
 const SKU: SkuPath = '/v2/inventory/{skuId}';
+const DETAILS: DetailsPath = '/v2/inventory/{skuId}/details';
 
-function itemUrl(template: ItemPath | PurchasePath | SkuPath, skuId: string): string {
+function itemUrl(template: ItemPath | PurchasePath | SkuPath | DetailsPath, skuId: string): string {
   return template.replace('{skuId}', encodeURIComponent(skuId));
 }
 
@@ -106,9 +113,10 @@ function post(body: unknown, key: string | null): RequestInit {
   return { method: 'POST', headers, body: JSON.stringify(body) };
 }
 
-function put(body: unknown, ifMatch: string | null): RequestInit {
+function put(body: unknown, { ifMatch, ifNoneMatch }: DetailsPreconditions): RequestInit {
   const headers: Record<string, string> = { ...JSON_HEADERS };
-  if (ifMatch !== null) headers[IF_MATCH] = ifMatch;
+  if (ifMatch !== undefined) headers[IF_MATCH] = ifMatch;
+  if (ifNoneMatch !== undefined) headers[IF_NONE_MATCH] = ifNoneMatch;
   return { method: 'PUT', headers, body: JSON.stringify(body) };
 }
 
@@ -131,11 +139,8 @@ export function createClient(base: string = window.location.origin, options: Cli
     getSku(skuId) {
       return call<GetOk>(new URL(itemUrl(SKU, skuId), base), GET, t);
     },
-    createSku(skuId, body, key) {
-      return call<CreateOk>(new URL(itemUrl(SKU, skuId), base), post(body, key), t);
-    },
-    replaceSkuDetails(skuId, body, ifMatch) {
-      return call<ReplaceOk>(new URL(itemUrl(SKU, skuId), base), put(body, ifMatch), t);
+    putDetails(skuId, body, preconditions = {}) {
+      return call<DetailsOk>(new URL(itemUrl(DETAILS, skuId), base), put(body, preconditions), t);
     },
     addStock(skuId, body, key) {
       return call<AddOk>(new URL(itemUrl(ITEM, skuId), base), post(body, key), t);

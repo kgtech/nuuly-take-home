@@ -16,7 +16,7 @@ type Saved = { status: number; errorText: string } | null;
 /** Shown when the read carried no ETag (a proxy stripped it): FE37 never sends an unconditional PUT (F-fe-04). */
 export const NO_VERSION = 'The service did not return a version; reload and try again.';
 
-/** #/sku/:id/edit: GET /v2 then PUT with If-Match from the ETag (FE37). Rendered with key={skuId}. */
+/** #/sku/:id/edit: GET /v2 then PUT .../details with If-Match from the ETag (FE37). Rendered with key={skuId}. */
 export function EditSkuPage({ skuId }: { skuId: string }) {
   const invalid = !SKU_ID_PATTERN.test(skuId);
   const [loaded, setLoaded] = useState<Loaded>(
@@ -68,7 +68,7 @@ export function EditSkuPage({ skuId }: { skuId: string }) {
     busy.current = true;
     setInFlight(true);
     try {
-      const r = await api.replaceSkuDetails(skuId, details.body(), loaded.etag);
+      const r = await api.putDetails(skuId, details.body(), { ifMatch: loaded.etag });
       if (r.ok) navigate(skuHref(skuId));
       else setFailure({ status: r.status, errorText: r.errorText });
     } finally {
@@ -130,8 +130,6 @@ export function EditSkuPage({ skuId }: { skuId: string }) {
                   </button>{' '}
                   to see the current details, then make your change again.
                 </>
-              ) : failure.status === 404 ? (
-                createLink
               ) : (
                 writeGuidance(failure.status)
               )}
