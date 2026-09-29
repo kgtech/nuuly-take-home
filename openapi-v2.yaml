@@ -10,8 +10,9 @@ paths:
   /v2/inventory:
     get:
       description: "Returns SKUs sorted by skuId with their quantity and details (absent\
-        \ for a SKU that has none), at most 250 per response; the same limit, after\
-        \ and Link rules as GET /inventory."
+        \ for a SKU that has none), at most 250 per response. The optional limit (1\
+        \ to 250, default 250) sets the page size and after is an exclusive cursor;\
+        \ a Link header with rel=next carries both to the next page."
       operationId: listSkus
       parameters:
       - description: "Optional page size, 1 to 250 (default 250). Larger values mean\
