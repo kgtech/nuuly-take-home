@@ -6,13 +6,11 @@ type Item = components['schemas']['InventoryItem'];
 type Body = components['schemas']['InventoryQuantity'];
 type SkuItem = components['schemas']['SkuItem'];
 type SkuDetails = components['schemas']['SkuDetails'];
-type CreateSkuRequest = components['schemas']['CreateSkuRequest'];
 
 export const TEXT = {
   notFound: 'SKU not found',
   insufficient: 'Insufficient inventory',
   invalid: 'Invalid request',
-  exists: 'SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}.',
   changed: 'Details changed since you read them. Reload the SKU and retry with its new ETag.',
 } as const;
 
@@ -20,11 +18,10 @@ const SKU = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const UUID = /^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$/;
 const CURRENCY = /^[A-Z]{3}$/;
 const MAX_PAGE = 250;
-const MAX_INT32 = 2_147_483_647;
 
 /**
  * In-memory store mocking the contract: v1 stock (ordering, Link paging, Idempotency-Key
- * replay) and v2 details (ETag versions, If-Match, 409 on an existing SKU, 412 on a stale tag).
+ * replay) and v2 details (ETag versions, PUT details with If-Match and If-None-Match: *, 412 on a failed precondition).
  */
 export const store = {
   items: new Map<string, number>(),
@@ -198,65 +195,34 @@ function validDetails(input: unknown): SkuDetails | null {
   return out;
 }
 
-const canonical = (d: SkuDetails, initialQuantity: number) =>
-  JSON.stringify([d.name, d.description ?? '', d.cost ?? null, d.images ?? [], initialQuantity]);
-
-async function create(request: Request, skuId: string): Promise<Response> {
-  let body: CreateSkuRequest;
-  try {
-    body = (await request.json()) as CreateSkuRequest;
-  } catch {
-    return text(400, TEXT.invalid);
-  }
-  const key = request.headers.get('Idempotency-Key');
-  if (key !== null && !UUID.test(key)) return text(400, TEXT.invalid);
-  if (!SKU.test(skuId)) return text(400, TEXT.invalid);
-  const details = validDetails(body?.details);
-  if (details === null) return text(400, TEXT.invalid);
-  const initial = body.initialQuantity ?? 0;
-  if (!Number.isInteger(initial) || initial < 0 || initial > MAX_INT32) return text(400, TEXT.invalid);
-
-  const hash = `create\n${skuId}\n${canonical(details, initial)}`;
-  if (key !== null) {
-    const replay = replayFor(key, hash);
-    if (replay) return replay;
-  }
-  if (store.items.has(skuId)) {
-    if (key !== null) store.keys.set(key, { hash, status: 409, body: TEXT.exists, contentType: 'text/plain' });
-    return text(409, TEXT.exists);
-  }
-  store.items.set(skuId, initial);
-  store.details.set(skuId, { details, version: 1 });
-  const out = JSON.stringify(skuItem(skuId));
-  if (key !== null) {
-    store.keys.set(key, { hash, status: 201, body: out, contentType: 'application/json', etag: store.etag(skuId) });
-  }
-  return withEtag(skuId, skuItem(skuId), 201);
-}
-
-async function replace(request: Request, skuId: string): Promise<Response> {
+/** H7: PUT /v2/inventory/{skuId}/details creates (201, quantity 0) or replaces (200); body, skuId, preconditions, write. */
+async function putDetails(request: Request, skuId: string): Promise<Response> {
   let body: unknown;
   try {
     body = await request.json();
   } catch {
     return text(400, TEXT.invalid);
   }
-  // As the service: the body is validated before the SKU lookup; an empty or malformed If-Match (not "*" and
-  // not a list of strong ETags) and a G11-invalid skuId are 400 (F-fe-06, R-05).
   const details = validDetails(body);
   if (details === null) return text(400, TEXT.invalid);
+  if (!SKU.test(skuId)) return text(400, TEXT.invalid);
+  // An empty or malformed If-Match (not "*" and not a list of strong ETags) is 400, and so is any If-None-Match but "*".
   const ifMatch = request.headers.get('If-Match');
   let tags: string[] | null = null;
   if (ifMatch !== null && ifMatch.trim() !== '*') {
     tags = ifMatch.split(',').map((t) => t.trim());
     if (tags.some((t) => !/^"[^"]*"$/.test(t))) return text(400, TEXT.invalid);
   }
-  if (!SKU.test(skuId)) return text(400, TEXT.invalid);
-  if (!store.items.has(skuId)) return text(404, TEXT.notFound);
-  if (tags !== null && !tags.includes(store.etag(skuId))) return text(412, TEXT.changed);
+  const ifNoneMatch = request.headers.get('If-None-Match');
+  if (ifNoneMatch !== null && ifNoneMatch.trim() !== '*') return text(400, TEXT.invalid);
+
+  const exists = store.items.has(skuId);
+  if (ifMatch !== null && (!exists || (tags !== null && !tags.includes(store.etag(skuId))))) return text(412, TEXT.changed);
+  if (ifNoneMatch !== null && exists) return text(412, TEXT.changed);
   const current = store.details.get(skuId);
+  if (!exists) store.items.set(skuId, 0);
   store.details.set(skuId, { details, version: (current?.version ?? 0) + 1 });
-  return withEtag(skuId, skuItem(skuId));
+  return withEtag(skuId, skuItem(skuId), exists ? 200 : 201);
 }
 
 export const handlers = [
@@ -267,8 +233,7 @@ export const handlers = [
     if (!SKU.test(skuId) || !store.items.has(skuId)) return text(404, TEXT.notFound);
     return withEtag(skuId, skuItem(skuId));
   }),
-  http.post('*/v2/inventory/:skuId', ({ request, params }) => create(request, String(params.skuId))),
-  http.put('*/v2/inventory/:skuId', ({ request, params }) => replace(request, String(params.skuId))),
+  http.put('*/v2/inventory/:skuId/details', ({ request, params }) => putDetails(request, String(params.skuId))),
 
   http.get('*/inventory', ({ request }) => page(new URL(request.url), '/inventory')),
   http.get('*/inventory/:skuId', ({ params }) => {

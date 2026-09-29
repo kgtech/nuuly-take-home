@@ -27,21 +27,32 @@ async function createSku(page: Page, skuId: string, name: string, initial: numbe
 
 test('create with details, edit them, then purchase', async ({ page }) => {
   const skuId = sku('e2e-v2');
-  const createUrl = `/v2/inventory/${encodeURIComponent(skuId)}`;
-  const posts: { url: string; key: string | undefined; body: unknown }[] = [];
+  const detailsPath = `/v2/inventory/${encodeURIComponent(skuId)}/details`;
+  const addPath = `/inventory/${encodeURIComponent(skuId)}`;
+  const seen: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
   page.on('request', (r) => {
-    if (r.method() === 'POST') posts.push({ url: r.url(), key: r.headers()['idempotency-key'], body: r.postDataJSON() });
+    if (r.method() === 'GET') return;
+    seen.push({ method: r.method(), path: new URL(r.url()).pathname, headers: r.headers(), body: r.postDataJSON() });
   });
 
   await createSku(page, skuId, 'Linen dress', 5);
-  // One POST /v2 with an Idempotency-Key and the whole request.
-  const creates = posts.filter((p) => p.url.endsWith(createUrl));
+  // Step 1: PUT details with If-None-Match: * and no Idempotency-Key; step 2: one keyed add. Nothing else.
+  const creates = seen.filter((r) => r.method === 'PUT' && r.path === detailsPath);
   expect(creates).toHaveLength(1);
-  expect(creates[0]?.key).toMatch(UUID_V4);
+  expect(creates[0]?.headers['if-none-match']).toBe('*');
+  expect(creates[0]?.headers['if-match']).toBeUndefined();
+  expect(creates[0]?.headers['idempotency-key']).toBeUndefined();
   expect(creates[0]?.body).toEqual({
-    details: { name: 'Linen dress', description: 'A midi dress in sand.', cost: { amount: 12900, currency: 'USD' }, images: [IMAGE] },
-    initialQuantity: 5,
+    name: 'Linen dress',
+    description: 'A midi dress in sand.',
+    cost: { amount: 12900, currency: 'USD' },
+    images: [IMAGE],
   });
+  const adds = seen.filter((r) => r.method === 'POST' && r.path === addPath);
+  expect(adds).toHaveLength(1);
+  expect(adds[0]?.headers['idempotency-key']).toMatch(UUID_V4);
+  expect(adds[0]?.body).toEqual({ quantity: 5 });
+  expect(seen.map((r) => `${r.method} ${r.path}`)).toEqual([`PUT ${detailsPath}`, `POST ${addPath}`]);
 
   // The SKU page shows the details and the initial quantity.
   await expect(page.getByRole('heading', { level: 2, name: 'Linen dress' })).toBeVisible();
@@ -53,9 +64,11 @@ test('create with details, edit them, then purchase', async ({ page }) => {
   await expect(page.getByRole('img', { name: /Linen dress/ })).toBeVisible();
 
   // Edit: PUT with If-Match from the ETag, then back to the SKU page with the new details.
-  const puts: { ifMatch: string | undefined; body: unknown }[] = [];
+  const puts: { ifMatch: string | undefined; ifNoneMatch: string | undefined; body: unknown }[] = [];
   page.on('request', (r) => {
-    if (r.method() === 'PUT') puts.push({ ifMatch: r.headers()['if-match'], body: r.postDataJSON() });
+    if (r.method() === 'PUT' && new URL(r.url()).pathname === detailsPath) {
+      puts.push({ ifMatch: r.headers()['if-match'], ifNoneMatch: r.headers()['if-none-match'], body: r.postDataJSON() });
+    }
   });
   await page.getByRole('link', { name: 'Edit details' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Edit details' })).toBeVisible();
@@ -68,6 +81,7 @@ test('create with details, edit them, then purchase', async ({ page }) => {
   await expect(page.getByTestId('cost')).toHaveText('$99.00');
   expect(puts).toHaveLength(1);
   expect(puts[0]?.ifMatch).toMatch(/^"\d+"$/);
+  expect(puts[0]?.ifNoneMatch).toBeUndefined();
   expect(puts[0]?.body).toEqual({
     name: 'Linen dress, sand',
     description: 'A midi dress in sand.',
@@ -82,7 +96,7 @@ test('create with details, edit them, then purchase', async ({ page }) => {
   await expect(page.getByRole('status')).toContainText(`Purchased 2 of ${skuId}: 3 left.`);
   await expect(page.getByTestId('quantity')).toHaveText('3');
   await expect(page.getByRole('heading', { level: 2, name: 'Linen dress, sand' })).toBeVisible();
-  expect(posts.filter((p) => p.url.endsWith('/purchase'))).toHaveLength(1);
+  expect(seen.filter((r) => r.method === 'POST' && r.path === `${addPath}/purchase`)).toHaveLength(1);
 
   // The list shows the name.
   await page.goto('/');
@@ -93,12 +107,16 @@ test('create with details, edit them, then purchase', async ({ page }) => {
   await expect(row.getByRole('cell').nth(3)).toHaveText('3');
 });
 
-test('a double-clicked Create sends one POST with one key and creates one SKU', async ({ page }) => {
+test('a double-clicked Create sends one PUT and one keyed add and creates one SKU', async ({ page }) => {
   const skuId = sku('e2e-dblcreate');
-  const createUrl = `/v2/inventory/${encodeURIComponent(skuId)}`;
+  const detailsPath = `/v2/inventory/${encodeURIComponent(skuId)}/details`;
+  const addPath = `/inventory/${encodeURIComponent(skuId)}`;
+  const puts: (string | undefined)[] = [];
   const keys: (string | undefined)[] = [];
   page.on('request', (r) => {
-    if (r.method() === 'POST' && r.url().endsWith(createUrl)) keys.push(r.headers()['idempotency-key']);
+    const path = new URL(r.url()).pathname;
+    if (r.method() === 'PUT' && path === detailsPath) puts.push(r.headers()['idempotency-key']);
+    if (r.method() === 'POST' && path === addPath) keys.push(r.headers()['idempotency-key']);
   });
   await page.goto('/#/new');
   await page.getByLabel('SKU ID').fill(skuId);
@@ -107,20 +125,26 @@ test('a double-clicked Create sends one POST with one key and creates one SKU', 
   await page.getByRole('button', { name: 'Create SKU' }).dblclick();
   await expect(page).toHaveURL(new RegExp(`#/sku/${encodeURIComponent(skuId)}$`));
   await expect(page.getByTestId('quantity')).toHaveText('2');
+  expect(puts).toEqual([undefined]);
   expect(keys).toHaveLength(1);
   expect(keys[0]).toMatch(UUID_V4);
-  const read = await page.request.get(createUrl);
+  const read = await page.request.get(`/v2/inventory/${encodeURIComponent(skuId)}`);
   expect(read.status()).toBe(200);
   expect((await read.json()).quantity).toBe(2);
 });
 
-test('a create retried after a network failure reuses the key and creates one SKU with its stock once', async ({ page }) => {
+test('an add retried after a network failure sends the same key, no second PUT, and adds the initial stock once', async ({ page }) => {
   const skuId = sku('e2e-retrycreate');
-  const createUrl = `/v2/inventory/${encodeURIComponent(skuId)}`;
+  const detailsPath = `/v2/inventory/${encodeURIComponent(skuId)}/details`;
+  const addPath = `/inventory/${encodeURIComponent(skuId)}`;
   const keys: (string | undefined)[] = [];
+  let putCount = 0;
   let failed = false;
-  // The server processes the first create, but the browser sees a network error.
-  await page.route(`**${createUrl}`, async (route) => {
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && new URL(r.url()).pathname === detailsPath) putCount += 1;
+  });
+  // The server processes the first add, but the browser sees a network error.
+  await page.route((url) => url.pathname === addPath, async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
     keys.push(route.request().headers()['idempotency-key']);
     if (!failed) {
@@ -135,31 +159,49 @@ test('a create retried after a network failure reuses the key and creates one SK
   await page.getByLabel('SKU ID').fill(skuId);
   await fillDetails(page, 'Retry');
   await page.getByLabel(/^Initial stock/).fill('3');
-  const create = page.getByRole('button', { name: 'Create SKU' });
-  await create.click();
-  await expect(page.getByRole('alert')).toContainText('Network error');
-  await expect(page.getByRole('alert')).toContainText('Sending again is safe');
-  await create.click();
+  await page.getByRole('button', { name: 'Create SKU' }).click();
+  const alert = page.getByRole('alert');
+  await expect(alert).toContainText('Network error');
+  await expect(alert).toContainText('exists at 0 stock');
+  await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page).toHaveURL(new RegExp(`#/sku/${encodeURIComponent(skuId)}$`));
   await expect(page.getByTestId('quantity')).toHaveText('3');
+  expect(putCount).toBe(1);
   expect(keys).toHaveLength(2);
   expect(keys[0]).toMatch(UUID_V4);
   expect(keys[1]).toBe(keys[0]);
-  const read = await page.request.get(createUrl);
+  const read = await page.request.get(`/v2/inventory/${encodeURIComponent(skuId)}`);
   expect((await read.json()).quantity).toBe(3);
 });
 
-test('creating an existing SKU shows the 409 text and a link to it', async ({ page }) => {
-  const skuId = sku('e2e-409');
-  await createSku(page, skuId, 'First', 0);
+test('creating an existing SKU changes nothing: the 412 text and a link to its edit page', async ({ page }) => {
+  const skuId = sku('e2e-412create');
+  const id = encodeURIComponent(skuId);
+  const original = { name: 'Original A', description: 'First description', images: [] };
+  const made = await page.request.put(`/v2/inventory/${id}/details`, {
+    headers: { 'If-None-Match': '*' },
+    data: original,
+  });
+  expect(made.status()).toBe(201);
+  const stocked = await page.request.post(`/inventory/${id}`, { data: { quantity: 4 } });
+  expect(stocked.status()).toBe(200);
+
   await page.goto('/#/new');
   await page.getByLabel('SKU ID').fill(skuId);
   await fillDetails(page, 'Second');
+  await page.getByLabel(/^Initial stock/).fill('9');
   await page.getByRole('button', { name: 'Create SKU' }).click();
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('SKU already exists');
-  await expect(alert.getByRole('link', { name: `Open ${skuId}` })).toHaveAttribute('href', `#/sku/${encodeURIComponent(skuId)}`);
+  await expect(alert).toContainText('Details changed since you read them. Reload the SKU and retry with its new ETag.');
+  await expect(alert).toContainText('A SKU with this ID already exists. Open it to edit its details or add stock.');
+  await expect(alert.locator(`a[href="#/sku/${id}/edit"]`)).toBeVisible();
   await expect(page).toHaveURL(/#\/new$/);
+
+  const read = await page.request.get(`/v2/inventory/${id}`);
+  expect(read.status()).toBe(200);
+  const now = await read.json();
+  expect(now.quantity).toBe(4);
+  expect(now.details).toEqual(original);
 });
 
 test('a stale edit gets 412 and Reload shows the current details', async ({ page }) => {
@@ -169,7 +211,7 @@ test('a stale edit gets 412 and Reload shows the current details', async ({ page
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Original');
 
   // Another client replaces the details while this page holds the old ETag.
-  const other = await page.request.put(`/v2/inventory/${encodeURIComponent(skuId)}`, {
+  const other = await page.request.put(`/v2/inventory/${encodeURIComponent(skuId)}/details`, {
     headers: { 'Content-Type': 'application/json', 'If-Match': '*' },
     data: { name: 'Changed elsewhere', description: '', images: [] },
   });

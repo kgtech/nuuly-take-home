@@ -93,28 +93,33 @@ describe('CreateSkuPage (#/new)', () => {
     expect(submit()).toHaveAttribute('aria-disabled', 'true');
   });
 
-  it('creates with one POST /v2 carrying an Idempotency-Key and navigates to the SKU page on 201', async () => {
+  const puts = () => store.requests.filter((r) => r.method === 'PUT');
+  const adds = () => store.requests.filter((r) => r.method === 'POST');
+  const detailsBody = {
+    name: 'Linen dress',
+    description: 'A midi dress.',
+    cost: { amount: 12900, currency: 'USD' },
+    images: ['https://img.example/1.jpg', 'https://img.example/2.jpg'],
+  };
+  const retry = () => screen.getByRole('button', { name: 'Retry' });
+  const editHref = '#/sku/DRS-1/edit';
+  const text = (status: number, body: string) => new HttpResponse(body, { status, headers: { 'Content-Type': 'text/plain' } });
+
+  it('step 1 is PUT .../details with If-None-Match * and no Idempotency-Key; 201 with stock 0 navigates and sends no add', async () => {
     const user = userEvent.setup();
     render(<CreateSkuPage />);
     await fillValid(user);
-    await user.type(field.initial(), '7');
     await user.click(submit());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
     expect(store.requests).toHaveLength(1);
     const req = store.requests[0]!;
-    expect(req.method).toBe('POST');
-    expect(new URL(req.url).pathname).toBe('/v2/inventory/DRS-1');
-    expect(req.headers.get('Idempotency-Key')).toMatch(UUID);
-    expect(await req.json()).toEqual({
-      details: {
-        name: 'Linen dress',
-        description: 'A midi dress.',
-        cost: { amount: 12900, currency: 'USD' },
-        images: ['https://img.example/1.jpg', 'https://img.example/2.jpg'],
-      },
-      initialQuantity: 7,
-    });
-    expect(store.items.get('DRS-1')).toBe(7);
+    expect(req.method).toBe('PUT');
+    expect(new URL(req.url).pathname).toBe('/v2/inventory/DRS-1/details');
+    expect(req.headers.get('If-None-Match')).toBe('*');
+    expect(req.headers.has('If-Match')).toBe(false);
+    expect(req.headers.has('Idempotency-Key')).toBe(false);
+    expect(await req.json()).toEqual(detailsBody);
+    expect(store.items.get('DRS-1')).toBe(0);
   });
 
   it('defaults the initial stock to 0 and omits cost when both fields are empty', async () => {
@@ -123,83 +128,180 @@ describe('CreateSkuPage (#/new)', () => {
     await user.type(field.skuId(), 'B-2');
     await user.type(field.name(), 'Belt');
     await user.click(submit());
-    await waitFor(() => expect(store.requests).toHaveLength(1));
-    expect(await store.requests[0]!.json()).toEqual({ details: { name: 'Belt', description: '', images: [] }, initialQuantity: 0 });
+    await waitFor(() => expect(window.location.hash).toBe('#/sku/B-2'));
+    expect(store.requests).toHaveLength(1);
+    expect(await store.requests[0]!.json()).toEqual({ name: 'Belt', description: '', images: [] });
   });
 
-  it('409: the server text verbatim, then a line linking to the existing SKU; the key is dropped', async () => {
+  it('initial stock above 0: after the 201, one keyed add through POST /inventory, then navigates', async () => {
     const user = userEvent.setup();
-    store.seed({ 'DRS-1': 3 });
     render(<CreateSkuPage />);
     await fillValid(user);
+    await user.type(field.initial(), '7');
     await user.click(submit());
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent!.startsWith(TEXT.exists)).toBe(true);
-    expect(alert).toHaveFocus();
-    expect(screen.getByRole('link', { name: /open DRS-1/i })).toHaveAttribute('href', '#/sku/DRS-1');
-    expect(window.location.hash).toBe('');
-    expect(field.name()).toHaveValue('Linen dress');
-    await user.click(submit());
-    await waitFor(() => expect(store.requests).toHaveLength(2));
-    expect(store.requests[1]!.headers.get('Idempotency-Key')).not.toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+    await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
+    expect(store.requests.map((r) => r.method)).toEqual(['PUT', 'POST']);
+    const [put, add] = store.requests as [Request, Request];
+    expect(put.headers.has('Idempotency-Key')).toBe(false);
+    expect(new URL(add.url).pathname).toBe('/inventory/DRS-1');
+    expect(add.headers.get('Idempotency-Key')).toMatch(UUID);
+    expect(await add.json()).toEqual({ quantity: 7 });
+    expect(store.items.get('DRS-1')).toBe(7);
+    expect(store.details.get('DRS-1')?.details.name).toBe('Linen dress');
   });
 
-  it('400: the server text verbatim with the check-the-values line', async () => {
+  it('412: the server text verbatim, its own line and a link to the SKU edit page; nothing else is sent', async () => {
     const user = userEvent.setup();
-    server.use(http.post('*/v2/inventory/:skuId', () => new HttpResponse(TEXT.invalid, { status: 400, headers: { 'Content-Type': 'text/plain' } })));
+    store.seedDetails('DRS-1', 4, { name: 'Original', description: 'A', images: [] });
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.type(field.initial(), '9');
+    await user.click(submit());
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent!.startsWith(TEXT.changed)).toBe(true);
+    expect(alert).toHaveTextContent('A SKU with this ID already exists. Open it to edit its details or add stock.');
+    expect(alert).toHaveFocus();
+    expect(alert.querySelector(`a[href="${editHref}"]`)).not.toBeNull();
+    expect(window.location.hash).toBe('');
+    expect(store.requests).toHaveLength(1);
+    expect(store.requests[0]!.method).toBe('PUT');
+    expect(store.items.get('DRS-1')).toBe(4);
+    expect(store.details.get('DRS-1')?.details.name).toBe('Original');
+    expect(field.name()).toHaveValue('Linen dress');
+  });
+
+  it('400 on the PUT: the server text verbatim with the check-the-values line', async () => {
+    const user = userEvent.setup();
+    server.use(http.put('*/v2/inventory/:skuId/details', () => text(400, TEXT.invalid)));
     render(<CreateSkuPage />);
     await fillValid(user);
     await user.click(submit());
     const alert = await screen.findByRole('alert');
     expect(alert.textContent!.startsWith(TEXT.invalid)).toBe(true);
     expect(alert).toHaveTextContent(GUIDANCE.refused);
+    expect(adds()).toHaveLength(0);
   });
 
-  it('network failure: says a retry is safe and reuses the key', async () => {
+  it('network failure on the PUT: shows it, sends no key, and the next click sends the PUT again', async () => {
     const user = userEvent.setup();
-    server.use(http.post('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    server.use(http.put('*/v2/inventory/:skuId/details', () => HttpResponse.error(), { once: true }));
     render(<CreateSkuPage />);
     await fillValid(user);
     await user.click(submit());
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent(/network/i);
-    expect(alert).toHaveTextContent(GUIDANCE.retrySafe);
-    expect(store.requests).toHaveLength(1);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/network/i);
     await user.click(submit());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
-    expect(store.requests).toHaveLength(2);
-    expect(store.requests[1]!.headers.get('Idempotency-Key')).toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+    expect(puts()).toHaveLength(2);
+    expect(puts().every((r) => !r.headers.has('Idempotency-Key'))).toBe(true);
   });
 
   it.each([
-    ['description', 'description', ' Now longer.'],
-    ['currency', 'currency', '{Backspace}{Backspace}{Backspace}EUR'],
-    ['an image line', 'images', '\nhttps://img.example/3.jpg'],
-  ] as const)('changing %s after a network failure gives the retry a new Idempotency-Key (S8)', async (_l, key, typed) => {
+    ['a network error', () => HttpResponse.error()],
+    ['a 502', () => text(502, 'Bad gateway')],
+  ] as const)('the add fails with %s: server error, "exists at 0 stock", Retry sends only the add with the same key', async (_l, failure) => {
     const user = userEvent.setup();
-    server.use(http.post('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    server.use(http.post('*/inventory/:skuId', failure, { once: true }));
     render(<CreateSkuPage />);
     await fillValid(user);
-    await user.click(submit());
-    await screen.findByRole('alert');
-    await user.type(field[key](), typed);
-    await user.click(submit());
-    await waitFor(() => expect(store.requests).toHaveLength(2));
-    expect(store.requests[1]!.headers.get('Idempotency-Key')).not.toBe(store.requests[0]!.headers.get('Idempotency-Key'));
-  });
-
-  it('an unchanged request after a 500 keeps its Idempotency-Key', async () => {
-    const user = userEvent.setup();
-    server.use(http.post('*/v2/inventory/:skuId', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
-    render(<CreateSkuPage />);
-    await fillValid(user);
+    await user.type(field.initial(), '7');
     await user.click(submit());
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent(GUIDANCE.retrySafe);
-    await user.click(submit());
+    expect(alert).toHaveTextContent(_l === 'a 502' ? 'Bad gateway' : /network/i);
+    expect(alert).toHaveTextContent(/exists at 0 stock until the add succeeds/i);
+    expect(window.location.hash).toBe('');
+    expect(store.items.get('DRS-1')).toBe(0);
+    expect(puts()).toHaveLength(1);
+    expect(adds()).toHaveLength(1);
+
+    await user.click(retry());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
-    expect(store.requests).toHaveLength(2);
-    expect(store.requests[1]!.headers.get('Idempotency-Key')).toBe(store.requests[0]!.headers.get('Idempotency-Key'));
+    expect(puts()).toHaveLength(1);
+    expect(adds()).toHaveLength(2);
+    expect(adds()[0]!.headers.get('Idempotency-Key')).toMatch(UUID);
+    expect(adds()[1]!.headers.get('Idempotency-Key')).toBe(adds()[0]!.headers.get('Idempotency-Key'));
+    expect(store.items.get('DRS-1')).toBe(7);
+  });
+
+  it('a retried add whose first try was applied but not seen is replayed: stock is the initial quantity once', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('*/inventory/:skuId', async ({ request, params }) => {
+        const key = request.headers.get('Idempotency-Key')!;
+        const body = (await request.json()) as { quantity: number };
+        store.items.set(String(params.skuId), (store.items.get(String(params.skuId)) ?? 0) + body.quantity);
+        store.keys.set(key, {
+          hash: `add\n${String(params.skuId)}\n${body.quantity}`,
+          status: 200,
+          body: JSON.stringify({ skuId: String(params.skuId), quantity: body.quantity }),
+          contentType: 'application/json',
+        });
+        return HttpResponse.error();
+      }, { once: true }),
+    );
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.type(field.initial(), '5');
+    await user.click(submit());
+    await screen.findByRole('alert');
+    await user.click(retry());
+    await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
+    expect(store.items.get('DRS-1')).toBe(5);
+    expect(puts()).toHaveLength(1);
+  });
+
+  it('after a non-retryable add failure the key is dropped: the next Retry sends a new key', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('*/inventory/:skuId', () => text(400, TEXT.invalid), { once: true }));
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.type(field.initial(), '7');
+    await user.click(submit());
+    expect((await screen.findByRole('alert')).textContent!.startsWith(TEXT.invalid)).toBe(true);
+    await user.click(retry());
+    await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
+    expect(puts()).toHaveLength(1);
+    expect(adds()).toHaveLength(2);
+    expect(adds()[1]!.headers.get('Idempotency-Key')).not.toBe(adds()[0]!.headers.get('Idempotency-Key'));
+  });
+
+  it('after step 1 succeeds and the add fails the form is locked: SKU ID, details and initial stock are read-only', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('*/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.type(field.initial(), '7');
+    await user.click(submit());
+    await screen.findByRole('alert');
+    for (const f of Object.values(field)) expect(f()).toHaveAttribute('readonly');
+    await user.type(field.name(), 'x');
+    expect(field.name()).toHaveValue('Linen dress');
+    expect(field.name()).not.toBeDisabled();
+    expect(puts()).toHaveLength(1);
+  });
+
+  it('in flight: aria-busy form, read-only fields, aria-disabled button; a double click sends one PUT', async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    server.use(
+      http.put('*/v2/inventory/:skuId/details', async () => {
+        await new Promise<void>((r) => (release = r));
+        return HttpResponse.json({ skuId: 'DRS-1', quantity: 0, details: { name: 'x' } }, { status: 201, headers: { ETag: '"1"' } });
+      }),
+    );
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.dblClick(submit());
+    await waitFor(() => expect(screen.getByRole('form', { name: 'New SKU' })).toHaveAttribute('aria-busy', 'true'));
+    expect(field.name()).toHaveAttribute('readonly');
+    expect(field.images()).toHaveAttribute('readonly');
+    expect(field.name()).not.toBeDisabled();
+    const busy = screen.getByRole('button', { name: 'Sending…' });
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
+    expect(busy).not.toBeDisabled();
+    await user.keyboard('{Enter}');
+    release();
+    await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
+    expect(store.requests).toHaveLength(1);
   });
 
   it('initial stock: text a number input cannot parse gets a "not a number" reason instead of sending 0 (F-fe-03)', async () => {
@@ -252,30 +354,5 @@ describe('CreateSkuPage (#/new)', () => {
     expect(field.name()).not.toHaveAttribute('maxlength');
     expect(field.description()).not.toHaveAttribute('maxlength');
     expect(hintOf(field.name())).toHaveTextContent('At most 120 characters.');
-  });
-
-  it('in flight: aria-busy form, read-only fields, aria-disabled button; a double click sends one request', async () => {
-    const user = userEvent.setup();
-    let release: () => void = () => {};
-    server.use(
-      http.post('*/v2/inventory/:skuId', async () => {
-        await new Promise<void>((r) => (release = r));
-        return HttpResponse.json({ skuId: 'DRS-1', quantity: 0, details: { name: 'x' } }, { status: 201, headers: { ETag: '"1"' } });
-      }),
-    );
-    render(<CreateSkuPage />);
-    await fillValid(user);
-    await user.dblClick(submit());
-    await waitFor(() => expect(screen.getByRole('form', { name: 'New SKU' })).toHaveAttribute('aria-busy', 'true'));
-    expect(field.name()).toHaveAttribute('readonly');
-    expect(field.images()).toHaveAttribute('readonly');
-    expect(field.name()).not.toBeDisabled();
-    const busy = screen.getByRole('button', { name: 'Sending…' });
-    expect(busy).toHaveAttribute('aria-disabled', 'true');
-    expect(busy).not.toBeDisabled();
-    await user.keyboard('{Enter}');
-    release();
-    await waitFor(() => expect(window.location.hash).toBe('#/sku/DRS-1'));
-    expect(store.requests).toHaveLength(1);
   });
 });

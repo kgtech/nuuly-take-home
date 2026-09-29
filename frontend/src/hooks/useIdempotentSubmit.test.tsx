@@ -28,7 +28,7 @@ describe('useIdempotentSubmit key lifecycle', () => {
     expect(keys[1]).toBe(keys[0]);
   });
 
-  it.each([200, 400, 404, 409])('drops the key after status %i', async (status) => {
+  it.each([200, 400, 404, 412])('drops the key after status %i', async (status) => {
     const reply: ApiResult<string> =
       status === 200 ? { ok: true, status, data: 'x', next: null, etag: null } : fail(status);
     const { keys, hook } = harness([reply]);

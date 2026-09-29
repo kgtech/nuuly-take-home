@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import { api, type CreateSkuRequest } from '../api/client';
+import { api } from '../api/client';
 import { DetailsFields, useDetailsForm } from '../components/DetailsFields';
 import { SKU_PLACEHOLDER } from '../components/FindSku';
 import { ArrowLeft } from '../components/Icons';
 import { ErrorText, Hint, SubmitButton, writeGuidance } from '../components/Messages';
-import { navigate, skuHref } from '../hooks/useHashRoute';
+import { editHref, navigate, skuHref } from '../hooks/useHashRoute';
 import { useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
 import { initialStockReason, NOT_A_NUMBER, skuIdReason } from '../validation';
 
-/** #/new: one POST /v2/inventory/{skuId} with details and optional initial stock (FE34). */
+type Failure = { status: number; errorText: string };
+
+/** Line under a 412 on the create PUT: the server text says details changed, which the user never read (FE33). */
+const EXISTS = 'A SKU with this ID already exists. Open it to edit its details or add stock.';
+
+/**
+ * #/new: two steps (FE34). A create-only PUT .../details, then, for initial stock above 0, a keyed add.
+ * The SKU exists at 0 stock between them, so a failed add locks the form and offers Retry for the add alone.
+ */
 export function CreateSkuPage() {
   const id = useId();
   const [skuId, setSkuId] = useState('');
@@ -19,14 +27,21 @@ export function CreateSkuPage() {
 
   const skuReason = skuIdReason(skuId);
   const initialReason = initialBadInput ? NOT_A_NUMBER : initialStockReason(initial);
-  const request = (): CreateSkuRequest => ({ details: details.body(), initialQuantity: initial === '' ? 0 : Number(initial) });
+  const quantity = initial === '' ? 0 : Number(initial);
 
-  const send = useCallback((key: string) => api.createSku(skuId, request(), key), [skuId, initial, details.values]); // eslint-disable-line react-hooks/exhaustive-deps
-  const { state, submit, inFlight } = useIdempotentSubmit(send);
+  const [created, setCreated] = useState(false);
+  const [putInFlight, setPutInFlight] = useState(false);
+  const [putFailure, setPutFailure] = useState<Failure | null>(null);
+  const putBusy = useRef(false);
+
+  const send = useCallback((key: string) => api.addStock(skuId, { quantity }, key), [skuId, quantity]);
+  const add = useIdempotentSubmit(send);
+  const inFlight = putInFlight || add.inFlight;
+  const failure: Failure | null = putFailure ?? (add.state.phase === 'failed' ? add.state : null);
 
   useEffect(() => {
-    if (state.phase === 'failed') alertRef.current?.focus();
-  }, [state]);
+    if (failure !== null) alertRef.current?.focus();
+  }, [failure]);
 
   const blockingIds = [
     ...(skuReason !== null ? [`${id}-sku-hint`] : []),
@@ -35,11 +50,30 @@ export function CreateSkuPage() {
   ];
   const blocked = blockingIds.length > 0;
 
+  const runAdd = async () => {
+    const result = await add.submit(`add\n${skuId}\n${quantity}`);
+    if (result?.phase === 'done') navigate(skuHref(skuId));
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (blocked || inFlight) return;
-    const result = await submit(JSON.stringify([skuId, request()]));
-    if (result?.phase === 'done') navigate(skuHref(skuId));
+    if (blocked || inFlight || putBusy.current) return;
+    putBusy.current = true;
+    setPutFailure(null);
+    setPutInFlight(true);
+    let ok: boolean;
+    try {
+      const r = await api.putDetails(skuId, details.body(), { ifNoneMatch: '*' });
+      ok = r.ok;
+      if (!r.ok) setPutFailure({ status: r.status, errorText: r.errorText });
+    } finally {
+      putBusy.current = false;
+      setPutInFlight(false);
+    }
+    if (!ok) return;
+    setCreated(true);
+    if (quantity === 0) navigate(skuHref(skuId));
+    else await runAdd();
   };
 
   return (
@@ -67,11 +101,11 @@ export function CreateSkuPage() {
             placeholder={SKU_PLACEHOLDER}
             aria-invalid={(skuId !== '' && skuReason !== null) || undefined}
             aria-describedby={`${id}-sku-hint`}
-            readOnly={inFlight}
+            readOnly={inFlight || created}
           />
           <Hint id={`${id}-sku-hint`}>{skuReason}</Hint>
         </div>
-        <DetailsFields form={details} readOnly={inFlight} />
+        <DetailsFields form={details} readOnly={inFlight || created} />
         <div className="field">
           <label htmlFor={`${id}-initial`}>Initial stock (optional, default 0)</label>
           <input
@@ -85,19 +119,30 @@ export function CreateSkuPage() {
             onInput={(e) => setInitialBadInput(e.currentTarget.validity?.badInput ?? false)}
             aria-invalid={initialReason !== null || undefined}
             aria-describedby={`${id}-initial-hint`}
-            readOnly={inFlight}
+            readOnly={inFlight || created}
           />
           <Hint id={`${id}-initial-hint`}>{initialReason}</Hint>
         </div>
-        <SubmitButton label="Create SKU" className="wide" unavailable={blocked} inFlight={inFlight} describedBy={blockingIds} />
-        {state.phase === 'failed' && (
-          <ErrorText text={state.errorText} ref={alertRef}>
-            {state.status === 409 ? (
+        {created ? (
+          <button type="button" className="wide" aria-disabled={inFlight || undefined} onClick={() => !inFlight && void runAdd()}>
+            {inFlight ? 'Sending…' : 'Retry'}
+          </button>
+        ) : (
+          <SubmitButton label="Create SKU" className="wide" unavailable={blocked} inFlight={inFlight} describedBy={blockingIds} />
+        )}
+        {failure !== null && (
+          <ErrorText text={failure.errorText} ref={alertRef}>
+            {failure.status === 412 && !created ? (
               <>
-                This SKU already exists. <a href={skuHref(skuId)}>Open {skuId}</a> to edit its details or add stock.
+                {EXISTS} <a href={editHref(skuId)}>Open {skuId}</a>
+              </>
+            ) : created ? (
+              <>
+                The SKU exists at 0 stock until the add succeeds. {writeGuidance(failure.status)}{' '}
+                <a href={skuHref(skuId)}>Open {skuId}</a>
               </>
             ) : (
-              writeGuidance(state.status)
+              writeGuidance(failure.status)
             )}
           </ErrorText>
         )}

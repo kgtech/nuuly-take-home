@@ -42,7 +42,8 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     await user.click(save());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/E-1'));
     const put = store.requests.find((r) => r.method === 'PUT')!;
-    expect(new URL(put.url).pathname).toBe('/v2/inventory/E-1');
+    expect(new URL(put.url).pathname).toBe('/v2/inventory/E-1/details');
+    expect(put.headers.has('If-None-Match')).toBe(false);
     expect(put.headers.get('If-Match')).toBe('"4"');
     expect(put.headers.has('Idempotency-Key')).toBe(false);
     expect(await put.json()).toEqual({ name: 'Linen dress, sand', description: 'Midi', images: ['https://img.example/1.jpg'] });
@@ -60,6 +61,7 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     await user.click(save());
     await waitFor(() => expect(window.location.hash).toBe('#/sku/plain'));
     const put = store.requests.find((r) => r.method === 'PUT')!;
+    expect(new URL(put.url).pathname).toBe('/v2/inventory/plain/details');
     expect(put.headers.get('If-Match')).toBe('"0"');
     expect(store.details.get('plain')?.details.name).toBe('Plain tee');
   });
@@ -70,13 +72,14 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     render(<EditSkuPage skuId="E-1" />);
     await screen.findByRole('heading', { level: 1, name: 'Edit details' });
     // Someone else saves meanwhile, through a real PUT (F-fe-06).
-    const other = await createClient('http://localhost:3000').replaceSkuDetails('E-1', { ...details, name: 'Renamed elsewhere' }, '*');
+    const other = await createClient('http://localhost:3000').putDetails('E-1', { ...details, name: 'Renamed elsewhere' }, { ifMatch: '*' });
     expect(other.ok && other.etag).toBe('"2"');
     await user.type(name(), ' v2');
     await user.click(save());
     const alert = await screen.findByRole('alert');
     expect(alert.textContent!.startsWith(TEXT.changed)).toBe(true);
     const pagePuts = () => store.requests.filter((r) => r.method === 'PUT' && r.headers.get('If-Match') !== '*');
+    expect(pagePuts().every((r) => new URL(r.url).pathname === '/v2/inventory/E-1/details')).toBe(true);
     expect(pagePuts()[0]!.headers.get('If-Match')).toBe('"1"');
     expect(window.location.hash).toBe('');
 
@@ -99,30 +102,18 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
   });
 
-  it('404 on save (deleted meanwhile is impossible, but the contract lists it): text verbatim and the create link', async () => {
-    const user = userEvent.setup();
-    store.seedDetails('E-1', 2, details);
-    render(<EditSkuPage skuId="E-1" />);
-    await screen.findByRole('heading', { level: 1, name: 'Edit details' });
-    server.use(http.put('*/v2/inventory/:skuId', () => new HttpResponse(TEXT.notFound, { status: 404, headers: { 'Content-Type': 'text/plain' } })));
-    await user.click(save());
-    const alert = await screen.findByRole('alert');
-    expect(alert.textContent!.startsWith(TEXT.notFound)).toBe(true);
-    expect(screen.getByRole('link', { name: /create/i })).toHaveAttribute('href', '#/new');
-  });
-
   it('400 and 5xx on save: verbatim text with the guidance line; the fields keep their values', async () => {
     const user = userEvent.setup();
     store.seedDetails('E-1', 2, details);
     render(<EditSkuPage skuId="E-1" />);
     await screen.findByRole('heading', { level: 1, name: 'Edit details' });
-    server.use(http.put('*/v2/inventory/:skuId', () => new HttpResponse(TEXT.invalid, { status: 400, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
+    server.use(http.put('*/v2/inventory/:skuId/details', () => new HttpResponse(TEXT.invalid, { status: 400, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
     await user.type(name(), '!');
     await user.click(save());
     let alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(`${TEXT.invalid}${GUIDANCE.refused}`);
     expect(name()).toHaveValue('Linen dress!');
-    server.use(http.put('*/v2/inventory/:skuId', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
+    server.use(http.put('*/v2/inventory/:skuId/details', () => new HttpResponse('Internal server error', { status: 500, headers: { 'Content-Type': 'text/plain' } }), { once: true }));
     await user.click(save());
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Internal server error'));
     alert = screen.getByRole('alert');
@@ -220,7 +211,7 @@ describe('EditSkuPage (#/sku/:id/edit)', () => {
     store.seedDetails('E-1', 2, details, 1);
     render(<EditSkuPage skuId="E-1" />);
     await screen.findByRole('heading', { level: 1, name: 'Edit details' });
-    await createClient('http://localhost:3000').replaceSkuDetails('E-1', { ...details, cost: { amount: 777, currency: 'EUR' } }, '*');
+    await createClient('http://localhost:3000').putDetails('E-1', { ...details, cost: { amount: 777, currency: 'EUR' } }, { ifMatch: '*' });
     await user.click(save());
     await screen.findByRole('alert'); // 412
     // Before reloading, the amount field holds text a number input cannot parse.
