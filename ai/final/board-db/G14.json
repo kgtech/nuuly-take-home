@@ -1,0 +1,8 @@
+{
+  "choice": "D",
+  "notes": "Owner OD-3 and OD-4",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded by OD-3: only /v2 writes touch the table."
+  }
+}

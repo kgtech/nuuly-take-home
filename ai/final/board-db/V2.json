@@ -1,0 +1,6 @@
+{
+  "choice": "A",
+  "notes": "Unexpected that a request would reach 2,147,483,647. Such a request would likely come through via a special order and would lead to a inventory adjustment instead of purchase via api request.",
+  "updatedAt": "2026-09-24T21:47:08.831Z",
+  "why": {}
+}

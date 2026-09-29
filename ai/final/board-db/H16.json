@@ -1,0 +1,8 @@
+{
+  "choice": "A",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "The filter would need the parsed body, or the check would move into the controllers (the L21 shape)."
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "choice": "A",
+  "notes": "Approved. TRUNCATE (Q24-04): The rows can be deleted between tests. Not in “production”",
+  "why": {}
+}

@@ -1,0 +1,8 @@
+{
+  "choice": "E",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded: the code runs the purchase as an UPDATE plus a second SELECT, not one statement."
+  }
+}

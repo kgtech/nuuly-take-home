@@ -1,0 +1,5 @@
+{
+  "choice": "A",
+  "notes": "Prompts live in agent-prompts.md: the prompt, summary of output, what was accepted, what was rejected, summary of my response to the output.",
+  "why": {}
+}

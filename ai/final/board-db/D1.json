@@ -1,0 +1,5 @@
+{
+  "choice": "A",
+  "notes": "Java 25 with Spring Boot 4.1.x. Java 25 is LTS and includes compact source files, instance main methods, module import declarations, flexible constructor bodies, and scoped values for virtual threads. Production builds are available from major vendors.",
+  "why": {}
+}

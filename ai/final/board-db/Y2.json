@@ -1,0 +1,8 @@
+{
+  "choice": "A",
+  "notes": "Inspect the root cause's SQLState at the annotation so the retry stays declarative at the method level (my proposal was Spring Retry's exceptionExpression). Framework 7's predicate does the same with the @Retryable already chosen in W2 and X1.",
+  "updatedAt": "2026-09-24T19:30:00.000Z",
+  "why": {
+    "B": "Spring Retry and Apache Commons Lang would be two new dependencies, and its attributes (maxAttempts, @Backoff) differ from the Framework 7 @Retryable chosen in W2 and X1."
+  }
+}

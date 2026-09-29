@@ -1,0 +1,5 @@
+{
+  "choice": "B",
+  "notes": "Use bigint/long so we don't have to defensively program against issues in backend calculations. (Changed from int32 after the ledger discussion.)",
+  "why": {}
+}
