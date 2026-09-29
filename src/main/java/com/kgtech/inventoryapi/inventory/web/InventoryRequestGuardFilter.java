@@ -24,6 +24,8 @@ import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import com.kgtech.inventoryapi.web.TextErrors;
+
 /**
  * Two request checks Spring MVC would get wrong on the spec's operations (issue #23, C-04, C-34, decision C3):
  * a raw ';' in the SKU segment (Spring strips ";matrix" content before binding, so /inventory/ABC-1;lot=7 would reach

@@ -18,6 +18,7 @@ import com.kgtech.inventoryapi.inventory.SkuCost;
 import com.kgtech.inventoryapi.inventory.SkuDetails;
 import com.kgtech.inventoryapi.inventory.SkuItem;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
+import com.kgtech.inventoryapi.web.TextErrors;
 
 import tools.jackson.databind.json.JsonMapper;
 

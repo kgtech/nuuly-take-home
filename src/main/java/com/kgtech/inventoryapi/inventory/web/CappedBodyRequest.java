@@ -11,6 +11,8 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 
+import com.kgtech.inventoryapi.web.BodyTooLargeException;
+
 /**
  * Counts the body bytes as they are read and fails past the cap (review R-01): a Content-Length check alone lets a
  * chunked body grow without bound, and a v2 body is materialised (a list of strings) before the record's own limits

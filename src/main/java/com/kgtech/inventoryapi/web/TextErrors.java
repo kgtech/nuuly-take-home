@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory.web;
+package com.kgtech.inventoryapi.web;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -6,19 +6,22 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
-/** The single helper for text/plain error responses (S5, D6, G6, T3). */
-final class TextErrors {
+/**
+ * The single helper for text/plain error responses (S5, D6, G6, T3), app-wide: the advice and the Tomcat valve here,
+ * the feature's controllers and filters in inventory.web (A37). Public members are the ones another package uses.
+ */
+public final class TextErrors {
 
     static final String SKU_NOT_FOUND = "SKU not found";
     static final String INSUFFICIENT_INVENTORY = "Insufficient inventory";
     static final String INVALID_REQUEST = "Invalid request";
     static final String INTERNAL_SERVER_ERROR = "Internal server error";
     /** DESIGN-V2 §8: the v2 create on an existing SKU; the text names what to do instead (A23). */
-    static final String SKU_EXISTS = "SKU already exists. Set its details with PUT /v2/inventory/{skuId}; "
+    public static final String SKU_EXISTS = "SKU already exists. Set its details with PUT /v2/inventory/{skuId}; "
             + "add stock with POST /inventory/{skuId}.";
     /** DESIGN-V2 §8: a conditional PUT whose If-Match no longer matches (A24). */
-    static final String DETAILS_CHANGED = "Details changed since you read them. Reload the SKU and retry with its "
-            + "new ETag.";
+    public static final String DETAILS_CHANGED = "Details changed since you read them. Reload the SKU and retry with "
+            + "its new ETag.";
 
     private TextErrors() {
     }
@@ -35,23 +38,23 @@ final class TextErrors {
                 .body(body);
     }
 
-    static ResponseEntity<String> skuNotFound() {
+    public static ResponseEntity<String> skuNotFound() {
         return of(HttpStatus.NOT_FOUND, SKU_NOT_FOUND);
     }
 
-    static ResponseEntity<String> insufficientInventory() {
+    public static ResponseEntity<String> insufficientInventory() {
         return of(HttpStatus.BAD_REQUEST, INSUFFICIENT_INVENTORY);
     }
 
-    static ResponseEntity<String> invalidRequest() {
+    public static ResponseEntity<String> invalidRequest() {
         return of(HttpStatus.BAD_REQUEST, INVALID_REQUEST);
     }
 
-    static ResponseEntity<String> skuExists() {
+    public static ResponseEntity<String> skuExists() {
         return of(HttpStatus.CONFLICT, SKU_EXISTS);
     }
 
-    static ResponseEntity<String> detailsChanged() {
+    public static ResponseEntity<String> detailsChanged() {
         return of(HttpStatus.PRECONDITION_FAILED, DETAILS_CHANGED);
     }
 

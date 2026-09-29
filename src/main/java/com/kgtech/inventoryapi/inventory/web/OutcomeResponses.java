@@ -17,6 +17,7 @@ import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+import com.kgtech.inventoryapi.web.TextErrors;
 
 import tools.jackson.databind.json.JsonMapper;
 

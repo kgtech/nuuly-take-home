@@ -87,6 +87,7 @@ import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+import com.kgtech.inventoryapi.web.TextErrors;
 
 /** The v2 details operations (DESIGN-V2 §8, A21): create with details, replace details, read one, read a page. */
 @Tag(name = TAG_V2)

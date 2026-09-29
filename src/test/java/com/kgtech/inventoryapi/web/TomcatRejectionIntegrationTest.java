@@ -50,8 +50,8 @@ class TomcatRejectionIntegrationTest {
 
     private static final String SEEDED = "ABC-1";
     private static final String QUANTITY_BODY = "{\"quantity\":1}";
-    /** The app-wide text valve lives in web beside this test (C1, A37); named so the test compiles before the move. */
-    private static final String TEXT_VALVE = "com.kgtech.inventoryapi.web.TextErrorReportValve";
+    /** The app-wide text valve lives in web beside this test (C1, A37). */
+    private static final String TEXT_VALVE = TextErrorReportValve.class.getName();
     private static final int OVERSIZED = 10_000;
 
     @LocalServerPort

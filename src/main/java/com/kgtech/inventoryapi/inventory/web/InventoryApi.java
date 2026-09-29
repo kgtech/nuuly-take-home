@@ -3,6 +3,8 @@ package com.kgtech.inventoryapi.inventory.web;
 import static com.kgtech.inventoryapi.inventory.InventoryService.DEFAULT_LIMIT;
 import static com.kgtech.inventoryapi.inventory.InventoryService.MAX_LIMIT;
 
+import com.kgtech.inventoryapi.web.TextErrors;
+
 /** The web layer's API strings: API paths, query parameter names and OpenAPI description texts (C2, Z2). */
 final class InventoryApi {
 
@@ -18,8 +20,6 @@ final class InventoryApi {
     static final String LIMIT = "limit";
     static final String AFTER = "after";
 
-    static final String API_TITLE = "Inventory API";
-    static final String API_VERSION = "1.0.0";
     static final String TAG = "inventory";
 
     static final String GET_SUMMARY = "Get inventory for a SKU";

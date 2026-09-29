@@ -6,8 +6,6 @@ import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
 import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_TITLE;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_VERSION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_OK_DESCRIPTION;
@@ -37,12 +35,10 @@ import static org.springframework.http.MediaType.TEXT_PLAIN_VALUE;
 
 import java.util.List;
 
-import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.headers.Header;
-import io.swagger.v3.oas.annotations.info.Info;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -74,9 +70,9 @@ import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+import com.kgtech.inventoryapi.web.TextErrors;
 
-/** The four spec operations (hand-written, D7), with the spec's info, operationIds and summaries. */
-@OpenAPIDefinition(info = @Info(title = API_TITLE, version = API_VERSION))
+/** The four spec operations (hand-written, D7), with the spec's operationIds and summaries. */
 @Tag(name = TAG)
 @RestController
 @RequestMapping(BASE_PATH)
