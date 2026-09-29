@@ -26,9 +26,9 @@ import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.stereotype.Controller;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.servlet.DispatcherServlet;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -143,11 +143,13 @@ class ArchitectureTest {
 
     /**
      * A37 (G10, S6, C1): the error advice, the Tomcat valve, the container customizer, the DispatcherServlet override
-     * and every @Configuration apply to the whole application, so they live in web, not in the feature.
+     * and every @Configuration apply to the whole application, so they live in web, not in the feature. Any
+     * controller advice counts (meta-annotated, so a plain @ControllerAdvice too); @Configuration stays a direct match,
+     * because @SpringBootApplication is meta-annotated with it.
      */
     @Test
     void appWideHttpClassesResideInWeb() {
-        classes().that().areAnnotatedWith(RestControllerAdvice.class)
+        classes().that().areMetaAnnotatedWith(ControllerAdvice.class)
                 .or().areAssignableTo(ErrorReportValve.class)
                 .or().areAssignableTo(WebServerFactoryCustomizer.class)
                 .or().areAssignableTo(DispatcherServlet.class)
@@ -164,10 +166,13 @@ class ArchitectureTest {
                 .check(MAIN);
     }
 
-    /** D7, Z2: controllers belong to a feature's web package and nothing outside it calls them. */
+    /**
+     * D7, Z2: controllers belong to a feature's web package and nothing outside it calls them. Meta-annotated, so a
+     * {@code @Controller} with {@code @ResponseBody} counts as well as a {@code @RestController}.
+     */
     @Test
-    void restControllersArePackagePrivateInAFeatureWebPackage() {
-        classes().that().areAnnotatedWith(RestController.class)
+    void controllersArePackagePrivateInAFeatureWebPackage() {
+        classes().that().areMetaAnnotatedWith(Controller.class)
                 .should().resideInAPackage(ROOT + ".*.web")
                 .andShould().bePackagePrivate()
                 .check(MAIN);
@@ -205,7 +210,7 @@ class ArchitectureTest {
      */
     @Test
     void nextLinkAndRepeatedAfterCheckLiveInOnePagingHelper() {
-        CompositeArchRule.of(noClasses().that().areAnnotatedWith(RestController.class)
+        CompositeArchRule.of(noClasses().that().areMetaAnnotatedWith(Controller.class)
                         .should().dependOnClassesThat().areAssignableTo(UriComponentsBuilder.class)
                         .orShould().callMethodWhere(describe("a target named getParameterValues",
                                 (JavaMethodCall call) -> call.getTarget().getName().equals("getParameterValues"))))
