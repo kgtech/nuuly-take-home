@@ -33,7 +33,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * D9, S11, W2 over real HTTP (#4): concurrent purchases and adds through Tomcat, the filter chain and the Hikari
  * pool, asserting the client only ever sees the spec's 200 and 400 (never a 500). Not @Transactional: every request
- * commits its own SERIALIZABLE transaction, so the tables are emptied before each test.
+ * commits its own SERIALIZABLE transaction, so the tables are emptied before each test. Each test ends by asserting
+ * the balance invariants (A14).
  */
 @IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class InventoryHttpConcurrencyTest {
@@ -114,6 +115,12 @@ class InventoryHttpConcurrencyTest {
         return jdbc.sql(sql).param(sku).query(Long.class).single();
     }
 
+    /** A14: after concurrent writes every balance equals its ledger sum and none is negative. */
+    private void assertInvariants() {
+        assertThat(Invariants.balanceMismatches(jdbc)).as("quantity = SUM(quantity_delta)").isEmpty();
+        assertThat(Invariants.minQuantity(jdbc)).as("smallest quantity").isNotNegative();
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {1, 7})
     void concurrentPurchasesNeverOversell(int stock) throws Exception {
@@ -136,6 +143,7 @@ class InventoryHttpConcurrencyTest {
         assertThat(ledgerSum(sku)).isZero();
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
                 .isEqualTo(stock);
+        assertInvariants();
     }
 
     @Test
@@ -150,5 +158,6 @@ class InventoryHttpConcurrencyTest {
         assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(THREADS);
         assertThat(ledgerSum(sku)).isEqualTo(THREADS);
+        assertInvariants();
     }
 }

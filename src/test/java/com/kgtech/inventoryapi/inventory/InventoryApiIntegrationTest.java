@@ -105,6 +105,20 @@ class InventoryApiIntegrationTest {
         return jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single();
     }
 
+    /**
+     * E1: GET and the list read the balance row, not a ledger SUM. The row says 7 and the ledger is empty, a state no
+     * write leaves, so only a read of sku.quantity answers 7.
+     */
+    @Test
+    void getAndListReadTheBalanceRow() throws Exception {
+        Invariants.assertBalanceColumns(jdbc);
+        jdbc.sql("INSERT INTO sku (sku_id, quantity, version) VALUES ('BAL-1', 7, 1)").update();
+        assertThat(allLedgerRows()).as("ledger rows").isZero();
+
+        expectJson(find("BAL-1"), item("BAL-1", 7));
+        expectJson(list(), "[" + item("BAL-1", 7) + "]");
+    }
+
     @Test
     void listIsEmptyArrayWhenNoSkus() throws Exception {
         expectJson(list(), "[]");

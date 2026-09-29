@@ -1,12 +1,19 @@
 package com.kgtech.inventoryapi.inventory;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Stream;
+
+import javax.sql.DataSource;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +44,9 @@ class InventoryServiceTest {
 
     @Autowired
     JdbcClient jdbc;
+
+    @Autowired
+    DataSource dataSource;
 
     @Autowired
     PlatformTransactionManager transactionManager;
@@ -230,6 +240,37 @@ class InventoryServiceTest {
         WriteResult outcome = service.purchase(sku, 1, null);
 
         assertThat(outcome).isEqualTo(new StockOutcome.NotFound());
+        assertThat(skuRows(sku)).isZero();
+        assertThat(ledgerRows(sku)).isZero();
+    }
+
+    /**
+     * AC1, E1 (OQ-2 B): a purchase racing a create of the same new SKU that has not committed answers NotFound, as it
+     * always has, and does not wait for the create. The create's rows are held uncommitted on another connection.
+     */
+    @Test
+    void purchaseRacingAnUncommittedCreateIsNotFound() throws Exception {
+        String sku = newSku("racing");
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try (Connection create = dataSource.getConnection()) {
+            create.setAutoCommit(false);
+            try (PreparedStatement insertSku = create.prepareStatement("INSERT INTO sku (sku_id) VALUES (?)");
+                    PreparedStatement insertLedger = create.prepareStatement(
+                            "INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 10, 'add')")) {
+                insertSku.setString(1, sku);
+                insertSku.executeUpdate();
+                insertLedger.setString(1, sku);
+                insertLedger.executeUpdate();
+            }
+
+            var purchase = pool.submit(() -> service.purchase(sku, 1, null));
+
+            assertThat(purchase.get(5, SECONDS)).as("answered while the create is uncommitted")
+                    .isEqualTo(new StockOutcome.NotFound());
+            create.rollback();
+        } finally {
+            pool.shutdownNow();
+        }
         assertThat(skuRows(sku)).isZero();
         assertThat(ledgerRows(sku)).isZero();
     }

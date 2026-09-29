@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import java.net.URI;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -172,6 +174,31 @@ class IdempotencyApiIntegrationTest {
 
     private long keyRows() {
         return count("SELECT count(*) FROM idempotency_keys");
+    }
+
+    /**
+     * A key row as v1 wrote it, before V3: request_hash is SHA-256 of operation, skuId and quantity (Y3), computed in
+     * SQL; status, Content-Type and body are null for a claim without a stored response.
+     */
+    private void storeKeyRow(String key, String operation, String skuId, int quantity, Integer status,
+            String contentType, String body) {
+        jdbc.sql("""
+                INSERT INTO idempotency_keys
+                    (idempotency_key, operation, sku_id, request_hash, status, content_type, body)
+                VALUES (?::uuid, ?, ?, sha256(convert_to(? || E'\\n' || ? || E'\\n' || ?, 'UTF8')), ?, ?, ?)
+                """)
+                .params(key, operation, skuId, operation, skuId, Integer.toString(quantity), status, contentType,
+                        body)
+                .update();
+    }
+
+    /** Every column of every key row, request_hash as hex so rows compare by content. */
+    private List<Map<String, Object>> keyRowSnapshot() {
+        return jdbc.sql("""
+                SELECT idempotency_key, operation, sku_id, encode(request_hash, 'hex') AS request_hash,
+                       status, content_type, body, created_at
+                FROM idempotency_keys ORDER BY idempotency_key
+                """).query().listOfRows();
     }
 
     private void backdate(String key, String interval) {
@@ -404,6 +431,53 @@ class IdempotencyApiIntegrationTest {
         assertThat(contentTypes).extracting(r -> r.get("content_type"))
                 .containsExactly(MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_PLAIN_VALUE,
                         MediaType.TEXT_PLAIN_VALUE);
+    }
+
+    /**
+     * A33, Y3, Y4, E3: keys stored before V3 keep replaying. The rows are exactly as v1 wrote them (hash, status,
+     * Content-Type and body); the same keyed POSTs answer the stored status, Content-Type and body unchanged, write no
+     * sku or ledger row, and leave every key row as it was.
+     */
+    @Test
+    void keyStoredBeforeTheMigrationReplaysByteForByte() throws Exception {
+        String okKey = newKey();
+        String notFoundKey = newKey();
+        String insufficientKey = newKey();
+        storeKeyRow(okKey, "add", "ABC-1", 5, 200, MediaType.APPLICATION_JSON_VALUE, item("ABC-1", 5));
+        storeKeyRow(notFoundKey, "purchase", "NOPE", 1, 404, MediaType.TEXT_PLAIN_VALUE, "SKU not found");
+        storeKeyRow(insufficientKey, "purchase", "ABC-1", 10, 400, MediaType.TEXT_PLAIN_VALUE,
+                "Insufficient inventory");
+        List<Map<String, Object>> before = keyRowSnapshot();
+
+        assertThat(create("ABC-1", 5, okKey))
+                .isEqualTo(new Reply(200, MediaType.APPLICATION_JSON_VALUE, item("ABC-1", 5)));
+        assertThat(purchase("NOPE", 1, notFoundKey))
+                .isEqualTo(new Reply(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found"));
+        assertThat(purchase("ABC-1", 10, insufficientKey))
+                .isEqualTo(new Reply(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory"));
+
+        assertThat(allLedgerRows()).as("ledger rows").isZero();
+        assertThat(allSkuRows()).as("sku rows").isZero();
+        assertThat(keyRowSnapshot()).as("key rows").isEqualTo(before);
+    }
+
+    /**
+     * A18: a committed key row with no stored response, for this very request, is never replayed and never a 500. The
+     * keyed POST gets 400 "Invalid request", writes no ledger row, changes no stock and stores nothing.
+     */
+    @ParameterizedTest
+    @EnumSource(Post.class)
+    void keyRowWithoutAStoredResponseIsInvalidRequest(Post op) throws Exception {
+        assertItem(create("widget", 10, null), "widget", 10);
+        String key = newKey();
+        storeKeyRow(key, op == Post.CREATE ? "add" : "purchase", "widget", 3, null, null, null);
+        List<Map<String, Object>> before = keyRowSnapshot();
+
+        assertText(postTo(op, "widget", quantityJson(3), key), 400, INVALID_REQUEST);
+
+        assertThat(ledgerRows("widget")).as("ledger rows").isEqualTo(1);
+        assertItem(find("widget"), "widget", 10);
+        assertThat(keyRowSnapshot()).as("key rows").isEqualTo(before);
     }
 
     // ---- AC9: Accept that excludes JSON fails before the claim (Y1) ----

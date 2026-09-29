@@ -2,6 +2,7 @@ package com.kgtech.inventoryapi.idempotency;
 
 import java.security.MessageDigest;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -16,6 +17,20 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  */
 @Component
 class IdempotencyStore {
+
+    /**
+     * A keyed write's answer (A33): the stored response, first run or replay alike, or 400 "Invalid request". Stub for
+     * #87's red tests.
+     */
+    public sealed interface Keyed {
+
+        record Response(StoredResponse response) implements Keyed {
+        }
+
+        /** Different operation, skuId or request (S8), older than 24h (T1), or no stored response (A18). */
+        record Invalid() implements Keyed {
+        }
+    }
 
     /** R2: claim the key; no row back means it already exists. */
     static final String CLAIM = """
@@ -72,6 +87,12 @@ class IdempotencyStore {
             throw new IllegalStateException("Idempotency-Key " + request.key() + " has no stored response");
         }
         return new KeyedResult.Replayed(response);
+    }
+
+    /** A33's explicit call: claim, write and store in one READ COMMITTED transaction. Stub for #87's red tests. */
+    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+            Supplier<StoredResponse> write) {
+        throw new UnsupportedOperationException("not implemented");
     }
 
     private boolean claim(IdempotentRequest request, byte[] hash) {

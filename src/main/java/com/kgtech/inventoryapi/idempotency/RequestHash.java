@@ -10,6 +10,11 @@ final class RequestHash {
     private RequestHash() {
     }
 
+    /** Y3, A33: the hash of the canonical request (the quantity's digits on both POSTs). Stub for #87's red tests. */
+    static byte[] of(Operation operation, String skuId, String canonicalRequest) {
+        throw new UnsupportedOperationException("not implemented");
+    }
+
     static byte[] of(Operation operation, String skuId, int quantity) {
         String canonical = operation.dbValue() + "\n" + skuId + "\n" + quantity;
         try {

@@ -28,6 +28,7 @@ dependencies {
     testImplementation(libs.spring.boot.starter.webmvc.test)
     testImplementation(libs.spring.boot.testcontainers)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.archunit) // ArchitectureTest (A39); not in the Spring Boot BOM, so versioned in the catalog (S10)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
