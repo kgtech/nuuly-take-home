@@ -56,8 +56,9 @@ final class InventoryApi {
 
     static final String V2_LIST_SUMMARY = "List all SKUs with details";
     static final String V2_LIST_DESCRIPTION = "Returns SKUs sorted by skuId with their quantity and details (absent "
-            + "for a SKU that has none), at most " + MAX_LIMIT + " per response; the same limit, after and Link rules "
-            + "as GET /inventory.";
+            + "for a SKU that has none), at most " + MAX_LIMIT + " per response. The optional limit (1 to "
+            + MAX_LIMIT + ", default " + MAX_LIMIT + ") sets the page size and after is an exclusive cursor; a Link "
+            + "header with rel=next carries both to the next page.";
     static final String V2_LIST_OK_DESCRIPTION = "One page of SKUs with details, at most " + MAX_LIMIT
             + ", sorted by skuId";
     static final String V2_GET_SUMMARY = "Get a SKU with its details";

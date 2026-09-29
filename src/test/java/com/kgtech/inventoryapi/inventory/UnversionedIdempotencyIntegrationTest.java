@@ -6,7 +6,9 @@ import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -90,6 +92,19 @@ class UnversionedIdempotencyIntegrationTest {
         assertThat(response.getContentAsString()).isEqualTo(body);
     }
 
+    /**
+     * Runs the requests with idempotency_keys renamed away, so any statement that reads or writes it (even one later
+     * rolled back) fails and would answer 500; the table is back before this returns.
+     */
+    private <T> T withIdempotencyTableHidden(Callable<T> requests) throws Exception {
+        jdbc.sql("ALTER TABLE idempotency_keys RENAME TO idempotency_keys_hidden").update();
+        try {
+            return requests.call();
+        } finally {
+            jdbc.sql("ALTER TABLE idempotency_keys_hidden RENAME TO idempotency_keys").update();
+        }
+    }
+
     private long quantity(String skuId) {
         return jdbc.sql("SELECT quantity FROM sku WHERE sku_id = ?").param(skuId).query(Long.class).single();
     }
@@ -111,8 +126,9 @@ class UnversionedIdempotencyIntegrationTest {
     void aPresentKeyIs400AndNothingIsWrittenOrStored(Op op, String what, String[] keyLines) throws Exception {
         Map<String, Long> before = Tables.counts(jdbc);
 
-        assertText(send(request(op, "widget", QUANTITY_1, keyLines)), 400, INVALID_REQUEST);
+        MockHttpServletResponse response = withIdempotencyTableHidden(() -> send(request(op, "widget", QUANTITY_1, keyLines)));
 
+        assertText(response, 400, INVALID_REQUEST);
         assertThat(Tables.counts(jdbc)).isEqualTo(before);
         assertThat(Tables.counts(jdbc).get("idempotency_keys")).isZero();
         assertThat(quantity("widget")).isEqualTo(5);
@@ -124,11 +140,17 @@ class UnversionedIdempotencyIntegrationTest {
         String key = UUID.randomUUID().toString();
         Map<String, Long> before = Tables.counts(jdbc);
 
-        assertText(send(request(Op.PURCHASE, "-bad", QUANTITY_1, key)), 400, INVALID_REQUEST);
-        assertText(send(request(Op.ADD, "-bad", QUANTITY_1, key)), 400, INVALID_REQUEST);
-        // without the header the frozen answers stay: 404 on purchase, 400 on add (G11)
-        assertText(send(request(Op.PURCHASE, "-bad", QUANTITY_1)), 404, "SKU not found");
-        assertText(send(request(Op.ADD, "-bad", QUANTITY_1)), 400, INVALID_REQUEST);
+        List<MockHttpServletResponse> responses = withIdempotencyTableHidden(() -> List.of(
+                send(request(Op.PURCHASE, "-bad", QUANTITY_1, key)),
+                send(request(Op.ADD, "-bad", QUANTITY_1, key)),
+                // without the header the frozen answers stay: 404 on purchase, 400 on add (G11)
+                send(request(Op.PURCHASE, "-bad", QUANTITY_1)),
+                send(request(Op.ADD, "-bad", QUANTITY_1))));
+
+        assertText(responses.get(0), 400, INVALID_REQUEST);
+        assertText(responses.get(1), 400, INVALID_REQUEST);
+        assertText(responses.get(2), 404, "SKU not found");
+        assertText(responses.get(3), 400, INVALID_REQUEST);
 
         assertThat(Tables.counts(jdbc)).isEqualTo(before);
     }
@@ -171,24 +193,18 @@ class UnversionedIdempotencyIntegrationTest {
     }
 
     /**
-     * The table is renamed away while the requests run, so any statement that reads or writes it fails and would
-     * answer 500; afterwards it is back and holds no row (invariant 5).
+     * The table is hidden while the requests run (see withIdempotencyTableHidden); afterwards it holds no row
+     * (invariant 5).
      */
     @ParameterizedTest(name = "{0}")
     @MethodSource("operations")
     void anUnversionedRequestNeverTouchesTheIdempotencyTable(Case operation) throws Exception {
         Tables.seed(jdbc, "big", Long.MAX_VALUE);
         Map<String, Long> before = Tables.counts(jdbc);
-        MockHttpServletResponse ok;
-        MockHttpServletResponse failed;
-
-        jdbc.sql("ALTER TABLE idempotency_keys RENAME TO idempotency_keys_hidden").update();
-        try {
-            ok = send(operation.success());
-            failed = send(operation.failure());
-        } finally {
-            jdbc.sql("ALTER TABLE idempotency_keys_hidden RENAME TO idempotency_keys").update();
-        }
+        List<MockHttpServletResponse> responses = withIdempotencyTableHidden(
+                () -> List.of(send(operation.success()), send(operation.failure())));
+        MockHttpServletResponse ok = responses.get(0);
+        MockHttpServletResponse failed = responses.get(1);
 
         assertThat(ok.getStatus()).as(ok.getContentAsString()).isEqualTo(200);
         assertText(failed, operation.failureStatus(), operation.failureBody());

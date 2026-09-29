@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -93,6 +94,29 @@ class RequestGuardTomcatIntegrationTest {
         assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
         assertThat(jdbc.sql("SELECT count(*) FROM inventory_ledger").query(Long.class).single()).isEqualTo(1);
         assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isEqualTo(1);
+    }
+
+    /**
+     * H3, through real Tomcat: an Idempotency-Key header with an empty value (no bytes after the colon) on an
+     * unversioned POST is 400 "Invalid request" and nothing is written; a header the servlet layer might drop as blank
+     * must still count as present.
+     */
+    @ParameterizedTest(name = "POST {0} with an empty Idempotency-Key")
+    @ValueSource(strings = {"/inventory/ABC-1", "/inventory/ABC-1/purchase"})
+    void anEmptyIdempotencyKeyIs400AndWritesNothing(String path) throws Exception {
+        String body = "{\"quantity\":1}";
+        String head = "POST " + path + " HTTP/1.1\r\n" + header(HOST, "localhost") + header(CONNECTION, "close")
+                + header(CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                + header(CONTENT_LENGTH, Integer.toString(body.length())) + header(IDEMPOTENCY_KEY, "");
+
+        RawHttp.Response response = RawHttp.send(port, head, body);
+
+        assertThat(response.status()).isEqualTo(400);
+        assertThat(response.contentType().isCompatibleWith(MediaType.TEXT_PLAIN)).isTrue();
+        assertThat(response.body()).isEqualTo("Invalid request");
+        assertThat(Tables.counts(jdbc)).containsEntry("idempotency_keys", 0L).containsEntry("inventory_ledger", 1L)
+                .containsEntry("sku", 1L);
+        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
     }
 
     private static final String QUANTITY_BODY = "{\"quantity\":1";

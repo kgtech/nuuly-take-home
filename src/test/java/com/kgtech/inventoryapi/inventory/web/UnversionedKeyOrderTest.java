@@ -95,16 +95,14 @@ class UnversionedKeyOrderTest {
         verifyNoInteractions(service);
     }
 
-    /** H3: a present key (a valid, an empty, a malformed one, two lines) is 400 and the service is never called. */
+    /**
+     * H3: a present key is 400 and the service is never called. The key values, the skuId order and the database
+     * effects are UnversionedIdempotencyIntegrationTest's matrix.
+     */
     @ParameterizedTest
     @EnumSource(Post.class)
     void aPresentKeyIs400AndTheServiceIsNeverCalled(Post op) throws Exception {
         expectText(send(op, "widget", "{\"quantity\":1}", KEY), 400, "Invalid request");
-        expectText(send(op, "widget", "{\"quantity\":1}", ""), 400, "Invalid request");
-        expectText(send(op, "widget", "{\"quantity\":1}", "nope"), 400, "Invalid request");
-        expectText(send(op, "widget", "{\"quantity\":1}", KEY, KEY), 400, "Invalid request");
-        // the key is checked before the skuId, so purchase's 404 for a malformed skuId is 400 with a key
-        expectText(send(op, "-bad", "{\"quantity\":1}", KEY), 400, "Invalid request");
 
         verifyNoInteractions(service);
     }

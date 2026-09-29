@@ -247,7 +247,7 @@ class SkuDetailsApiIntegrationTest {
     }
 
     @Test
-    void listV2PagesLikeV1AndAgreesRowForRow() throws Exception {
+    void listV2PagesWithLimitAndAgreesWithTheUnversionedListRowForRow() throws Exception {
         withDetails("L-1", 1);
         Tables.seed(jdbc, "L-2", 2);
         Tables.seed(jdbc, "L-3", 3);
