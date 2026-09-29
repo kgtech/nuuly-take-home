@@ -38,3 +38,4 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T19:38:20Z [service] PR #108 (guard) opened; reviewer a8a2442821517aa8d. PR5 details PUT committed on final-details-put (bbe90a3), waits for #108 to merge before it opens (guard). FE PR6 (create/edit via details PUT) test agent abab6b5aee1ecc4e2 in wt-p6 (based on final-details-put). NOTE: e2e runs share ports 8080/5173 across worktrees: serialize them.
 - 2026-09-29T19:42:55Z [frontend] PR6 FE tests done (abab6b5aee1ecc4e2): 21 unit + 8 e2e red for the right reasons. Implementer launched (a3cba699d8654eb91) in wt-p6; must check ports before e2e.
 - 2026-09-29T19:43:28Z [service] PR #108 reviewed (a8a2442821517aa8d): no BLOCKER/MAJOR, 5 MINOR + NITs (followups 9-10); merged; #94 closed.
+- 2026-09-29T19:45:20Z [service] PR5 (details PUT) opened after merging final; gate (no e2e: FE6 implementer may hold 8080/5173) green: 898 tests; compose readiness + PUT probe on 18095 ok.
