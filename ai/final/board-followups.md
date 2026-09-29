@@ -10,3 +10,5 @@ Each needs a board edit and a regenerate (never hand-edit DECISIONS.md or CLAUDE
 6. issues.md F-10 makes typed WriteResult<O> / one Page<T> conditional while A38 states it unconditionally: settle when the removal PR lands.
 7. Add a note for OD-7 in frontend/DECISIONS.md (front end calls only /v2).
 8. E1 cites DESIGN-V2 without its path (ai/v2/DESIGN-V2.md). board-cards.md calls H16 "H-M13".
+9. (PR #108 review) A19/H11 state 4 KB for both POSTs on both versions; until the combined /v2 add/purchase PR lands, the /v2 item POST (build v2's create) is 64 KB. The PR removes the temporary state; check the wording then.
+10. (PR #108 review) ArchitectureTest L19 could also forbid getPathInfo/getPathTranslated; RouteGuardCoverageTest only enumerates patterns containing `{skuId}` (a route with another variable name is not enumerated) and checks only the ';' answer; RoutedPathTest could pin double slashes, trailing slash and upper-case literals. MINOR; do if budget allows.
