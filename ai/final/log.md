@@ -26,3 +26,5 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T19:20:55Z [service] Subagents: PR106 reviewer (afd0a3728a3ec69af); PR5 (details PUT) test agent (a537be6d14f61e71d) in wt-p5.
 - 2026-09-29T19:21:32Z [service] PR #106 review (afd0a3728a3ec69af): no BLOCKER/MAJOR; MINOR gate.sh reference resolves once #105 merges first; L19 wrapper/getPathInfo widening deferred to F-04.
 - 2026-09-29T19:24:25Z [service] PR5 (details PUT): test agent done (51 red tests, 2 classes, route missing = right reason; IfMatchTest unchanged, absent vs * covered via HTTP). Implementer launched (a3df0455803781f43) in wt-p5. Board agent (ac9859d9107a1c504) still running.
+- 2026-09-29T19:27:25Z [service] PR5 implementer (a3df0455803781f43) done: 49/51 new tests green; 2 rows need the guard filter (F-04) -> ordering rule: PR4 (guard) merges before PR5; 4 ApiDocsTest counts updated via test agent.
+- 2026-09-29T19:28:05Z [service] PR4 (guard by route kind): test agent launched (a3b78984df477e28a) in wt-p4 (branch final-guard, based on the PR3 branch for ArchitectureTest). API designed: RoutedPath.parse/RouteKind/rawSkuId/skuHasMatrix.
