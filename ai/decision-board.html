@@ -1911,6 +1911,382 @@ Object.assign(REFINES,{"C3:A":[{"id":"G11","rule":0,"from":"controllers pass the
 {"id":"U2","assumption":true,"from":"a POST whose `Accept` header excludes JSON returns 400.","to":"a POST whose `Accept` header excludes JSON, or gives it `q=0`, returns 400."},
 {"id":"Y1","rule":0,"from":"before the controller, the idempotency claim or the ledger write runs.","to":"before the controller, the idempotency claim or the ledger write runs. The produces condition ignores q, so an Accept that gives JSON q=0 passes lookup and JsonAcceptForPostInterceptor rejects it with the same exception before argument resolution (C3)."},
 {"id":"G11","assumption":true,"from":"Creating any other ID returns 400; reading or purchasing one returns 404.","to":"Creating any other ID returns 400; reading or purchasing one returns 404. A `;` in the ID segment is part of the ID (C3)."}],"C3:B":[],"C3:C":[]});
+/* ---------- Round 13: align v1 with v2 (#87, owner approval 2026-09-29) ---------- */
+Object.assign(SRC,{
+  pg_cte_snapshot:{t:"PostgreSQL docs: the sub-statements in WITH run with the same snapshot as the main query, so they can't see one another's effects on the target tables",u:"https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-MODIFYING",s:"V"},
+  pg_raise:{t:"PL/pgSQL docs: RAISE EXCEPTION without a condition or SQLSTATE uses P0001 (raise_exception); USING ERRCODE sets it explicitly",u:"https://www.postgresql.org/docs/current/plpgsql-errors-and-messages.html",s:"V"},
+  pg_truncate:{t:"PostgreSQL docs: TRUNCATE does not fire ON DELETE triggers; only ON TRUNCATE triggers see it",u:"https://www.postgresql.org/docs/current/sql-truncate.html",s:"V"},
+  archunit:{t:"ArchUnit user guide: rules checked against imported class files with rule.check; a rule that matches no classes fails by default",u:"https://www.archunit.org/userguide/html/000_Index.html",s:"V"}
+});
+DECISIONS.push(
+{id:"E1",kind:"design",review13:true,finding:"Balance row",q:"Where does stock live, and how does a write stay correct under concurrency without retries?",
+ quote:{text:"[V1] Stock is the SUM of inventory_ledger.quantity_delta per SKU. Every write checks the SUM and inserts the delta in one SERIALIZABLE transaction …\n[W2] Retry SERIALIZABLE stock writes on PessimisticLockingFailureException whose root SQLState is 40001 or 40P01: up to 10 retries, 5–200 ms jittered backoff.",from:"CLAUDE.md (V1, W2)"},
+ why:"Issue #87 aligns v1 with v2's storage design (DESIGN-V2 §2, §7). Every v1 write sums the SKU's whole ledger at SERIALIZABLE, so each write costs more as history grows, writes to different SKUs can still fail each other with 40001 (#26), and W2, X1, Y2 and Z1's proxy order exist only to retry those failures. With the balance in a column changed by one conditional UPDATE, writers to one SKU queue on its row lock and READ COMMITTED re-checks the WHERE against the committed row, so there is nothing to retry.",
+ detail:[
+  "Probe on postgres:18: A's UPDATE … WHERE quantity >= 5 RETURNING held the row for 3 s; B's identical UPDATE waited about 2 s, then returned no row and no error. Final quantity 0, version +1 once.",
+  "The purchase decides NotFound or Insufficient in the same statement as its UPDATE. v2 runs a second SELECT EXISTS, which answers 400 \"Insufficient inventory\" when a create of the same new SKU commits between the two; the one statement keeps main's 404 (#87 amendment 1).",
+  "Every change still appends a ledger row in the same transaction, so the history stays complete. Tests assert quantity = SUM(quantity_delta) (A14), and V3's triggers keep the ledger append-only (E3).",
+  "GET and the list read the row with one autocommit query, so a read never waits on a writer.",
+  "A database error during a write is a plain 500 (G6), and the rollback undoes the balance, the ledger row and any key claim together."],
+ examples:[
+  {label:"Add",code:"INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING;\nUPDATE sku SET quantity = quantity + :q, version = version + 1\nWHERE sku_id = :id AND quantity <= 9223372036854775807 - :q\nRETURNING quantity, version;          -- no row → Overflow\nINSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (:id, :q, 'add');",note:"All three run in one READ COMMITTED transaction."},
+  {label:"Purchase (one statement)",code:"WITH updated AS (\n  UPDATE sku SET quantity = quantity - :q, version = version + 1\n  WHERE sku_id = :id AND quantity >= :q\n  RETURNING quantity, version)\nSELECT (SELECT quantity FROM updated) AS quantity,\n       (SELECT version FROM updated) AS version,\n       EXISTS (SELECT 1 FROM sku WHERE sku_id = :id) AS found;\n-- quantity not null → Ok; else found → Insufficient; else NotFound\n-- on Ok: INSERT INTO inventory_ledger … VALUES (:id, -:q, 'purchase')",note:"Both parts read the statement's snapshot, so a create of the same SKU that hasn't committed gives found = false: main's 404."}],
+ by:["V1","W1","W2","X1","Y2","D4","G7","G12"],
+ options:[
+  {k:"A",label:"Balance row, conditional UPDATE at READ COMMITTED",summary:"sku.quantity and sku.version change in one conditional UPDATE … RETURNING; the ledger row goes in the same READ COMMITTED transaction; nothing retries.",
+   pros:["Writers to one SKU queue on its row lock; writers to different SKUs never conflict (#26)","A read is one primary-key lookup","Removes the retry machinery (W2, X1, Y2) and its tests"],
+   cons:["Stock is stored twice (row and ledger), and their agreement is asserted by tests, not by a constraint (A14)","Existing databases need a backfill migration (E3)"],h:6,risk:"Med",src:["pg_rc","pg_update","pg_cte_dml","pg_cte_snapshot"],
+   rules:[
+    "Stock is sku.quantity (bigint NOT NULL DEFAULT 0, CHECK (quantity >= 0)), and sku.version (bigint) goes up by 1 with each change. Add: INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING; then UPDATE sku SET quantity = quantity + :q, version = version + 1 WHERE sku_id = :id AND quantity <= 9223372036854775807 - :q RETURNING quantity, version; no row → Overflow. Purchase is one statement: WITH updated AS (UPDATE sku SET quantity = quantity - :q, version = version + 1 WHERE sku_id = :id AND quantity >= :q RETURNING quantity, version) SELECT (SELECT quantity FROM updated) AS quantity, (SELECT version FROM updated) AS version, EXISTS (SELECT 1 FROM sku WHERE sku_id = :id) AS found; a non-null quantity → Ok(quantity), otherwise found → Insufficient, otherwise NotFound. Both parts read the statement's snapshot, so a create of the same SKU that hasn't committed when the purchase starts gives NotFound. A changed balance (the add's row, the purchase's Ok) → INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (:id, :d, :r) in the same READ COMMITTED transaction; a rejected write inserts no ledger row.",
+    "Stock writes run at READ COMMITTED (PROPAGATION_REQUIRED) and nothing retries: writers to one SKU wait on its row lock, and Postgres re-evaluates the waiting UPDATE's WHERE against the committed row, so a waiting purchase sees the balance the first one left. There is no SERIALIZABLE and no retry; a database error is a plain 500 \"Internal server error\" (G6).",
+    "Reads use no transaction: GET /inventory/{skuId} is one autocommit SELECT quantity, version FROM sku WHERE sku_id = :id, and the list is SELECT sku_id, quantity FROM sku WHERE sku_id > :after ORDER BY sku_id LIMIT :limit + 1 (G9). Neither reads the ledger.",
+    "Test: a purchase waiting on another's row lock sees the committed balance (two purchases of the whole stock: one Ok(0), one Insufficient, no exception, one ledger row); a purchase racing an uncommitted create of the same SKU returns NotFound without waiting; GET and the list answer a balance seeded with no ledger rows (the read is the row); concurrent writes to different SKUs all succeed (CrossSkuConcurrencyTest); every concurrency test ends by asserting the invariants (A14)."],
+   assumption:"Concurrent changes to one SKU wait for each other; nothing is retried; a database failure returns 500."},
+  {k:"B",label:"Keep SUM, SERIALIZABLE and retries",summary:"Stay on V1, W1, W2 and X1.",pros:["No migration","The ledger stays the only stored balance"],cons:["Writes to different SKUs still fail with 40001 under SSI (#26), and every write sums a ledger that only grows"],h:0,risk:"Med",src:["pg_ser"],
+   rules:["Keep V1, W1, W2 and X1 as they are."],assumption:null},
+  {k:"C",label:"Balance kept by a trigger",summary:"An AFTER INSERT trigger on inventory_ledger updates sku.quantity.",pros:["The row and the ledger can't disagree"],cons:["The trigger, not the conditional UPDATE, decides and returns the balance, and every write runs a second UPDATE (A14)"],h:4,risk:"Med",src:[],
+   rules:["An AFTER INSERT trigger on inventory_ledger keeps sku.quantity equal to the sum of its deltas."],assumption:null},
+  {k:"D",label:"Lock, then check",summary:"SELECT … FOR UPDATE on the sku row, check the balance in Java, then UPDATE it.",pros:["Explicit locking"],cons:["Two statements and a Java-side check (G7) for what one conditional UPDATE does"],h:5,risk:"Med",src:["pg_rowlock"],
+   rules:["Lock the sku row with SELECT … FOR UPDATE, check the balance, then UPDATE it."],assumption:null}
+ ],
+ rec:{k:"A",why:"It is v2's design, which #87 scopes for v1, and it keeps the guard in one Postgres statement while removing every retry path.",change:"The ledger must stay the only stored balance. Then B."}},
+
+{id:"E2",kind:"design",review13:true,finding:"JdbcClient only",q:"How does the code run SQL once nothing needs Spring Data JPA?",
+ quote:{text:"[D3] Spring Data JPA for reads (balances come from native or projection queries that cast SUM(quantity_delta)::bigint …); atomic writes are native SQL run through JdbcClient in a repository fragment …\n[D5] Schema changes only through Flyway migrations in src/main/resources/db/migration; spring.jpa.hibernate.ddl-auto=validate.",from:"CLAUDE.md (D3, D5)"},
+ why:"JPA served only the reads of the ledger SUM (D3, S1); every write already ran through JdbcClient. With the balance in a row (E1), every statement is hand-written SQL with RETURNING, so the JPA starter would bring Hibernate ORM, Spring Data, an EntityManager and a ddl-auto check for two primary-key queries. v2 made the same change.",
+ detail:[
+  "spring-boot-starter-flyway 4.1.1 already brings spring-boot-starter-jdbc (dependency-tree probe), so declaring it adds no artifact; it keeps JDBC on the classpath if Flyway's dependencies change.",
+  "Boot 4.1.1 auto-configures JdbcClient and a JDBC transaction manager once JPA is gone (JdbcClientAutoConfiguration, DataSourceTransactionManagerAutoConfiguration).",
+  "Hibernate Validator stays for @Valid (G4, G13): it comes from spring-boot-starter-validation and is not Hibernate ORM.",
+  "Without ddl-auto=validate nothing checks the schema at startup, so schema tests take over that check."],
+ examples:[],
+ by:["D3","S1","D1","D5","E1"],
+ options:[
+  {k:"A",label:"JdbcClient only",summary:"StockRepository and IdempotencyStore run every statement through JdbcClient; the JPA starter goes.",
+   pros:["Every statement is visible SQL, run as written","One data-access style and one transaction manager","No ORM on the classpath"],
+   cons:["Row mapping is written by hand","Schema drift is caught by tests instead of at startup"],h:2,risk:"Low",src:["sf_jdbcclient"],
+   rules:[
+    "All SQL runs through JdbcClient in two places: StockRepository (a package-private @Repository in the inventory package) and IdempotencyStore, whose SQL constants and JdbcClient are not public (only run() is). There is no Spring Data, JPA, Hibernate ORM, repository fragment or @Modifying. build.gradle.kts declares spring-boot-starter-jdbc and not spring-boot-starter-data-jpa, and application.yaml has no spring.jpa settings.",
+    "StockRepository's writes run only inside the caller's READ COMMITTED transaction: the service's own without an Idempotency-Key, IdempotencyStore.run's with one (A33). Its reads (find, page) run as single autocommit queries.",
+    "There is no ddl-auto: SchemaTest and IdempotencySchemaTest assert the migrated columns, types, defaults, collation, constraints, index and triggers against Postgres, and InventoryApplicationTests asserts that no JPA, Spring Data or Hibernate ORM class is on the classpath (Hibernate Validator is) and that the transaction manager is a DataSourceTransactionManager."],
+   assumption:null},
+  {k:"B",label:"JPA for reads, JdbcClient for writes (D3 as is)",summary:"Keep Spring Data JPA for find and page.",pros:["No change to the read path"],cons:["Hibernate ORM, Spring Data and a ddl-auto check for two primary-key queries, and two data-access styles in one transaction (S1)"],h:0,risk:"Low",src:[],
+   rules:["Spring Data JPA for reads; JdbcClient for writes."],assumption:null},
+  {k:"C",label:"Spring Data JDBC",summary:"Aggregates and repositories from Spring Data JDBC.",pros:["Derived queries for the reads"],cons:["An aggregate and repository layer around statements that are all hand-written SQL with RETURNING"],h:3,risk:"Med",src:[],
+   rules:["Spring Data JDBC repositories for reads and writes."],assumption:null}
+ ],
+ rec:{k:"A",why:"Every statement is hand-written SQL, which JdbcClient runs as written, and v2 already dropped JPA the same way.",change:"A read needs an entity graph or derived queries. Then B."}},
+
+{id:"E3",kind:"design",review13:true,finding:"V3 migration",q:"How does an existing v1 database move to the balance row, and how is the ledger kept append-only?",
+ quote:{text:"[G5] Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1).\n[V1] … The ledger is append-only: never UPDATE or DELETE inventory_ledger rows (W1).",from:"CLAUDE.md (G5, V1)"},
+ why:"E1 adds sku.quantity and sku.version, and a v1 database already holds ledger rows, so the new columns are filled from the ledger in place. G5 and V1 keep the ledger append-only by convention only, and #24 asks the database to enforce it. PR #63 did that with statement-level triggers that reject every UPDATE on sku and TRUNCATE, but the balance row updates sku on every write, so the owner closed #63 unmerged. This card closes #24.",
+ detail:[
+  "Flyway runs each migration in its own transaction on Postgres (PostgreSQLDatabase.supportsDdlTransactions() is true in 12.4.0), so the ALTER, the backfill and the triggers commit together or not at all; MigrationUpgradeTest checks it.",
+  "The CHECK validates every backfilled row: a negative SUM fails V3 with 23514, and a SUM above the bigint range fails the ::bigint cast with 22003. Neither can arise under v1's guards (G7, G12).",
+  "ALTER TABLE holds ACCESS EXCLUSIVE on sku until V3 commits; Boot runs Flyway before Tomcat accepts requests.",
+  "A v1 instance still running after V3 commits appends ledger rows without changing sku.quantity, and the two drift apart.",
+  "Nothing reads version. Counting ledger rows keeps version equal to the number of changes for migrated and new SKUs alike.",
+  "idempotency_keys is untouched, so stored responses replay byte for byte after the upgrade."],
+ examples:[
+  {label:"V3__balance_row.sql",code:"ALTER TABLE sku\n    ADD COLUMN quantity bigint NOT NULL DEFAULT 0 CONSTRAINT sku_quantity_check CHECK (quantity >= 0),\n    ADD COLUMN version  bigint NOT NULL DEFAULT 0;\n\nUPDATE sku s\nSET quantity = l.total, version = l.changes\nFROM (SELECT sku_id, SUM(quantity_delta)::bigint AS total, count(*) AS changes\n      FROM inventory_ledger GROUP BY sku_id) l\nWHERE l.sku_id = s.sku_id;\n\nCREATE FUNCTION forbid_row_change() RETURNS trigger LANGUAGE plpgsql AS $\nBEGIN\n    RAISE EXCEPTION '% on % is not allowed', TG_OP, TG_TABLE_NAME USING ERRCODE = 'P0001';\nEND\n$;\n\nCREATE TRIGGER inventory_ledger_append_only\n    BEFORE UPDATE OR DELETE ON inventory_ledger\n    FOR EACH ROW EXECUTE FUNCTION forbid_row_change();\n\nCREATE TRIGGER sku_never_deleted\n    BEFORE DELETE ON sku\n    FOR EACH ROW EXECUTE FUNCTION forbid_row_change();",note:"Probe on main's V1 and V2 with v1 data: ABC-1 8/3, BARE 0/0, BIG 9223372036854775807/2, ZERO 0/2, abc-1 2/1; idempotency_keys unchanged; TRUNCATE still works."}],
+ by:["E1","G5","D5","V1","G11"],
+ options:[
+  {k:"A",label:"V3: backfill from the ledger, then row-level triggers",summary:"One Flyway migration adds and backfills quantity and version (version = number of ledger rows) and adds triggers that reject ledger UPDATE and DELETE and sku DELETE.",
+   pros:["Upgrades a v1 database in place, all or nothing","The database enforces append-only (#24)","The balance row's UPDATE and test TRUNCATE still work"],
+   cons:["Every v1 instance must stop before the new version starts","A trigger error is P0001, not a permission error (A11)"],h:3,risk:"Med",src:["pg_raise","pg_truncate","pg_err"],
+   rules:[
+    "V1 and V2 never change. V3__balance_row.sql adds sku.quantity bigint NOT NULL DEFAULT 0 with CONSTRAINT sku_quantity_check CHECK (quantity >= 0) and sku.version bigint NOT NULL DEFAULT 0, backfills each SKU's quantity = SUM(quantity_delta)::bigint and version = count(*) of its ledger rows (a SKU with no ledger rows keeps 0 and 0), then creates the triggers. Flyway runs V3 in one transaction, so a negative or out-of-range SUM fails it and leaves the database at V2 unchanged. Code names columns and never relies on their order.",
+    "Row-level triggers BEFORE UPDATE OR DELETE ON inventory_ledger and BEFORE DELETE ON sku call forbid_row_change(), which raises P0001 (A11). TRUNCATE is not blocked: tests reset tables with Tables.reset (TRUNCATE … RESTART IDENTITY CASCADE).",
+    "An upgrade stops every running v1 instance before the new version starts: a v1 instance still running after V3 commits appends ledger rows without changing sku.quantity.",
+    "Test: MigrationUpgradeTest migrates a fresh database to V2, seeds v1 ledger rows (several changes, a SKU back at 0, a SKU with no ledger rows, a SKU at 9223372036854775807, IDs that differ only in case) and stored keys, migrates to the latest version and asserts each quantity and version, quantity = SUM(quantity_delta), unchanged idempotency_keys rows and active triggers; a seeded negative SUM fails V3 and leaves no quantity column, no forbid_row_change function and no successful V3 row. SchemaTest asserts that UPDATE and DELETE on inventory_ledger and DELETE on sku raise P0001 and that TRUNCATE succeeds."],
+   assumption:null},
+  {k:"B",label:"Backfill version as 0",summary:"Migrated SKUs start at version 0; only later changes count.",pros:["No count in the backfill"],cons:["version would count every change for new SKUs but only later ones for migrated SKUs"],h:3,risk:"Low",src:[],
+   rules:["V3 backfills quantity from the ledger and sets version to 0 for every migrated SKU."],assumption:null},
+  {k:"C",label:"Statement-level triggers (#63)",summary:"Reject UPDATE and DELETE on sku and inventory_ledger, and TRUNCATE, per statement.",pros:["Also blocks TRUNCATE"],cons:["Rejects every UPDATE on sku, which the balance row needs on every write, and blocks the TRUNCATE that test cleanup uses"],h:1,risk:"High",src:["pg_truncate"],
+   rules:["Statement-level triggers reject UPDATE, DELETE and TRUNCATE on sku and inventory_ledger."],assumption:null},
+  {k:"D",label:"Privilege separation",summary:"Revoke UPDATE and DELETE from the application's database role.",pros:["The database refuses by permission, not by trigger"],cons:["The deployment has one database role, so it needs a second role and separate migration credentials first"],h:3,risk:"Med",src:[],
+   rules:["The application's role has no UPDATE or DELETE on inventory_ledger and no DELETE on sku."],assumption:null}
+ ],
+ rec:{k:"A",why:"It upgrades a v1 database in place in one transaction and enforces #24 the way v2 does, without blocking the balance row's UPDATE.",change:"The deployment gets separate migration and application roles. Then D."}},
+
+{id:"A11",kind:"design",review13:true,finding:"Trigger error",q:"Which error does the append-only trigger raise?",
+ quote:{text:"[A11] The append-only trigger raises SQLSTATE P0001 (plpgsql RAISE EXCEPTION) rather than a privilege error: the tests assert the state, and no role separation exists in this deployment to make 42501 truthful.",from:"DECISIONS-ADDED.md@cad5c77 (A11)"},
+ why:"E3's triggers need an SQLSTATE the tests can assert. A privilege error (42501) would claim a role separation this deployment doesn't have (E3 rejects it); RAISE EXCEPTION gives P0001 with a message naming the operation and the table.",
+ detail:[
+  "P0001 (raise_exception) is PL/pgSQL's default for RAISE EXCEPTION; the migration names it anyway, so the code can't drift.",
+  "An application write that hits a trigger is a bug; it answers 500 through the catch-all (S6)."],
+ examples:[],
+ by:["E3","G5"],
+ options:[
+  {k:"A",label:"P0001 from RAISE EXCEPTION",summary:"forbid_row_change() raises P0001 with \"<operation> on <table> is not allowed\".",pros:["True to what happened","One SQLSTATE for every forbidden change"],cons:["Not a permission error, so tools that watch for 42501 don't see it"],h:0.25,risk:"Low",src:["pg_raise"],
+   rules:["forbid_row_change() raises SQLSTATE P0001 with the message \"<TG_OP> on <TG_TABLE_NAME> is not allowed\" (RAISE EXCEPTION … USING ERRCODE = 'P0001'). Tests assert the SQLState P0001 and that the balance and the ledger count are unchanged."],
+   assumption:null},
+  {k:"B",label:"42501 insufficient_privilege",summary:"Raise the error a revoked grant would give.",pros:["Matches what a permission-based setup reports"],cons:["Claims a role separation this deployment doesn't have"],h:0.25,risk:"Low",src:[],
+   rules:["forbid_row_change() raises SQLSTATE 42501."],assumption:null}
+ ],
+ rec:{k:"A",why:"It reports what actually refused the change, and the tests only need a stable SQLSTATE.",change:"The deployment separates roles (E3-D). Then B."}},
+
+{id:"A14",kind:"design",review13:true,finding:"Balance invariant",q:"Is quantity = SUM(quantity_delta) kept by the database or asserted by tests?",
+ quote:{text:"[A14] quantity = SUM(quantity_delta) is asserted by tests, not maintained by a trigger (DESIGN-V2 §5 alt. 7): the conditional UPDATE must stay the single statement that decides and returns the balance.",from:"DECISIONS-ADDED.md@cad5c77 (A14)"},
+ why:"E1 stores stock twice: the balance row and the ledger. A trigger could keep them equal, but then the trigger, not the conditional UPDATE, decides and returns the balance, and every write pays for a second statement. v2 asserts the invariant in tests instead.",
+ detail:[
+  "The write inserts the ledger row in the same transaction as the UPDATE, and only when the UPDATE changed the balance (E1), so a committed change always has both.",
+  "The triggers (E3) stop an UPDATE or DELETE on the ledger, so a committed ledger row can't change later."],
+ examples:[],
+ by:["E1","E3","V1"],
+ options:[
+  {k:"A",label:"Asserted by tests",summary:"A test helper compares every SKU's quantity with its ledger sum after the tests that could break it.",pros:["The write stays one decision in one statement","No extra work per write"],cons:["A bug that skips the ledger insert is caught by tests, not refused by Postgres"],h:1,risk:"Low",src:[],
+   rules:["quantity = SUM(quantity_delta) per SKU is asserted by tests, not maintained by a trigger or constraint: the conditional UPDATE stays the one statement that decides and returns the balance, and the ledger row goes in the same transaction (E1). The test helper Invariants (balanceMismatches: SKUs whose quantity differs from their ledger sum; minQuantity: never below 0) runs at the end of every concurrency test and after the V3 backfill; InventoryServiceTest#balanceEqualsLedgerSum and InventoryPagingIntegrationTest#pageQuantitiesMatchLedgerSum check it too."],
+   assumption:null},
+  {k:"B",label:"A trigger keeps the balance",summary:"An AFTER INSERT trigger on inventory_ledger updates sku.quantity.",pros:["The two can't disagree"],cons:["The trigger, not the conditional UPDATE, decides and returns the balance, and each write runs a second UPDATE"],h:3,risk:"Med",src:[],
+   rules:["An AFTER INSERT trigger on inventory_ledger updates sku.quantity."],assumption:null},
+  {k:"C",label:"A constraint trigger checks the sum at commit",summary:"A deferred constraint trigger compares quantity with the ledger sum when the transaction commits.",pros:["Postgres refuses a mismatch"],cons:["Sums the SKU's whole ledger on every commit, the cost E1 removes"],h:3,risk:"Med",src:[],
+   rules:["A deferred constraint trigger checks quantity against the ledger sum at commit."],assumption:null}
+ ],
+ rec:{k:"A",why:"It keeps E1's single deciding statement and costs nothing per write; the tests that could break the invariant check it.",change:"Something other than the service writes to these tables. Then C."}},
+
+{id:"A18",kind:"gap",review13:true,finding:"Cleared key row",q:"What does a keyed POST get when its key's row is committed without a stored response?",
+ quote:{text:"[Y4] … The R2 claim inserts them NULL; an UPDATE in the same transaction sets all three, and a CHECK allows only all NULL or all set, so no committed row is incomplete. A replay sends the stored status, Content-Type and body unchanged.",from:"CLAUDE.md (Y4)"},
+ why:"The app completes every claim in the claim's transaction or rolls it back, so a committed row whose status, content_type and body are all NULL only appears when someone clears them by hand, as v2's README retention clean-up does (main has none; #25). Main then throws IllegalStateException, which answers 500 and looks like a server fault. v2 treats the key as used up (A18).",
+ detail:[
+  "v2's replay branch returns Keyed.Invalid when the stored status is NULL, next to the operation, skuId, request-hash and age checks (IdempotencyStore.java@cad5c77).",
+  "The answer is not stored and nothing is written, so the row stays as the operator left it."],
+ examples:[],
+ by:["R2","Y4","G14","T1"],
+ options:[
+  {k:"A",label:"IllegalStateException → 500 (main)",summary:"Keep main's replay branch: a row without a response is a server fault.",pros:["No behaviour change from main","Tombstones stay with #25, which adds the clean-up that creates them"],cons:["A 500 suggests a server fault where an operator cleared the row"],h:0,risk:"Low",src:[],
+   rules:["A committed idempotency_keys row with a NULL status throws IllegalStateException, which answers 500 \"Internal server error\"."],assumption:null},
+  {k:"B",label:"400 \"Invalid request\" (v2's A18)",summary:"The key is used up: reject it like a mismatched or expired key.",pros:["Same answer as v2","Never a 500 for an operator action"],cons:["Defines tombstone behaviour before #25 adds the clean-up that creates tombstones"],h:0.5,risk:"Low",src:[],
+   rules:[
+    "A committed idempotency_keys row whose status, content_type and body are NULL answers 400 \"Invalid request\" (IdempotencyStore.Keyed.Invalid), whatever its age: it is never replayed, the write never runs, and it never causes a 500. The answer is not stored. Main has no retention clean-up that clears responses (#25).",
+    "Test: IdempotencyStoreTest#tombstonedRowIsRejectedNotReplayed; at the API, a keyed POST whose key row has a NULL response gets 400 text/plain \"Invalid request\", writes no ledger row and changes no stock."],
+   assumption:"An `Idempotency-Key` whose stored response was cleared can't be reused; sending it again returns 400."}
+ ],
+ rec:{k:"A",why:"Main has no retention clean-up, so no such row arises in normal operation, and the tombstone behaviour belongs to #25 (C-16).",change:"You want v1 to answer as v2 does. Then B."}},
+
+{id:"A33",kind:"design",review13:true,finding:"Explicit Idempotency-Key call",q:"Where does Idempotency-Key handling sit once nothing needs ordering against a retry?",
+ quote:{text:"[Z1] Idempotency-Key handling is cross-cutting advice (Idempotent Receiver): @Idempotent(Operation) on the service's stock-write methods, applied by a programmatic spring-aop Advisor …\n[Z1] The proxy order on stock writes is [Retry, Idempotency, Tx].",from:"CLAUDE.md (Z1)"},
+ why:"Z1's advice existed to sit between @Retryable and a SERIALIZABLE transaction, so that a retry re-ran the claim in a new transaction. E1 removes both, and the advice would only add a pointcut, arguments read by position, a per-method result strategy and a REQUIRES_NEW that suspends a caller's transaction. v2 replaced it with an explicit call (#81, DESIGN-V2 §10).",
+ detail:[
+  "At READ COMMITTED a concurrent claim of the same fresh key blocks on the primary key until the first transaction ends, then finds the committed row and replays it; after a rollback it claims the key itself (probe on postgres:18). No 40001 is raised.",
+  "TransactionSynchronizationManager reports no isolation (null) for a caller at ISOLATION_DEFAULT, which is READ COMMITTED on Postgres, so run joins it.",
+  "The canonical request is the quantity's decimal digits, the same bytes main hashes, so keys stored before the change still replay."],
+ examples:[],
+ by:["Z1","E1","R2","Y3","G14","T1"],
+ options:[
+  {k:"A",label:"Explicit call to IdempotencyStore.run",summary:"The service checks the key and the skuId, then passes the write to IdempotencyStore.run, which claims, writes and stores in one READ COMMITTED transaction.",
+   pros:["One visible call and one transaction","Joins a caller's transaction instead of suspending it","Deletes the advisor, pointcut and result-strategy types"],
+   cons:["The service names IdempotencyStore"],h:3,risk:"Low",src:["pg_uniq","sf_prop"],
+   rules:[
+    "Idempotency-Key handling is an explicit call (supersedes Z1): InventoryService's add and purchase check the key (IdempotencyKey.parse) and the skuId (A34), then pass the write to IdempotencyStore.run(key, operation, skuId, canonicalRequest, write). run opens a READ COMMITTED transaction (PROPAGATION_REQUIRED, never suspending a caller's), or joins a READ COMMITTED or DEFAULT caller's transaction and refuses any other isolation with IllegalStateException before any I/O; when joined, the caller's now() (T1) and rollback scope apply. In that transaction run claims the key, runs the write and stores the response, or replays or rejects (R2, S8, T1, A18). Without a key, the service's own TransactionTemplate (READ COMMITTED, PROPAGATION_REQUIRED) runs the write. No spring-aop advice, no annotation and no generic result strategy.",
+    "The domain's KeyedResponses interface (toStored(String skuId, StockOutcome outcome)), implemented by the web layer's OutcomeResponses, renders the outcome as the stored response inside the claim's transaction, so the domain imports no HTTP type (Z2). The canonical request on both POSTs is the quantity's decimal digits, so the Y3 hash bytes are unchanged and keys stored before this change still replay.",
+    "Test: run outside a transaction opens a READ COMMITTED one; inside a READ COMMITTED or DEFAULT outer transaction it joins it (rolled back with it), and a failing joined write marks the caller rollback-only; inside a REPEATABLE READ or SERIALIZABLE one it throws IllegalStateException before any row is written; a second run with the same fresh key waits on the first's claim, then returns its response without running its own write; after the first rolls back, the second claims and writes; a key row stored before V3 replays byte for byte."],
+   assumption:null},
+  {k:"B",label:"Keep the advice at READ COMMITTED",summary:"The @Idempotent advice stays, with PROPAGATION_REQUIRED and no retry around it.",pros:["Controller and service stay unaware of the store"],cons:["Keeps a pointcut, arguments read by position and a per-method result strategy that only existed to sit between a retry and a SERIALIZABLE transaction"],h:1,risk:"Med",src:[],
+   rules:["Keep Z1's advice, at READ COMMITTED with PROPAGATION_REQUIRED."],assumption:null},
+  {k:"C",label:"Store the domain outcome (#83)",summary:"Store the outcome, not the rendered response, and render it on replay.",pros:["The domain never sees a rendered response"],cons:["Changes the stored format, so keys stored before the change need converting; it is #83's scope"],h:4,risk:"Med",src:[],
+   rules:["The idempotency row stores the domain outcome; a replay renders it again."],assumption:null}
+ ],
+ rec:{k:"A",why:"It is v2's shape (#81): one visible call, one transaction, and nothing left over from the retry.",change:"Idempotency must wrap writes the service doesn't own. Then B."}},
+
+{id:"A34",kind:"gap",review13:true,finding:"Check order",q:"In what order are a POST's body, Idempotency-Key and skuId checked, and where?",
+ quote:{text:"[U3] Order on both POSTs: body validation (@Valid, controller) → Idempotency-Key format (@Idempotent interceptor, 400) → skuId pattern (service check; run by the interceptor before the claim when a key is present; create 400, purchase 404) → claim and stock write.",from:"CLAUDE.md (U3)"},
+ why:"With the advice gone (A33), the key-format and skuId checks that it ran before the claim move into the service. A request with both a malformed key and a malformed skuId still needs one defined answer, and neither rejection may touch the database or be stored.",
+ detail:[
+  "A malformed key wins over a malformed skuId: a keyed purchase of -a with key \"nope\" gets 400, not 404, as on main.",
+  "Each service method names its own answer for a malformed skuId (create 400, purchase 404), so SkuId no longer maps it per idempotency Operation."],
+ examples:[],
+ by:["U3","S2","S3","G11","A33"],
+ options:[
+  {k:"A",label:"Body → key format → skuId → claim, each checked once in the service",summary:"Main's order, with the interceptor's two checks moved into the service.",
+   pros:["Same answers as main","Each check runs once, before any I/O"],cons:["Both writes repeat the two checks"],h:1,risk:"Low",src:[],
+   rules:[
+    "Order on both POSTs: body validation (@Valid, controller) → Idempotency-Key format (service, 400) → skuId pattern (service; create 400, purchase 404) → claim and write (IdempotencyStore.run when a key is present). The key and the skuId are each checked once, in the service, before any database or idempotency I/O, and neither answer is stored. Each service method names its own answer for a malformed skuId; SkuId depends on no idempotency type.",
+    "Test: InventoryServiceWriteChecksTest (a malformed key, \"\" included, is 400 before anything else and wins over a malformed skuId; a malformed skuId, with or without a key, touches no repository, transaction or idempotency row); IdempotencyHeaderOrderTest (a bad body wins over a bad key); IdempotencyApiIntegrationTest (neither answer is stored, and the key stays usable)."],
+   assumption:"On both POSTs an invalid body wins over an invalid `Idempotency-Key`, which wins over an invalid SKU ID. None of these answers is remembered, so the key can be sent again."},
+  {k:"B",label:"skuId before the key format",summary:"Check the skuId first, then the key.",pros:["The SKU's own answer (404 on purchase) comes first"],cons:["A malformed key could get 404 on purchase, so S3's 400 would depend on the SKU"],h:1,risk:"Low",src:[],
+   rules:["Order on both POSTs: body → skuId pattern → Idempotency-Key format → claim."],assumption:null},
+  {k:"C",label:"One SkuId check per Operation",summary:"Keep a shared SkuId helper that picks the malformed-skuId answer from the idempotency Operation.",pros:["One place for both answers"],cons:["The domain's SkuId depends on idempotency.Operation, a dependency the layout removes (A37)"],h:0.5,risk:"Low",src:[],
+   rules:["SkuId maps a malformed skuId to each Operation's answer."],assumption:null}
+ ],
+ rec:{k:"A",why:"It keeps main's observable order and moves the interceptor's checks into the service without running either twice.",change:"You want a malformed skuId to win over a malformed key. Then B."}},
+
+{id:"A37",kind:"design",review13:true,finding:"Package layout",q:"Where does app-wide HTTP code live, and which types and members are public?",
+ quote:{text:"[Z2] … a web package (com.kgtech.inventoryapi.inventory.web: InventoryController, InventoryErrorAdvice, JsonAcceptForGetFilter, TextErrors, InventoryQuantity, OutcomeResponses, InventoryApi …)",from:"CLAUDE.md (Z2)"},
+ why:"The error advice, the Tomcat valve and the container settings serve every path (G10, S6, C1), not only the inventory feature, yet they live in inventory.web. The layout review that #86 applies to v2 moves them to an app-wide web package and narrows each package's public types to what another package uses. #87 applies the same layout to v1.",
+ detail:[
+  "InventoryErrorAdvice keeps its name, so the tests and log lines that match its simple name are unchanged; its logger category moves with the package, to com.kgtech.inventoryapi.web.InventoryErrorAdvice.",
+  "TextErrors moves whole rather than split, so S5 keeps one helper; only the three texts inventory.web renders have public factories.",
+  "@OpenAPIDefinition with its title and version moves off InventoryController to web.OpenApiConfiguration; openapi.yaml is byte-identical.",
+  "idempotency is the inventory feature's Idempotency-Key support (its operations, skuId and request hash are inventory's), though it imports no inventory type."],
+ examples:[],
+ by:["D10","Z2","S5","S6","C1","C2","Z3"],
+ options:[
+  {k:"A",label:"App-wide HTTP in web; feature endpoints in inventory.web, all package-private",summary:"v2's layout (#86) without v2's details API, request guard and Jackson settings.",
+   pros:["Code that serves every path lives outside the feature","Public types are exactly the cross-package contract"],cons:["Many files move in one change"],h:3,risk:"Low",src:[],
+   rules:[
+    "App-wide HTTP code lives in com.kgtech.inventoryapi.web, which depends on no feature package: InventoryErrorAdvice (name kept), TextErrors, TextErrorReportValve, ServletContainerConfiguration (the Tomcat customizer and the DispatcherServlet), OpenApiConfiguration (@OpenAPIDefinition, API title and version) and HttpConstants. Its public types are HttpConstants and TextErrors; TextErrors' only public members are skuNotFound(), insufficientInventory() and invalidRequest(), the ones inventory.web uses, and its texts, of(…), internalServerError() and textFor stay package-private.",
+    "com.kgtech.inventoryapi.inventory.web holds the feature's endpoints and filters, all package-private: InventoryController, JsonAcceptForGetFilter, JsonAcceptForPostInterceptor, OutcomeResponses, StoredResponses, Paging (the next-page Link and the repeated-after check), InventoryQuantity and InventoryApi. idempotency is the inventory feature's Idempotency-Key support and imports no inventory type.",
+    "Members follow D10's visibility rule too: Operation.dbValue() is package-private. The domain's InventoryItem, the spec's wire schema, may carry OpenAPI @Schema annotations; no other domain type does."],
+   assumption:null},
+  {k:"B",label:"Keep app-wide HTTP code in inventory.web",summary:"Leave the advice, the valve and the container settings with the feature.",pros:["No moves"],cons:["Code that serves every path lives in one feature's package, and a second feature would import from it"],h:0,risk:"Low",src:[],
+   rules:["App-wide HTTP code stays in inventory.web."],assumption:null},
+  {k:"C",label:"Split TextErrors into generic and feature halves",summary:"web keeps the generic texts; inventory.web owns \"SKU not found\" and \"Insufficient inventory\".",pros:["Feature texts stay with the feature"],cons:["Two helpers, where S5 requires one"],h:1,risk:"Low",src:[],
+   rules:["web.TextErrors holds the generic texts; inventory.web holds the feature's."],assumption:null}
+ ],
+ rec:{k:"A",why:"It is the layout the review found for v2 (#86), and #87 asks v1 to match it.",change:"A second feature needs its own error texts. Then C."}},
+
+{id:"A38",kind:"design",review13:true,finding:"Write results",q:"What does each write return, and how does the controller render it?",
+ quote:{text:"[R1] Inside the stock transaction, return an outcome value (Ok / NotFound / Insufficient / Overflow); never throw for business results. … The controller maps outcomes to 200/404/400.",from:"CLAUDE.md (R1)"},
+ why:"Main's WriteResult is one wide type that both writes return, so each controller switch needs branches for the other operation's outcomes that can never happen, and the controller has its own switch for unkeyed outcomes that duplicates OutcomeResponses.toStored (C-36 in #28). v2 gives each write a result of its own outcome family and renders every outcome through OutcomeResponses (#86).",
+ detail:[
+  "add returns WriteResult<StockOutcome.Add> (Ok or Overflow) and purchase WriteResult<StockOutcome.Purchase> (Ok, NotFound or Insufficient), so each switch is exhaustive over its own outcomes.",
+  "An unkeyed outcome and a keyed first run go through the same OutcomeResponses.toStored, so an unkeyed answer and its keyed replay are byte-identical (Y4).",
+  "The list's page becomes Page<T>(List<T> items, Optional<Next> next); page types are never serialized, so openapi.yaml doesn't change.",
+  "C-17 and C-35 in #28 are unchanged (#87 amendment 2)."],
+ examples:[],
+ by:["R1","U1","Z2","A33","S5","D6","Y4"],
+ options:[
+  {k:"A",label:"Per-operation results; the controller keeps its own switch for unkeyed outcomes",summary:"WriteResult<O> and Page<T> as in v2, but the controller renders Done outcomes itself (main's rendering; #28 untouched).",pros:["Leaves #28 to its own change"],cons:["Two mappings of the same outcomes (C-36) that must stay byte-identical by hand"],h:2,risk:"Low",src:[],
+   rules:["Each write returns WriteResult<O> of its own outcome family; the controller renders Done outcomes with its own switch and Stored responses through StoredResponses."],assumption:null},
+  {k:"B",label:"Per-operation results; every outcome rendered through OutcomeResponses",summary:"WriteResult<O> with Done, Stored and InvalidRequest, and Page<T>; the controller renders unkeyed and keyed outcomes through OutcomeResponses and StoredResponses.",
+   pros:["One mapping from outcome to response (resolves C-36)","Exhaustive switches with no impossible branches"],cons:["The @WebMvcTest slices import OutcomeResponses"],h:2.5,risk:"Low",src:[],
+   rules:[
+    "Each write returns a result of its own outcome family: sealed interface WriteResult<O> with Done<O>(O outcome), Stored<O>(StoredResponse response) and InvalidRequest<O>(). add returns WriteResult<StockOutcome.Add>, purchase WriteResult<StockOutcome.Purchase>, and purchase's 404 for a malformed skuId is Done(NotFound). StockOutcome (Add: Ok, Overflow; Purchase: Ok, NotFound, Insufficient) is not a WriteResult. KeyedResponses has one method, toStored(String skuId, StockOutcome outcome).",
+    "The controller renders every write result through one mapping: Done → OutcomeResponses.toStored(skuId, outcome), then StoredResponses.toResponseEntity; Stored → StoredResponses.toResponseEntity; InvalidRequest → TextErrors.invalidRequest(). OutcomeResponses takes its error texts from web.TextErrors, and StoredResponses sends the recorded status, Content-Type and body unchanged (Y4), so an unkeyed answer and its keyed replay are byte-identical. The controller has no second switch over outcomes.",
+    "Page<T>(List<T> items, Optional<Next> next), with Next(int limit, String after), is the domain's one page type; list returns Page<InventoryItem>.",
+    "Test: the S12 contract rows stay byte-identical in status, Content-Type and body; OutcomeResponsesTest pins each outcome's stored response; the @WebMvcTest slices @Import(OutcomeResponses.class)."],
+   assumption:null},
+  {k:"C",label:"One wide WriteResult (main)",summary:"Keep one WriteResult for both writes and the list-specific page type.",pros:["No type changes"],cons:["Each controller switch carries branches for another operation's outcomes that can't happen"],h:0,risk:"Low",src:[],
+   rules:["Both writes return the same WriteResult."],assumption:null}
+ ],
+ rec:{k:"A",why:"The per-operation types are v2's (#86); the rendering was left to #28 so that this change stays a port.",change:"You want the duplicate mapping (C-36) gone in this change. Then B."}},
+
+{id:"A39",kind:"design",review13:true,finding:"ArchUnit",q:"How is the package layout checked on the compiled classes?",
+ quote:{text:"[A39] ArchUnit guards the package layout beside PackageBoundaryTest (dependency approved by the owner 2026-09-29) …",from:"DECISIONS-ADDED.md@cad5c77 (A39)"},
+ why:"PackageBoundaryTest scans sources for imports and literals, so it can't see visibility, annotations, or a dependency that has no import line. ArchUnit reads the bytecode, so A37's layout, A38's result types, E2's JdbcClient boundary and E1's no-retry rule each fail a test when broken. The owner approved the dependency on 2026-09-29.",
+ detail:[
+  "ArchUnit 1.5.1 reads Java 25 class files: #86's ArchitectureTest ran 23 of 23 rules on JDK 25.0.2.",
+  "It is not in the Spring Boot BOM, so its version lives only in the catalog (S10).",
+  "javac inlines constants and bytecode keeps no string literals, so the source scans stay in PackageBoundaryTest."],
+ examples:[],
+ by:["A37","A38","E1","E2","Z2","S10"],
+ options:[
+  {k:"A",label:"ArchUnit core, plain JUnit tests",summary:"One ArchitectureTest with @Test methods that call rule.check, beside the source scans.",
+   pros:["Checks what source scans can't: visibility, annotations, bytecode dependencies","One test artifact, versioned in the catalog"],cons:["A new test dependency"],h:2,risk:"Low",src:["archunit"],
+   rules:[
+    "ArchitectureTest (ArchUnit 1.5.x, built with 1.5.1: the core artifact com.tngtech.archunit:archunit, testImplementation, versioned only in gradle/libs.versions.toml, S10) checks the compiled main classes with plain JUnit @Test methods that call rule.check, keeping ArchUnit's default of failing when a rule matches nothing. Rules: no package cycles; web and idempotency depend on no feature package; the domain depends on no inventory.web, web, Spring web or HTTP, servlet or Tomcat type; OpenAPI annotations in the domain only on InventoryItem, and no Jackson annotations in the domain; idempotency uses no HTTP or servlet type; app-wide HTTP classes and the API definition live in web; @RestController classes are package-private in a feature's web package; repositories are package-private and used only in inventory; JdbcClient only in the domain's @Repository classes and IdempotencyStore; one paging helper (inventory.web.Paging) for the next-page Link and the repeated-after check; inventory.web types package-private; the exact public types of web (HttpConstants, TextErrors), idempotency (IdempotencyKey, IdempotencyStore, Operation, StoredResponse) and inventory (InventoryItem, InventoryService, KeyedResponses, Page, SkuId, StockOutcome, WriteResult); web's public code used by another package, and its public fields exactly HttpConstants.IDEMPOTENCY_KEY; members used only inside their class or package are not public; StockOutcome is not a WriteResult; each write returns a WriteResult of its own outcome; KeyedResponses renders the stock family through a typed method; one generic page type; no main class depends on org.springframework.resilience, or on jakarta.persistence, org.springframework.data or org.hibernate outside org.hibernate.validator.",
+    "PackageBoundaryTest (root test package) keeps the recursive source scans that bytecode can't replace: the Idempotency-Key literal only in HttpConstants, header-name constants in tests, no web or HTTP imports in the domain or idempotency, no com.kgtech.inventoryapi.inventory. in web or idempotency sources, no serializable isolation or retry annotation in src/main/java, and no spring.jpa settings in application.yaml. A layout change updates both tests."],
+   assumption:null},
+  {k:"B",label:"Source scans only",summary:"Extend PackageBoundaryTest instead of adding a library.",pros:["No new test dependency"],cons:["Source scans can't see visibility, annotations, or a dependency without an import line"],h:1,risk:"Med",src:[],
+   rules:["PackageBoundaryTest's source scans check the layout."],assumption:null},
+  {k:"C",label:"archunit-junit5",summary:"ArchUnit's JUnit 5 engine with @ArchTest fields.",pros:["Less code per rule"],cons:["A second test-engine artifact for what plain @Test and rule.check already do"],h:2,risk:"Low",src:["archunit"],
+   rules:["ArchitectureTest uses archunit-junit5 and @ArchTest fields."],assumption:null}
+ ],
+ rec:{k:"A",why:"It checks on the bytecode what the source scans can't, with the smallest artifact and no second test engine.",change:"The rule count grows enough that @ArchTest fields save real code. Then C."}}
+);
+Object.assign(REFINES,{
+"E1:A":[
+ {id:"V1",rule:0,from:"Stock is the SUM of inventory_ledger.quantity_delta per SKU. Every write checks the SUM and inserts the delta in one SERIALIZABLE transaction: Add: INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING; then INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, :q, 'add' WHERE (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) <= 9223372036854775807 - :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) + :q)::bigint; no row → Overflow. Purchase: INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, -:q, 'purchase' WHERE EXISTS (SELECT 1 FROM sku WHERE sku_id = :id) AND (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) >= :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) - :q)::bigint; no row → SELECT the sku row in the same transaction: missing → NotFound, otherwise Insufficient. The RETURNING subquery doesn't see the row being inserted, so the balance is the old SUM ± :q. The ledger is append-only: never UPDATE or DELETE inventory_ledger rows (W1).",to:"Superseded by E1: stock is sku.quantity, changed by one conditional statement per write at READ COMMITTED; every change still appends an inventory_ledger row in the same transaction, and triggers keep the ledger append-only (E3)."},
+ {id:"W1",rule:0,from:"Stock writes run at SERIALIZABLE and retry on SQLSTATE 40001 or 40P01 as W2 specifies; X1 sets where the retry and the transaction boundary sit.",to:"Superseded by E1: stock writes run at READ COMMITTED under the sku row's lock, and nothing retries."},
+ {id:"W2",rule:0,from:"Retry SERIALIZABLE stock writes on PessimisticLockingFailureException whose root SQLState is 40001 or 40P01: up to 10 retries, 5–200 ms jittered backoff. The retry wraps the transaction (one new transaction per attempt).",to:"Superseded by E1: nothing retries; there is no retry policy or backoff."},
+ {id:"W2",rule:1,from:"When retries are exhausted, return 500 \"Internal server error\" and log the SKU.",to:"Superseded by E1: there are no retries to exhaust; a database error during a write rolls it back and returns 500 \"Internal server error\" (G6)."},
+ {id:"W2",rule:2,from:"inventory_ledger has an index on sku_id; a test asserts the SUM query uses it. Concurrency tests use at most 8 threads per SKU.",to:"Concurrency tests use at most 8 threads per SKU. inventory_ledger keeps its index on sku_id (SchemaTest asserts it); no application query sums the ledger (E1)."},
+ {id:"X1",rule:0,from:"@Retryable sits on the service's stock-write method and wraps everything beneath it; each attempt runs in one new SERIALIZABLE transaction. Without an Idempotency-Key, the method's TransactionTemplate (ISOLATION_SERIALIZABLE, PROPAGATION_REQUIRED) starts it. With a key, the @Idempotent interceptor, which runs inside the retry, starts it (TransactionTemplate, ISOLATION_SERIALIZABLE, PROPAGATION_REQUIRES_NEW) and runs the claim, the stock write and the stored response in it; the method's TransactionTemplate joins. Stock-write methods have no @Transactional annotation.",to:"Superseded by E1 and A33: nothing retries. Each stock write runs in one READ COMMITTED transaction (PROPAGATION_REQUIRED): the service's TransactionTemplate opens it without an Idempotency-Key, IdempotencyStore.run with one (A33). Stock-write methods have no @Transactional annotation."},
+ {id:"Y2",rule:0,from:"@Retryable(includes = PessimisticLockingFailureException.class, predicate = SerializationFailure.class, maxRetries = 10, …) with @EnableResilientMethods. SerializationFailure implements MethodRetryPredicate and returns true only when NestedExceptionUtils.getMostSpecificCause(t) is an SQLException with SQLState 40001 or 40P01.",to:"Superseded by E1: nothing retries, so there is no @Retryable, no retry predicate and no @EnableResilientMethods."},
+ {id:"Y2",rule:1,from:"Don't add Spring Retry or Apache Commons Lang for retries.",to:"Don't add Spring Retry, Apache Commons Lang or any other retry library; nothing retries (E1)."},
+ {id:"Y2",rule:2,from:"Test: a PessimisticLockingFailureException whose root SQLState is 55P03 is not retried; one with 40001 is.",to:"Test: ArchitectureTest (no main class depends on org.springframework.resilience) and PackageBoundaryTest (no serializable isolation or retry annotation in src/main/java) keep retries out (E1, A39)."},
+ {id:"D4",rule:0,from:"Run stock writes at SERIALIZABLE and retry on PessimisticLockingFailureException with root SQLState 40001/40P01 (see W2).",to:"Stock writes run at READ COMMITTED under the sku row's lock; nothing retries (E1)."},
+ {id:"G7",rule:0,from:"in one transaction, never by a Java-side check alone. There is no balance column to CHECK; SERIALIZABLE plus retries is the guard (W1).",to:"in one READ COMMITTED transaction, never by a Java-side check alone: the conditional UPDATE … WHERE quantity >= :q and CHECK (quantity >= 0) on sku.quantity are the guard, and nothing retries (E1)."},
+ {id:"G12",rule:0,from:"the SUM check in the add's INSERT … WHERE (W1)",to:"the add's conditional UPDATE … WHERE quantity <= 9223372036854775807 - :q (E1)"},
+ {id:"R2",rule:0,from:"; under SERIALIZABLE a concurrent claim may instead raise 40001, and the W1 retry replays (different operation, skuId or request hash → 400 \"Invalid request\").",to:" (different operation, skuId or request hash → 400 \"Invalid request\"). At READ COMMITTED a concurrent claim of the same key blocks on the primary key until the first transaction ends, then replays its response, or claims the key if the first rolled back (E1)."},
+ {id:"S11",rule:0,from:"create path (sku row + first ledger row); add path;",to:"create path (sku row, balance and first ledger row); add path (the conditional UPDATE, E1);"},
+ {id:"S11",rule:0,from:"(400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit)",to:"(400, no ledger row and no version change; seed the balance with Tables.seed, since the API can't reach the limit)"},
+ {id:"S11",rule:0,from:"SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing);",to:"conditional purchase (E1) (200 with remaining, 400 insufficient, 404 missing, 404 when racing an uncommitted create);"},
+ {id:"S11",rule:0,from:"SUM(quantity_delta) never negative after concurrent purchases;",to:"quantity = SUM(quantity_delta) and quantity ≥ 0 after concurrent writes (A14);"},
+ {id:"S11",rule:2,from:"clean tables in @BeforeEach.",to:"use at most 8 threads per SKU; clean tables with Tables.reset in @BeforeEach; assert the invariants (A14) at the end."},
+ {id:"D9",rule:1,from:"and final quantity is 0.",to:"and final quantity is 0, with quantity = SUM(quantity_delta) (A14)."},
+ {id:"C3",rule:1,from:"InventoryService.find checks SkuId.isValid before it starts its read-only transaction (a read-only TransactionTemplate; find has no @Transactional), so an invalid GET skuId borrows no connection.",to:"InventoryService.find checks SkuId.isValid before any database access, then runs one autocommit query with no transaction (E1), so an invalid GET skuId borrows no connection."},
+ {id:"S7",ref:"S7 has no rules of its own; the canonical add and purchase statements are E1's first rule."}
+],
+"E1:B":[],"E1:C":[],"E1:D":[],
+"E2:A":[
+ {id:"D3",rule:0,from:"Spring Data JPA for reads (balances come from native or projection queries that cast SUM(quantity_delta)::bigint, because SUM(bigint) returns numeric); atomic writes are native SQL run through JdbcClient in a repository fragment, inside the attempt's SERIALIZABLE transaction (X1). No @Modifying.",to:"Superseded by E2: all SQL runs through JdbcClient in StockRepository and IdempotencyStore; there is no ORM, repository fragment or @Modifying."},
+ {id:"S1",rule:0,from:"Atomic writes live in a repository fragment (e.g. InventoryWrites + InventoryWritesImpl) and run through JdbcClient. Reads use Spring Data JPA.",to:"Superseded by E2: reads and writes are JdbcClient statements in StockRepository (a package-private @Repository in the inventory package) and IdempotencyStore; there is no repository fragment."},
+ {id:"S1",rule:1,from:"JdbcClient writes (ledger and idempotency) run only inside the attempt's SERIALIZABLE transaction that X1 defines (JpaTransactionManager shares the connection). Never mix a JPA entity change and a JdbcClient write in one transaction.",to:"Superseded by E2: JdbcClient writes (balance row, ledger row and idempotency row) run only inside one READ COMMITTED transaction: the service's TransactionTemplate without an Idempotency-Key, IdempotencyStore.run's with one (A33)."},
+ {id:"D5",rule:0,from:"; spring.jpa.hibernate.ddl-auto=validate.",to:". A merged migration is never edited (V1 and V2 keep their checksums). There is no ddl-auto: SchemaTest and IdempotencySchemaTest assert the migrated schema against Postgres (E2)."},
+ {id:"D1",rule:0,from:"Jackson 3 under tools.jackson, Hibernate 7.x (version from the Spring Boot BOM; 7.4.5 with Boot 4.1.1)).",to:"Jackson 3 under tools.jackson; no JPA or Hibernate ORM (E2); Hibernate Validator, from the Spring Boot BOM, stays for @Valid)."},
+ {id:"D10",rule:0,from:"(SkuRepository, JPA entities, repository fragments)",to:"(StockRepository and its Balance record, E2)"},
+ {id:"C2",rule:4,from:"SQL in its repository (S1)",to:"SQL in StockRepository and IdempotencyStore (E2)"}
+],
+"E2:B":[],"E2:C":[],
+"E3:A":[
+ {id:"G5",rule:0,from:"Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1).",to:"Never delete sku rows or ledger rows, and never update ledger rows: Postgres rejects UPDATE or DELETE on inventory_ledger and DELETE on sku with P0001 (E3, A11). A SKU at 0 keeps its sku row."},
+ {id:"G5",assumption:true,from:"A SKU sold down to 0 still exists:",to:"A SKU sold down to 0 still exists, and the database refuses to delete it:"},
+ {id:"D5",rule:1,from:"Migrations declare the sku table,",to:"Migrations declare the sku table (V3 adds quantity bigint NOT NULL DEFAULT 0 CHECK (quantity >= 0) and version bigint NOT NULL DEFAULT 0, E3),"},
+ {id:"D5",rule:1,from:" and the sku_id collation from G11 (W1).",to:", the sku_id collation from G11 (W1) and V3's append-only triggers (E3)."},
+ {id:"S11",rule:0,from:"COLLATE \"C\" order;",to:"COLLATE \"C\" order; the append-only triggers (P0001) and the V3 backfill (MigrationUpgradeTest, E3);"}
+],
+"E3:B":[],"E3:C":[],"E3:D":[],
+"A11:A":[],"A11:B":[],
+"A14:A":[],"A14:B":[],"A14:C":[],
+"A18:A":[],
+"A18:B":[
+ {id:"R2",rule:0,from:"(different operation, skuId or request hash → 400 \"Invalid request\").",to:"(different operation, skuId or request hash, or a row with no stored response (A18) → 400 \"Invalid request\")."},
+ {id:"S11",rule:0,from:"key older than 24h rejected with 400;",to:"key older than 24h rejected with 400, a key row with no stored response rejected with 400 (A18);"}
+],
+"A33:A":[
+ {id:"Z1",rule:0,from:"Idempotency-Key handling is cross-cutting advice (Idempotent Receiver): @Idempotent(Operation) on the service's stock-write methods, applied by a programmatic spring-aop Advisor (MethodInterceptor + StaticMethodMatcherPointcut) declared as a static @Role(ROLE_INFRASTRUCTURE) @Bean with ObjectProvider dependencies. No @Aspect and no spring-boot-starter-aspectj. InventoryController and InventoryService never reference idempotency types other than the @Idempotent annotation and Operation (the aspect's declarative contract).",to:"Superseded by A33: InventoryService calls IdempotencyStore.run explicitly; there is no spring-aop advice, annotation or pointcut for Idempotency-Key handling."},
+ {id:"Z1",rule:1,from:"The proxy order on stock writes is [Retry, Idempotency, Tx]. Stock writes return WriteResult outcome values, never exceptions, for bad input, so a 400 or 404 fires no MethodRetryEvent.",to:"Superseded by A33 and E1: nothing retries, so there is no proxy order to keep. Writes still return result values, never exceptions, for bad input (A38)."},
+ {id:"Z1",rule:2,from:"InventoryService's TransactionTemplate uses ISOLATION_SERIALIZABLE and PROPAGATION_REQUIRED; before writing it throws IllegalStateException if an active transaction is not SERIALIZABLE.",to:"Superseded by A33: stock writes run at READ COMMITTED (PROPAGATION_REQUIRED), and IdempotencyStore.run refuses a caller's transaction at any isolation other than READ COMMITTED or DEFAULT."},
+ {id:"Z1",rule:3,from:"Test: the retry advisor wraps the idempotency advisor on InventoryService; a keyed 40001 retries the claim in a new transaction; a stock write inside a non-SERIALIZABLE transaction fails.",to:"Superseded by A33: IdempotencyStoreTest and InventoryServiceWriteChecksTest replace the advice-order, keyed-retry and isolation tests."},
+ {id:"Y3",rule:0,from:"+ quantity, computed from the parsed, validated request.",to:"+ the canonical request, computed from the parsed, validated request: the quantity's decimal digits on both POSTs, the same bytes as before A33, so stored keys still replay."}
+],
+"A33:B":[],"A33:C":[],
+"A34:A":[
+ {id:"U3",rule:0,from:"Idempotency-Key format (@Idempotent interceptor, 400) → skuId pattern (service check; run by the interceptor before the claim when a key is present; create 400, purchase 404) → claim and stock write.",to:"Idempotency-Key format (service, 400) → skuId pattern (service, once; create 400, purchase 404) → claim and write, through IdempotencyStore.run when a key is present (A34)."},
+ {id:"S2",rule:1,from:"The service checks it with SkuId.isValid() before any database or idempotency work",to:"The service checks it with SkuId.isValid() once, after a POST's Idempotency-Key format and before any database or idempotency work (A34),"},
+ {id:"S2",rule:1,from:" With an Idempotency-Key, the @Idempotent interceptor runs the same check (IdempotentResults.beforeClaim) before it opens a transaction, and the result is not stored.",to:" The answer is never stored."},
+ {id:"S3",rule:0,from:"The controller passes the raw header to the service; the @Idempotent interceptor checks it.",to:"The controller passes the raw header to the service, which parses it with IdempotencyKey.parse before the skuId check (A34)."}
+],
+"A34:B":[],"A34:C":[],
+"A37:A":[
+ {id:"D10",rule:0,from:"Package by feature (inventory/, idempotency/); inventory/ is split into domain and web sub-packages (Z2).",to:"Package by feature (inventory/, idempotency/), plus web/ for app-wide HTTP: the error advice, the Tomcat valve and container settings, the OpenAPI definition and HttpConstants (A37). inventory/ is split into domain and web sub-packages (Z2). web and idempotency depend on no feature package; idempotency is the inventory feature's Idempotency-Key support, not a generic facility (A37)."},
+ {id:"D10",rule:0,from:"stay package-private in the domain package.",to:"stay package-private in the domain package. Members follow the same rule: Operation.dbValue() is package-private (A37)."},
+ {id:"Z2",rule:0,from:"and a web package (com.kgtech.inventoryapi.inventory.web: InventoryController, InventoryErrorAdvice, JsonAcceptForGetFilter, TextErrors, InventoryQuantity, OutcomeResponses, InventoryApi (API paths, parameter names and OpenAPI texts, C2)).",to:"and a web package whose types are all package-private (com.kgtech.inventoryapi.inventory.web: InventoryController, OutcomeResponses, StoredResponses, Paging (next-page Link and repeated-after check), JsonAcceptForGetFilter, JsonAcceptForPostInterceptor, InventoryQuantity, InventoryApi (API paths, parameter names and OpenAPI texts, C2)). App-wide HTTP lives in com.kgtech.inventoryapi.web (A37: InventoryErrorAdvice, TextErrors, TextErrorReportValve, ServletContainerConfiguration, OpenApiConfiguration, HttpConstants); its public types are HttpConstants and TextErrors, the ones inventory.web uses."},
+ {id:"Z2",rule:0,from:"The domain package never imports Spring MVC or HTTP transport types.",to:"The domain package never imports Spring MVC or HTTP transport types, and web and idempotency import no inventory code (A37)."},
+ {id:"S5",rule:0,from:"with one helper that calls .contentType(MediaType.TEXT_PLAIN);",to:"with one helper, web.TextErrors, that calls .contentType(MediaType.TEXT_PLAIN);"},
+ {id:"S5",rule:0,from:"the Tomcat error valve, which can't",to:"the Tomcat error valve (web.TextErrorReportValve), which can't"},
+ {id:"S6",rule:1,from:"On those library paths InventoryErrorAdvice rethrows",to:"On those library paths the app-wide web.InventoryErrorAdvice (A37) rethrows"},
+ {id:"C1",rule:0,from:"is replaced by TextErrorReportValve, installed by a Tomcat context customizer ordered after Spring Boot's.",to:"is replaced by web.TextErrorReportValve, installed by a Tomcat context customizer (web.ServletContainerConfiguration, A37) ordered after Spring Boot's."},
+ {id:"C1",rule:2,from:"the dispatcherServlet bean is a DispatcherServlet",to:"the dispatcherServlet bean (web.ServletContainerConfiguration, A37) is a DispatcherServlet"},
+ {id:"C1",rule:3,from:"is answered by InventoryErrorAdvice on every path",to:"is answered by web.InventoryErrorAdvice (A37) on every path"},
+ {id:"Z3",rule:0,from:"InventoryErrorAdvice maps Tomcat's",to:"web.InventoryErrorAdvice (A37) maps Tomcat's"},
+ {id:"Z3",rule:0,from:"A repeated after on GET /inventory returns the same 400;",to:"A repeated after on GET /inventory returns the same 400 (checked by inventory.web.Paging, A37);"},
+ {id:"C2",rule:1,from:"The next-page Link is built from",to:"The next-page Link is built by inventory.web.Paging (A37) from"},
+ {id:"C2",rule:4,from:"the query parameter names and the OpenAPI texts.",to:"the query parameter names and the operations' OpenAPI texts. The API-wide OpenAPI title and version live in web.OpenApiConfiguration beside its @OpenAPIDefinition, not on a controller (A37)."},
+ {id:"C2",rule:4,from:"InventoryController, JsonAcceptForGetFilter and the Link builder static-import them",to:"InventoryController, JsonAcceptForGetFilter and inventory.web.Paging static-import them"},
+ {id:"C2",rule:4,from:"Domain constants stay beside the logic that owns them:",to:"Other constants stay beside the logic that owns them:"},
+ {id:"C2",rule:4,from:"error texts in TextErrors (G6)",to:"error texts in web.TextErrors (G6, A37)"}
+],
+"A37:B":[],"A37:C":[],
+"A38:A":[],
+"A38:B":[
+ {id:"R1",rule:0,from:"Rejections of a malformed skuId or Idempotency-Key, and of a reused key, are outcome values too. The controller maps outcomes to 200/404/400.",to:"Each write returns a WriteResult of its own outcome family (add WriteResult<StockOutcome.Add>, purchase WriteResult<StockOutcome.Purchase>): Done(outcome), Stored(response) or InvalidRequest (A38). Rejections of a malformed skuId or Idempotency-Key, and of a reused key, are result values too. The controller maps every result to 200/404/400 through OutcomeResponses and StoredResponses, with no branch for another operation's outcomes (A38)."},
+ {id:"U1",rule:0,from:"The add returns Ok or Overflow.",to:"The add returns WriteResult<StockOutcome.Add>, whose outcome is Ok or Overflow (A38)."},
+ {id:"Z2",rule:0,from:"(com.kgtech.inventoryapi.inventory: InventoryService, SkuRepository, InventoryWrites/InventoryWritesImpl, Sku, SkuQuantity, StockOutcome, WriteResult, SkuId, InventoryItem, InventoryPage, SerializationFailure, StockWriteFailureLogger)",to:"(com.kgtech.inventoryapi.inventory: InventoryService, StockRepository, Balance, StockOutcome, WriteResult, KeyedResponses, Page, SkuId, InventoryItem)"},
+ {id:"S5",rule:0,from:"Build every error response (advice and controller) with one helper, web.TextErrors, that calls .contentType(MediaType.TEXT_PLAIN);",to:"Every error response takes its status, Content-Type and body from one helper, web.TextErrors, that calls .contentType(MediaType.TEXT_PLAIN): the advice and the controller return the helper's ResponseEntity, and a write's outcome goes through OutcomeResponses, which copies it into a StoredResponse, and StoredResponses, which sends that unchanged (A38);"},
+ {id:"D6",rule:0,from:"the controller's 404/400 outcome responses use the same helper.",to:"the controller's 404 and 400 responses take their status, Content-Type and body from the same helper, directly or, for a write's outcome, through OutcomeResponses and StoredResponses (A38)."}
+],
+"A38:C":[],
+"A39:A":[],"A39:B":[],"A39:C":[]
+});
+/* A34 now owns the G11 text Z1 introduced (the skuId is checked in the service); Z1 is superseded by A33 and the text is unchanged, so only G11's cross-reference moves. */
+REFINES["Z1:B"].filter(e=>e.id==="G11").forEach(e=>{ e.credit="A34"; });
+PAIR_RULES.push(
+ {a:["A18",["A","B"]],b:["G8",["D"]],msg:"A18 only matters if the API accepts an Idempotency-Key."},
+ {a:["A33",["A","B","C"]],b:["G8",["D"]],msg:"A33 only matters if the API accepts an Idempotency-Key."}
+);
 (function(){
 const BUDGET = 16;
 const byId = Object.fromEntries(DECISIONS.map(d=>[d.id,d]));
@@ -1990,7 +2366,7 @@ function renderCard(d){
   const srcs=keys.map((k,i)=>{ const s=SRC[k]; return `<li id="s-${d.id}-${i+1}"><span class="n">[${i+1}]</span><span class="u"><a href="${esc(s.u)}" target="_blank" rel="noopener">${esc(s.t)}</a><span class="vtag ${s.s}">${s.s==="V"?"Verified":"Unverified"}</span>${s.test?`<span class="test"><b>${s.s==="V"?"Confirm":"Test to prove"}:</b> ${esc(s.test)}</span>`:""}</span></li>`; }).join("");
   return `<article class="card" id="${d.id}" data-id="${d.id}">
     <div class="card-h">
-      <div class="card-meta"><span class="cid">${d.id}</span><span class="tag ${d.kind}">${d.kind==="gap"?"Spec gap":"Design choice"}</span>${d.review?'<span class="tag review">Review follow-up</span>':""}${d.review2?`<span class="tag review">Review round 2 · ${esc(d.finding)}</span>`:""}${d.review3?`<span class="tag review">Review round 3</span>`:""}${d.review4?`<span class="tag review">Review round 4</span>`:""}${d.review5?`<span class="tag review">Round 5 · ${esc(d.finding)}</span>`:""}${d.review6?`<span class="tag review">Round 6 · ledger as truth</span>`:""}${d.review7?`<span class="tag review">Round 7 · SERIALIZABLE retries</span>`:""}${d.review8?`<span class="tag review">Round 8 · ${esc(d.finding)}</span>`:""}${d.review9?`<span class="tag review">Round 9 · ${esc(d.finding)}</span>`:""}${d.review10?`<span class="tag review">Round 10 · ${esc(d.finding)}</span>`:""}${d.review11?`<span class="tag review">Round 11 · ${esc(d.finding)}</span>`:""}${d.review12?`<span class="tag review">Round 12 · ${esc(d.finding)}</span>`:""}<span class="pill open" data-role="status">Open</span></div>
+      <div class="card-meta"><span class="cid">${d.id}</span><span class="tag ${d.kind}">${d.kind==="gap"?"Spec gap":"Design choice"}</span>${d.review?'<span class="tag review">Review follow-up</span>':""}${d.review2?`<span class="tag review">Review round 2 · ${esc(d.finding)}</span>`:""}${d.review3?`<span class="tag review">Review round 3</span>`:""}${d.review4?`<span class="tag review">Review round 4</span>`:""}${d.review5?`<span class="tag review">Round 5 · ${esc(d.finding)}</span>`:""}${d.review6?`<span class="tag review">Round 6 · ledger as truth</span>`:""}${d.review7?`<span class="tag review">Round 7 · SERIALIZABLE retries</span>`:""}${d.review8?`<span class="tag review">Round 8 · ${esc(d.finding)}</span>`:""}${d.review9?`<span class="tag review">Round 9 · ${esc(d.finding)}</span>`:""}${d.review10?`<span class="tag review">Round 10 · ${esc(d.finding)}</span>`:""}${d.review11?`<span class="tag review">Round 11 · ${esc(d.finding)}</span>`:""}${d.review12?`<span class="tag review">Round 12 · ${esc(d.finding)}</span>`:""}${d.review13?`<span class="tag review">Round 13 · ${esc(d.finding)}</span>`:""}<span class="pill open" data-role="status">Open</span></div>
       <h2>${md(d.q)}</h2>
     </div>
     <div class="card-b">
@@ -2015,7 +2391,7 @@ function renderCard(d){
   </article>`;
 }
 function renderNav(){
-  const groups=[["gap","Spec gaps",d=>d.kind==="gap"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10&&!d.review11&&!d.review12],["design","Design choices",d=>d.kind==="design"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10&&!d.review11&&!d.review12],["review","Review follow-ups",d=>d.review],["review2","Review round 2",d=>d.review2],["review3","Review round 3",d=>d.review3],["review4","Review round 4",d=>d.review4],["review5","Round 5: ledger and bigint",d=>d.review5],["review6","Round 6: ledger as truth",d=>d.review6],["review7","Round 7: SERIALIZABLE retries",d=>d.review7],["review8","Round 8: retry and transaction boundary",d=>d.review8],["review9","Round 9: story review follow-ups",d=>d.review9],["review10","Round 10: PR #14 review",d=>d.review10],["review11","Round 11: PR #18 review",d=>d.review11],["review12","Round 12: codebase critique",d=>d.review12]];
+  const groups=[["gap","Spec gaps",d=>d.kind==="gap"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10&&!d.review11&&!d.review12&&!d.review13],["design","Design choices",d=>d.kind==="design"&&!d.review&&!d.review2&&!d.review3&&!d.review4&&!d.review5&&!d.review6&&!d.review7&&!d.review8&&!d.review9&&!d.review10&&!d.review11&&!d.review12&&!d.review13],["review","Review follow-ups",d=>d.review],["review2","Review round 2",d=>d.review2],["review3","Review round 3",d=>d.review3],["review4","Review round 4",d=>d.review4],["review5","Round 5: ledger and bigint",d=>d.review5],["review6","Round 6: ledger as truth",d=>d.review6],["review7","Round 7: SERIALIZABLE retries",d=>d.review7],["review8","Round 8: retry and transaction boundary",d=>d.review8],["review9","Round 9: story review follow-ups",d=>d.review9],["review10","Round 10: PR #14 review",d=>d.review10],["review11","Round 11: PR #18 review",d=>d.review11],["review12","Round 12: codebase critique",d=>d.review12],["review13","Round 13: align v1 with v2 (#87)",d=>d.review13]];
   document.getElementById("nav").innerHTML=groups.map(([k,t,f])=>`<div class="navgroup"><h3>${t}</h3><ul class="nav">${DECISIONS.filter(f).map(d=>`<li data-nav="${d.id}"><a href="#${d.id}"><span class="nid">${d.id}</span><span class="nt">${esc(d.q)}</span><span class="dot" aria-hidden="true"></span></a></li>`).join("")}</ul></div>`).join("");
 }
 function update(){
@@ -2092,7 +2468,8 @@ function genDecisions(conf){
 }
 function refinesFor(id){
   if(typeof REFINES==="undefined") return [];
-  const out=[]; for(const d of DECISIONS){ const c=state[d.id].choice; if(!c) continue; (REFINES[d.id+":"+c]||[]).forEach(e=>{ if(e.id===id) out.push({...e,by:d.id}); }); }
+  /* e.credit: the chosen card that now owns a refinement a superseded card made (Round 13: Z1's G11 text → A34). */
+  const out=[]; for(const d of DECISIONS){ const c=state[d.id].choice; if(!c) continue; (REFINES[d.id+":"+c]||[]).forEach(e=>{ if(e.id===id) out.push({...e,by:e.credit&&state[e.credit]&&state[e.credit].choice?e.credit:d.id}); }); }
   return out;
 }
 function effRules(id){
