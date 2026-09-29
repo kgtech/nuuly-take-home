@@ -99,8 +99,8 @@ Check each item and report every failure to me with a proposed fix.
   - Don't edit the issue body. The original acceptance criteria stay as written; changes live in the comments.
   - Rejected proposals are recorded in the run log only, not posted as issue comments. Step 9 must include them.
 - When I reject a proposal tied to a review finding, re-invoke the fixer to reply in that thread, prefixed `[Round N - Fixer]`: "Owner decision: not changed in this PR." The thread stays unresolved. Reviewers and the verifier treat it like a rebutted finding: don't re-raise it, and report it as open by owner decision.
-- Decisions recorded in DECISIONS.md or CLAUDE.md come from the decision board (S9). If I approve a change to one, the orchestrator:
-  1. Dumps the board state from the board artifact's database (`https://claude.ai/artifact/Ma9JpFCmsLHQpJgWXbwpBT`, collection `decisions`, one JSON file per decision) to a scratch directory.
+- Decisions recorded in DECISIONS.md or CLAUDE.md come from the decision board (S9). Final's board is the artifact `https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG`; main's board (`https://claude.ai/artifact/Ma9JpFCmsLHQpJgWXbwpBT`) is read only (OD-10). If I approve a change to one, the orchestrator:
+  1. Dumps the board state from the board artifact's database (`https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG`, collection `decisions`, one JSON file per decision) to a scratch directory.
   2. Runs `ai/export-board.mjs` against the unchanged board and that dump, with the date from the committed DECISIONS.md header, and confirms the output matches the committed DECISIONS.md and CLAUDE.md byte for byte. If it doesn't, stop and report; change nothing. (The script needs the `playwright` package next to it: copy it into a scratch directory with `npm i playwright` there. If the package and the installed browsers are different versions, set `PW_EXE` to an installed Chromium.)
   3. Updates `ai/decision-board.html`.
   4. Regenerates DECISIONS.md and CLAUDE.md with the same script against the updated board and today's date.

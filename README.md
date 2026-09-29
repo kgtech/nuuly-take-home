@@ -1,5 +1,7 @@
 # Nuuly Inventory API, V2
 
+
+**Decisions:** the decision board for this build is a private artifact, https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG (main's board is separate and read only). [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md) are generated from it (`ai/export-board.mjs`); its database is dumped in [`ai/final/board-db/`](ai/final/board-db/) so the exports can be reproduced without the artifact.
 V2 of the inventory service for the Nuuly Services assessment: it receives stock by SKU, processes purchases and lists inventory through the API in [`openapi.yaml`](openapi.yaml), and adds a React front end in [`frontend/`](frontend/). It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1) and PostgreSQL 18.
 
 The storage design is V2's own and is documented in [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md): each SKU's stock is a row in Postgres, changed with a conditional `UPDATE` so concurrent purchases never oversell, every change is appended to a ledger the database keeps append-only, and idempotent responses are stored beside the claim that made them. Postgres is the only store; a cache was part of the first V2 design and was removed (DESIGN-V2 §9).

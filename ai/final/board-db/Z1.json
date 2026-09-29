@@ -1,0 +1,7 @@
+{
+  "choice": "B",
+  "notes": "Moving idempotency into a MethodInterceptor (@Idempotent) decouples InventoryController and InventoryService from IdempotencyStore while keeping @Retryable as the outermost wrapper ([Retry, Idempotency, Tx]). Returning WriteResult outcome values instead of throwing exceptions keeps bad requests (400/404) from firing MethodRetryEvent and adding WARN logs from StockWriteFailureLogger. spring-aop (MethodInterceptor + StaticMethodMatcherPointcut) is already on the classpath, avoids adding spring-boot-starter-aspectj, and a static @Role(ROLE_INFRASTRUCTURE) @Bean with ObjectProvider dependencies keeps bean post-processing order deterministic. The isolation check keeps InventoryService agnostic of the key while failing fast if a future caller runs a stock write inside a non-SERIALIZABLE transaction.",
+  "why": {
+    "A": "Doesn't align with standard idempotency practices; the key should be passed through so the service can handle conversions."
+  }
+}

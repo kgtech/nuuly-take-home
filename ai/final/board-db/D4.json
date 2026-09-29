@@ -1,0 +1,6 @@
+{
+  "choice": "D",
+  "notes": "This is the initial approach. A production system could have a cart service and even a reservation service that holds inventory for a set short period of time. Similar to purchasing ibventory from Ticketmaster the inventory is reserved for x minutes then released if not purchased. ",
+  "updatedAt": "2026-09-24T22:00:25.067Z",
+  "why": {}
+}

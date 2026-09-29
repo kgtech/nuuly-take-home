@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "Nothing validates it.",
+    "C": "It adds a response header the spec never had."
+  }
+}

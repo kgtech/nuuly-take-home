@@ -1,0 +1,10 @@
+{
+  "choice": "A",
+  "notes": "Owner OD-2",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "A header is invisible in a URL, a curl line and the Swagger UI, and needs a default for callers that send none.",
+    "C": "Same visibility problem as a header, and caches key on the URL.",
+    "D": "The spec's four operations would carry behaviour the spec does not list (idempotency keys, limit, details)."
+  }
+}

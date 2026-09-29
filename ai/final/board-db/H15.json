@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Approved at the plan gate (2026-09-29)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "Source scans cannot see visibility, annotations or a dependency with no import line.",
+    "C": "It names classes and rules the code does not have."
+  }
+}
