@@ -1,5 +1,9 @@
 package com.kgtech.inventoryapi.inventory.web;
 
+import java.io.IOException;
+
+import jakarta.servlet.http.HttpServletResponse;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -30,6 +34,15 @@ final class TextErrors {
                 .headers(headers)
                 .contentType(MediaType.TEXT_PLAIN)
                 .body(body);
+    }
+
+    /** Writes {@code error} straight to the servlet response, for filters that answer before Spring MVC (S5). */
+    static void write(HttpServletResponse response, ResponseEntity<String> error) throws IOException {
+        response.setStatus(error.getStatusCode().value());
+        response.setContentType(MediaType.TEXT_PLAIN_VALUE);
+        response.setCharacterEncoding("UTF-8");
+        response.getWriter().write(String.valueOf(error.getBody()));
+        response.flushBuffer();
     }
 
     static ResponseEntity<String> skuNotFound() {

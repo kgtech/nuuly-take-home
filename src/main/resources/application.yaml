@@ -8,6 +8,12 @@ spring:
       accept-float-as-int: false
       fail-on-trailing-tokens: true       # {"quantity":1}{"quantity":100} is malformed JSON, not quantity 1
       fail-on-unknown-properties: false   # explicit G13 (already the default)
+    read:
+      strict-duplicate-detection: true    # {"quantity":1,"quantity":2} is malformed, not quantity 2 (M-11)
+  datasource:
+    hikari:
+      connection-timeout: 3000            # a starved pool answers 500 in 3 s, not after Hikari's 30 s (M-14)
+      connection-init-sql: SET lock_timeout = 5000   # a write waiting on a locked row gives up after 5 s (M-14)
   mvc:
     problemdetails:
       enabled: false                      # explicit "ProblemDetail stays off"

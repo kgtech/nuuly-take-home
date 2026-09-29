@@ -31,12 +31,21 @@ record RoutedPath(boolean v2, RouteKind kind, String rawSkuId, boolean skuHasMat
 
     private static final String BASE_SEGMENT = BASE_PATH.substring(1);
     private static final String V2_SEGMENT = V2_BASE_PATH.substring(1, V2_BASE_PATH.indexOf('/', 1));
+    private static final String ERROR_SEGMENT = "error";
     private static final String PURCHASE_SEGMENT = "purchase";
     private static final String DETAILS_SEGMENT = "details";
 
     /** The request's routed path; empty when it does not lie under /inventory or /v2/inventory. */
     static Optional<RoutedPath> of(HttpServletRequest request) {
         return parse(request.getRequestURI(), request.getContextPath());
+    }
+
+    /** Whether the request is for exactly Boot's error path, as Spring routes it: decoded, ";" content ignored (M-02). */
+    static boolean isErrorPath(HttpServletRequest request) {
+        List<PathSegment> segments = RequestPath.parse(request.getRequestURI(), request.getContextPath())
+                .pathWithinApplication().elements().stream().filter(PathSegment.class::isInstance)
+                .map(PathSegment.class::cast).toList();
+        return segments.size() == 1 && ERROR_SEGMENT.equals(segments.getFirst().valueToMatch());
     }
 
     /** Empty when the path does not lie under /inventory or /v2/inventory. */

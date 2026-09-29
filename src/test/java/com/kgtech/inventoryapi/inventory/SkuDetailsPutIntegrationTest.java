@@ -60,6 +60,9 @@ class SkuDetailsPutIntegrationTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    javax.sql.DataSource dataSource;
+
     @BeforeEach
     void clean() {
         Tables.reset(jdbc);
@@ -218,6 +221,62 @@ class SkuDetailsPutIntegrationTest {
         assertText(putDetails("PM-3", DETAILS, IF_MATCH, ifMatch), 412, DETAILS_CHANGED);
 
         assertNothingStored();
+    }
+
+    /**
+     * M-04, OD-11: a stale non-zero If-Match on a SKU that has stock but no details row is 412 and creates nothing. The
+     * lost-update guard is the version predicate in the conditional insert; without it the PUT would answer 200.
+     */
+    @ParameterizedTest(name = "If-Match: {0}")
+    @ValueSource(strings = {"\"5\"", "W/\"0\"", "\"7\", \"2\"", "\"2\""})
+    void aStaleIfMatchOnASkuWithStockAndNoDetailsIs412AndCreatesNoDetails(String ifMatch) throws Exception {
+        Tables.seed(jdbc, "PM-6", 2);
+
+        assertText(putDetails("PM-6", DETAILS, IF_MATCH, ifMatch), 412, DETAILS_CHANGED);
+
+        assertThat(count("SELECT count(*) FROM sku_details")).as("sku_details rows").isZero();
+        assertThat(quantity("PM-6")).isEqualTo(2);
+        assertThat(getV2("PM-6").etag()).isEqualTo("\"0\"");
+    }
+
+    /**
+     * M-25: the recheck of the version against the locked row, made deterministic. Transaction A holds the details row
+     * lock (an uncommitted version bump); a conditional PUT with the tag it read waits on that lock, and only after A
+     * commits does it re-evaluate against the NEW row: 412, and A's version stands. Without the recheck in the update
+     * the PUT would overwrite the details after the wait.
+     */
+    @Test
+    void aConditionalPutWaitsOnTheRowLockAndRechecksTheVersionAfterTheWinnerCommits() throws Exception {
+        assertThat(putDetails("PL-1", DETAILS).status()).isEqualTo(201);
+        assertThat(getV2("PL-1").etag()).isEqualTo("\"1\"");
+        try (java.sql.Connection holder = dataSource.getConnection();
+                java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            holder.setAutoCommit(false);
+            try (java.sql.Statement statement = holder.createStatement()) {
+                statement.executeUpdate("UPDATE sku_details SET name = 'winner', version = version + 1 "
+                        + "WHERE sku_id = 'PL-1'");
+            }
+            java.util.concurrent.Future<Reply> put = executor.submit(
+                    () -> putDetails("PL-1", OTHER_DETAILS, IF_MATCH, "\"1\""));
+
+            awaitBackendWaitingOnALock();
+            assertThat(put.isDone()).as("the PUT waits for the lock A holds").isFalse();
+            holder.commit();
+
+            assertText(put.get(30, java.util.concurrent.TimeUnit.SECONDS), 412, DETAILS_CHANGED);
+        }
+        assertThat(detailsName("PL-1")).as("A's row stands").isEqualTo("winner");
+        assertThat(getV2("PL-1").etag()).isEqualTo("\"2\"");
+    }
+
+    /** Polls pg_stat_activity until a backend is blocked on a lock, so "it waited" is observed, not assumed. */
+    private void awaitBackendWaitingOnALock() throws InterruptedException {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        while (count("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+                + "AND datname = current_database()") == 0) {
+            assertThat(System.nanoTime()).as("a backend waits on the row lock").isLessThan(deadline);
+            Thread.sleep(50);
+        }
     }
 
     @ParameterizedTest(name = "malformed If-Match: {0}")

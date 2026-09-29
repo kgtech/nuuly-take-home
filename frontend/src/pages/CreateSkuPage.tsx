@@ -10,7 +10,7 @@ import { initialStockReason, NOT_A_NUMBER, skuIdReason } from '../validation';
 
 type Failure = { status: number; errorText: string; kind?: 'uncertain' | 'lost' | undefined };
 
-/** Line under a 412 on the create PUT: the server text says details changed, which the user never read (FE33). */
+/** The whole answer to a plain 412 on the create PUT: the service's text says details changed, which the user never read (FE33). */
 const EXISTS = 'A SKU with this ID already exists. Open it to edit its details or add stock.';
 
 /** A 412 after a PUT whose answer never arrived: most likely our own earlier create, so no edit link (FE34). */
@@ -93,6 +93,8 @@ export function CreateSkuPage() {
     else await runAdd();
   };
 
+  const plainExists = failure?.status === 412 && failure.kind === undefined && !created;
+
   return (
     <section className="page">
       <p style={{ margin: 0 }}>
@@ -148,15 +150,13 @@ export function CreateSkuPage() {
           describedBy={created ? [] : blockingIds}
         />
         {failure !== null && (
-          <ErrorText text={failure.kind === 'lost' ? LOST : failure.errorText} ref={alertRef}>
+          <ErrorText text={failure.kind === 'lost' ? LOST : plainExists ? EXISTS : failure.errorText} ref={alertRef}>
             {failure.kind === 'lost' ? (
               <a href={skuHref(skuId)}>Open {skuId}</a>
             ) : failure.kind === 'uncertain' ? (
               UNCERTAIN
             ) : failure.status === 412 && !created ? (
-              <>
-                {EXISTS} <a href={editHref(skuId)}>Open {skuId}</a>
-              </>
+              <a href={editHref(skuId)}>Open {skuId}</a>
             ) : created ? (
               <>
                 The SKU exists at 0 stock until the add succeeds. {writeGuidance(failure.status)}{' '}
