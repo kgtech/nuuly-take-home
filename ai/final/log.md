@@ -19,3 +19,6 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T19:14:23Z [service] PR #105 (final-ci) opened: workflow parked at ai/final/ci-workflow.yml + scripts/gate.sh (deviation D-1, no workflow scope); local gate --e2e passed in 59 s. Merge waits for the board PR (order rule).
 - 2026-09-29T19:14:23Z [board] Board subagent launched (agent ac9859d9107a1c504): edits ai/decision-board.html, regenerates exports; orchestrator will write DB choices and republish.
 - 2026-09-29T19:15:07Z [service] Subagents: test agent for PR3 (a62ff1e88ed1724c8: ports + ArchUnit tests, worktree wt-p3), reviewer for PR #105 (a4bc07b0b7916fda7).
+- 2026-09-29T19:17:37Z [service] PR #105 review (a4bc07b0b7916fda7): MAJOR ports rejected per owner instruction; MINORs fixed; gate --e2e green again (48 s).
+- 2026-09-29T19:17:37Z [service] PR3 test agent (a62ff1e88ed1724c8) done: ArchUnit 1.5.1, ArchitectureTest (L19 allow-list, L27, E2), ComposeFilesTest ports. Red: 2 ports, 1 L27 (ActuatorHealthDownTest).
+- 2026-09-29T19:19:37Z [service] PR3 implemented (ports 8080/5173 + ArchUnit 1.5.1), gate --e2e green, PR opened.
