@@ -22,16 +22,25 @@ import java.util.stream.Stream;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 
 import org.apache.catalina.valves.ErrorReportValve;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.servlet.DispatcherServlet;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import com.kgtech.archfixture.inventory.FeatureFixtures;
+import com.kgtech.archfixture.inventory.web.FeatureWebFixtures;
+import com.kgtech.archfixture.web.WebFixtures;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
 import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.inventory.CreateSku;
@@ -43,6 +52,7 @@ import com.kgtech.inventoryapi.inventory.SkuCost;
 import com.kgtech.inventoryapi.inventory.SkuDetails;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
+import com.kgtech.inventoryapi.web.TextErrors;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -55,14 +65,18 @@ import com.tngtech.archunit.core.domain.properties.CanBeAnnotated;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchCondition;
+import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.CompositeArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.EvaluationResult;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 
 /**
  * D10, Z2, A37, A38, A39: the package layout, checked on the compiled main classes with ArchUnit's core API. javac
  * inlines constants, so a constant-only dependency is invisible here; PackageBoundaryTest scans the sources for those
- * and for quoted names. Rules keep ArchUnit's default of failing when nothing matches, so none passes vacuously.
+ * and for quoted names. Rules keep ArchUnit's default of failing when nothing matches, so none passes vacuously. The
+ * placement rule's self-tests run it on fixture classes of their own (com.kgtech.archfixture, under src/test), which
+ * the main-class import never contains.
  */
 class ArchitectureTest {
 
@@ -71,6 +85,8 @@ class ArchitectureTest {
     private static final String IDEMPOTENCY = ROOT + ".idempotency";
     private static final String INVENTORY = ROOT + ".inventory";
     private static final String INVENTORY_WEB = INVENTORY + ".web";
+    /** The fixture layout the placement rule's self-tests import (src/test, outside ROOT; see WebFixtures). */
+    private static final String FIXTURE_ROOT = "com.kgtech.archfixture";
     /** The records that are also the wire schema (D7, C2): the only domain types with OpenAPI annotations. */
     private static final String WIRE_RECORDS = "(InventoryItem|SkuItem|SkuDetails|SkuCost|CreateSku)";
     /** The records whose JSON needs Jackson annotations today (absent values omitted, the ETag version hidden). */
@@ -145,28 +161,108 @@ class ArchitectureTest {
     // ---- placement ----
 
     /**
-     * A37 (G10, S6, C1): the error advice, the Tomcat valve, the container customizer, the DispatcherServlet override
-     * and every @Configuration apply to the whole application, so they live in web, not in the feature. Any
-     * controller advice counts (meta-annotated, so a plain @ControllerAdvice too); @Configuration stays a direct match,
-     * because @SpringBootApplication is meta-annotated with it.
+     * A37 (G10, S6, C1), R2-06: what serves every path lives in web, not in a feature: any controller advice
+     * (meta-annotated, so a plain @ControllerAdvice too), an ErrorReportValve, a WebServerFactoryCustomizer, a
+     * DispatcherServlet, the API-wide @OpenAPIDefinition, and a @Configuration that declares one of those or a
+     * JsonMapperBuilderCustomizer as a @Bean. Any other @Configuration (a feature's Clock, say) may live in its
+     * feature, under that package's dependency rules. @Configuration counts when direct, or when meta-annotated
+     * outside the root package, where @SpringBootApplication (meta-annotated with it) sits.
      */
     @Test
     void appWideHttpClassesResideInWeb() {
-        classes().that().areMetaAnnotatedWith(ControllerAdvice.class)
-                .or().areAssignableTo(ErrorReportValve.class)
-                .or().areAssignableTo(WebServerFactoryCustomizer.class)
-                .or().areAssignableTo(DispatcherServlet.class)
-                .or().areAnnotatedWith(Configuration.class)
-                .should().resideInAPackage(WEB)
-                .check(MAIN);
+        placementRule(ROOT).check(MAIN);
     }
 
-    /** A37: the API-wide OpenAPI info describes every controller, so it sits in web, not on one controller. */
+    /** The placement rule for the layout rooted at {@code root}; the self-tests run it on fixtures of their own. */
+    private static ArchRule placementRule(String root) {
+        return classes().that(appWideHttp(root)).should().resideInAPackage(root + ".web");
+    }
+
+    private static DescribedPredicate<JavaClass> appWideHttp(String root) {
+        return describe("are app-wide HTTP (a controller advice, an ErrorReportValve, a WebServerFactoryCustomizer, "
+                        + "a DispatcherServlet or an @OpenAPIDefinition carrier, or a @Configuration declaring one of "
+                        + "them or a JsonMapperBuilderCustomizer as a bean)",
+                (JavaClass c) -> isAppWideHttpKind(c) || (isConfiguration(c, root) && declaresAppWideBean(c)));
+    }
+
+    private static boolean isAppWideHttpKind(JavaClass type) {
+        return type.isMetaAnnotatedWith(ControllerAdvice.class)
+                || type.isAssignableTo(ErrorReportValve.class)
+                || type.isAssignableTo(WebServerFactoryCustomizer.class)
+                || type.isAssignableTo(DispatcherServlet.class)
+                || type.isMetaAnnotatedWith(OpenAPIDefinition.class);
+    }
+
+    /** Directly annotated, or meta-annotated outside the root package (where the @SpringBootApplication class is). */
+    private static boolean isConfiguration(JavaClass type, String root) {
+        return type.isAnnotatedWith(Configuration.class)
+                || (type.isMetaAnnotatedWith(Configuration.class) && !type.getPackageName().equals(root));
+    }
+
+    private static boolean declaresAppWideBean(JavaClass configuration) {
+        return configuration.getMethods().stream()
+                .filter(method -> method.isAnnotatedWith(Bean.class))
+                .map(JavaMethod::getRawReturnType)
+                .anyMatch(bean -> isAppWideHttpKind(bean) || bean.isAssignableTo(JsonMapperBuilderCustomizer.class));
+    }
+
+    // ---- the placement rule's self-tests (R2-06): fixtures under src/test, never in MAIN ----
+
+    /** The main-class import holds no test class, so the fixtures below can never reach the rules above. */
     @Test
-    void apiDefinitionResidesInWeb() {
-        classes().that().areAnnotatedWith(OpenAPIDefinition.class)
-                .should().resideInAPackage(WEB)
-                .check(MAIN);
+    void mainImportHoldsNoTestClasses() {
+        assertThat(MAIN.contain(ArchitectureTest.class)).as("MAIN contains ArchitectureTest").isFalse();
+        assertThat(MAIN.contain(TestcontainersConfiguration.class)).as("MAIN contains TestcontainersConfiguration")
+                .isFalse();
+        assertThat(MAIN.stream()).as("MAIN classes under %s", FIXTURE_ROOT)
+                .noneMatch(c -> c.getPackageName().startsWith(FIXTURE_ROOT));
+    }
+
+    /** App-wide HTTP in web passes, and is matched: rules fail when they match nothing. */
+    @Test
+    void placementRuleAcceptsAppWideHttpInWeb() {
+        assertNoViolation(placementRule(FIXTURE_ROOT).evaluate(fixtures()));
+    }
+
+    /** R2-06: a feature's own @Configuration, here one declaring a Clock, may live in its feature package. */
+    @Test
+    void placementRuleLetsAFeatureOwnItsConfiguration() {
+        assertNoViolation(placementRule(FIXTURE_ROOT)
+                .evaluate(fixtures(FeatureFixtures.ClockConfiguration.class)));
+    }
+
+    /** R2-06: @SpringBootApplication is meta-annotated with @Configuration; the rule leaves the application alone. */
+    @Test
+    void placementRuleLeavesTheApplicationClassAlone() {
+        assertNoViolation(placementRule(ROOT).allowEmptyShould(true)
+                .evaluate(new ClassFileImporter().importClasses(InventoryApplication.class)));
+    }
+
+    static Stream<Class<?>> placementRuleKeepsAppWideHttpInWeb() {
+        return Stream.of(
+                FeatureFixtures.ContainerCustomizerConfiguration.class,
+                FeatureFixtures.JsonConfiguration.class,
+                FeatureFixtures.DispatcherAutoConfiguration.class,
+                FeatureFixtures.ErrorAdvice.class,
+                FeatureFixtures.ErrorPageValve.class,
+                FeatureFixtures.ContainerCustomizer.class,
+                FeatureFixtures.Dispatcher.class,
+                FeatureFixtures.ApiDefinition.class,
+                FeatureWebFixtures.ErrorPageConfiguration.class);
+    }
+
+    /**
+     * R2-06: each app-wide HTTP kind outside web fails the rule, and so does a feature's @Configuration (direct or
+     * meta-annotated) that declares one, or a JsonMapperBuilderCustomizer, as a bean. A feature's web package is not
+     * web. Only the fixture is reported; web's own fixture passes beside it.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void placementRuleKeepsAppWideHttpInWeb(Class<?> fixture) {
+        EvaluationResult result = placementRule(FIXTURE_ROOT).evaluate(fixtures(fixture));
+        assertThat(result.getFailureReport().getDetails()).as("violations with %s", fixture.getSimpleName())
+                .singleElement(InstanceOfAssertFactories.STRING)
+                .contains("<" + fixture.getName() + ">");
     }
 
     /**
@@ -262,9 +358,8 @@ class ArchitectureTest {
 
     /**
      * A37 (L1): TextErrors and BodyTooLargeException are public for inventory.web, so every public method or
-     * constructor of a public web type must have a caller outside web; the helpers only web uses (of, textFor,
-     * internalServerError) stay package-private. Constant fields are inlined, so webPublicFieldsAreTheSharedConstants
-     * lists them instead.
+     * constructor of a public web type must have a caller outside web; a helper only web uses stays package-private.
+     * Constant fields are inlined, so webPublicFieldsAreTheSharedConstants lists them instead.
      */
     @Test
     void webPublicCodeIsUsedByAnotherPackage() {
@@ -277,9 +372,33 @@ class ArchitectureTest {
     }
 
     /**
-     * A37 (L1): javac inlines constants, so bytecode shows no reader of a public field; the list is explicit instead.
-     * inventory.web.InventoryApi reads SKU_EXISTS and DETAILS_CHANGED for the v2 409 and 412 descriptions, and the
-     * controllers read IDEMPOTENCY_KEY (Z2); G6's other texts stay package-private.
+     * R1-05: TextErrors keeps only the generic text/plain helpers (of, textFor, invalidRequest, internalServerError),
+     * so those are the only methods web may make public; with webPublicCodeIsUsedByAnotherPackage, each public one is
+     * also called from another package. The inventory feature's answers (skuNotFound, insufficientInventory,
+     * skuExists, detailsChanged) belong to inventory.web, which builds them through TextErrors.of.
+     */
+    @Test
+    void webPublicMethodsAreTheGenericTextHelpers() {
+        Set<String> methods = MAIN.stream()
+                .filter(c -> c.getPackageName().equals(WEB))
+                .filter(JavaClass::isTopLevelClass)
+                .filter(c -> c.getModifiers().contains(JavaModifier.PUBLIC))
+                .flatMap(c -> c.getMethods().stream())
+                .filter(m -> m.getModifiers().contains(JavaModifier.PUBLIC))
+                .map(m -> m.getOwner().getSimpleName() + "." + m.getName())
+                .collect(Collectors.toSet());
+
+        assertThat(methods).as("public methods of the public types of %s", WEB)
+                .isNotEmpty()
+                .isSubsetOf("TextErrors.of", "TextErrors.textFor", "TextErrors.invalidRequest",
+                        "TextErrors.internalServerError");
+    }
+
+    /**
+     * A37 (L1), R1-05: javac inlines constants, so bytecode shows no reader of a public field; the list is explicit
+     * instead. The controllers read IDEMPOTENCY_KEY (Z2). The inventory feature's texts live in inventory.web,
+     * SKU_EXISTS and DETAILS_CHANGED (the v2 409 and 412 descriptions InventoryApi reads) included; G6's generic
+     * texts stay package-private.
      */
     @Test
     void webPublicFieldsAreTheSharedConstants() {
@@ -293,8 +412,22 @@ class ArchitectureTest {
                 .collect(Collectors.toSet());
 
         assertThat(fields).as("public fields of the public types of %s", WEB)
-                .containsExactlyInAnyOrder("TextErrors.SKU_EXISTS", "TextErrors.DETAILS_CHANGED",
-                        "HttpConstants.IDEMPOTENCY_KEY");
+                .containsExactlyInAnyOrder("HttpConstants.IDEMPOTENCY_KEY");
+    }
+
+    /**
+     * S5, D6, R1-05: one Content-Type path. Every text/plain error response gets its Content-Type from TextErrors.of,
+     * so no other class reads MediaType.TEXT_PLAIN; a feature's error helpers build their responses through
+     * TextErrors.of. (MediaType.TEXT_PLAIN_VALUE is an inlined String, set directly on the servlet responses the valve
+     * and the request guard write; bytecode does not show it.)
+     */
+    @Test
+    void onlyTextErrorsReadsTheTextPlainMediaType() {
+        CompositeArchRule.of(noClasses().that().doNotHaveFullyQualifiedName(TextErrors.class.getName())
+                        .should().accessField(MediaType.class, "TEXT_PLAIN"))
+                .and(classes().that().haveFullyQualifiedName(TextErrors.class.getName())
+                        .should().accessField(MediaType.class, "TEXT_PLAIN"))
+                .check(MAIN);
     }
 
     /** L4: members used only inside their own class or package are not public. */
@@ -378,6 +511,16 @@ class ArchitectureTest {
     }
 
     // ---- helpers ----
+
+    /** Web's fixture plus {@code others}, imported on their own: never MAIN. */
+    private static JavaClasses fixtures(Class<?>... others) {
+        return new ClassFileImporter().importClasses(Stream.concat(Stream.of(WebFixtures.WebHttpConfiguration.class),
+                Stream.of(others)).toList());
+    }
+
+    private static void assertNoViolation(EvaluationResult result) {
+        assertThat(result.getFailureReport().getDetails()).as("violations").isEmpty();
+    }
 
     private static Set<String> publicTopLevelTypes(String packageName) {
         Set<String> types = MAIN.stream()

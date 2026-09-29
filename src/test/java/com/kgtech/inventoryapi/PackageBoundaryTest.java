@@ -27,9 +27,10 @@ import org.junit.jupiter.params.provider.MethodSource;
  * Z2, issue #15, A39: the source-text half of the layout guard; ArchitectureTest checks the compiled classes. javac
  * inlines constants and drops comments, so only the sources show a constant-only import or a quoted name. The
  * inventory domain and idempotency packages name no Spring MVC, HTTP, servlet or Tomcat type, the domain names no web
- * package, web and idempotency name no inventory code, and header names are written once: Idempotency-Key in
- * HttpConstants, the standard ones in Spring's HttpHeaders; tests pass the constants, not quoted names, to header
- * calls. Every scan walks sub-packages too. Reads the sources; Gradle runs tests from the project directory.
+ * package, web and idempotency name no inventory code and no feature route or answer in a string literal (R1-05),
+ * and header names are written once: Idempotency-Key in HttpConstants, the standard ones in Spring's HttpHeaders;
+ * tests pass the constants, not quoted names, to header calls. Every scan walks sub-packages too. Reads the sources;
+ * Gradle runs tests from the project directory.
  */
 class PackageBoundaryTest {
 
@@ -48,6 +49,12 @@ class PackageBoundaryTest {
     private static final String SHARED_WEB = "com.kgtech.inventoryapi.web.";
     /** Any inventory type, the domain's or its web layer's. */
     private static final String INVENTORY = "com.kgtech.inventoryapi.inventory.";
+    /** Every route of the inventory feature: the spec's /inventory/** and v2's /v2/inventory/**. */
+    private static final String FEATURE_ROUTE = "/inventory";
+    /** The inventory feature's error answers, by their opening words: G6's 404 and 400, DESIGN-V2 §8's 409 and 412. */
+    private static final List<String> FEATURE_ANSWERS = List.of("SKU not found", "Insufficient inventory",
+            "SKU already exists", "Details changed");
+    private static final String TEXT_BLOCK_QUOTES = "\"\"\"";
     /** Built from the constants so this file does not contain the quoted names it looks for. */
     private static final List<String> QUOTED_HEADER_NAMES = Stream.of(ACCEPT, ALLOW, CONTENT_TYPE, LINK,
                     LOCATION, IDEMPOTENCY_KEY)
@@ -91,6 +98,52 @@ class PackageBoundaryTest {
     void sharedPackagesImportNoFeatureCode() throws IOException {
         assertReferencesNone(sources(WEB), List.of(INVENTORY));
         assertReferencesNone(sources(IDEMPOTENCY), List.of(INVENTORY));
+    }
+
+    /**
+     * R1-05: web and idempotency name no feature route in code: no string literal holds /inventory (the spec's
+     * routes, and v2's /v2/inventory). Only literals count: a comment may name a route (the advice's Javadoc says it
+     * serves every path), and the advice's library paths (/actuator/**, the springdoc paths) name no feature.
+     */
+    @Test
+    void sharedPackagesNameNoFeatureRoute() throws IOException {
+        assertLiteralsContainNone(sharedSources(), List.of(FEATURE_ROUTE));
+    }
+
+    /**
+     * R1-05: the inventory feature's answers (G6's 404 and 400 texts, DESIGN-V2 §8's 409 and 412 texts) live in
+     * inventory.web; web keeps G6's generic texts, which every path uses.
+     */
+    @Test
+    void sharedPackagesNameNoFeatureAnswer() throws IOException {
+        assertLiteralsContainNone(sharedSources(), FEATURE_ANSWERS);
+    }
+
+    /** The literal scan reads the real sources: web's literals include the advice's library paths and G6's 400. */
+    @Test
+    void literalScanReadsWebSources() throws IOException {
+        List<String> literals = sources(WEB).stream().flatMap(p -> stringLiterals(read(p)).stream()).toList();
+        assertThat(literals).contains("/actuator/**", "/swagger-ui/**", "Invalid request");
+    }
+
+    /** Rows are Java source fragments and the literals the scanner must return, raw, in order. */
+    static Stream<Arguments> stringLiteralScannerCases() {
+        return Stream.of(
+                Arguments.of("String a = \"/inventory/{skuId}\";", List.of("/inventory/{skuId}")),
+                Arguments.of("String a = \"x\" + \"y\";", List.of("x", "y")),
+                Arguments.of("String e = \"\";", List.of("")),
+                Arguments.of("// see \"/inventory\"\nint x;", List.of()),
+                Arguments.of("/** 404 \"SKU not found\" */ int x;", List.of()),
+                Arguments.of("String u = \"http://x\"; // \"y\"", List.of("http://x")),
+                Arguments.of("char q = '\"'; String s = \"a\\\"b\";", List.of("a\\\"b")),
+                Arguments.of("char q = '\\''; String s = \"c\";", List.of("c")),
+                Arguments.of("String t = \"\"\"\n    /inventory\n    \"\"\";", List.of("\n    /inventory\n    ")));
+    }
+
+    @ParameterizedTest
+    @MethodSource("stringLiteralScannerCases")
+    void stringLiteralScannerReadsOnlyLiterals(String source, List<String> literals) {
+        assertThat(stringLiterals(source)).as(source).isEqualTo(literals);
     }
 
     /** The walk reaches sub-packages and leaves out the excluded ones (a scan that saw nothing proves nothing). */
@@ -165,6 +218,64 @@ class PackageBoundaryTest {
                     .filter(p -> Stream.of(excluded).noneMatch(p::startsWith))
                     .toList();
         }
+    }
+
+    /** The shared packages' sources: web and idempotency, which serve the feature but name none of it. */
+    private static List<Path> sharedSources() throws IOException {
+        return Stream.concat(sources(WEB).stream(), sources(IDEMPOTENCY).stream()).toList();
+    }
+
+    /**
+     * The contents of the string literals and text blocks in {@code source}, in order and raw (escapes kept as
+     * written); comments and char literals are skipped. Enough of Java's lexical grammar for a source scan.
+     */
+    static List<String> stringLiterals(String source) {
+        List<String> literals = new ArrayList<>();
+        int i = 0;
+        while (i < source.length()) {
+            if (source.startsWith("//", i)) {
+                int lineEnd = source.indexOf('\n', i);
+                i = lineEnd < 0 ? source.length() : lineEnd + 1;
+            } else if (source.startsWith("/*", i)) {
+                int commentEnd = source.indexOf("*/", i + 2);
+                i = commentEnd < 0 ? source.length() : commentEnd + 2;
+            } else if (source.startsWith(TEXT_BLOCK_QUOTES, i)) {
+                int end = closing(source, i + TEXT_BLOCK_QUOTES.length(), TEXT_BLOCK_QUOTES);
+                literals.add(source.substring(i + TEXT_BLOCK_QUOTES.length(), end));
+                i = end + TEXT_BLOCK_QUOTES.length();
+            } else if (source.charAt(i) == '"') {
+                int end = closing(source, i + 1, "\"");
+                literals.add(source.substring(i + 1, end));
+                i = end + 1;
+            } else if (source.charAt(i) == '\'') {
+                i = closing(source, i + 1, "'") + 1;
+            } else {
+                i++;
+            }
+        }
+        return literals;
+    }
+
+    /** The index of the first unescaped {@code delimiter} at or after {@code from}, or the end of {@code source}. */
+    private static int closing(String source, int from, String delimiter) {
+        int i = from;
+        while (i < source.length() && !source.startsWith(delimiter, i)) {
+            i += source.charAt(i) == '\\' ? 2 : 1;
+        }
+        return Math.min(i, source.length());
+    }
+
+    private static void assertLiteralsContainNone(List<Path> sources, List<String> forbidden) {
+        assertThat(sources).as("sources to scan").isNotEmpty();
+
+        List<String> found = new ArrayList<>();
+        for (Path file : sources) {
+            for (String literal : stringLiterals(read(file))) {
+                forbidden.stream().filter(literal::contains)
+                        .forEach(text -> found.add(file + ": " + quoted(literal) + " contains " + quoted(text)));
+            }
+        }
+        assertThat(found).as("string literals naming %s", forbidden).isEmpty();
     }
 
     private static void assertReferencesNone(List<Path> sources, List<String> forbidden) {
