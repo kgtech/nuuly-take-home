@@ -2,7 +2,7 @@
 
 V2 of the inventory service for the Nuuly Services assessment: it receives stock by SKU, processes purchases and lists inventory through the API in [`openapi.yaml`](openapi.yaml), and adds a React front end in [`frontend/`](frontend/). It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1) and PostgreSQL 18.
 
-The storage design is V2's own and is documented in [`DESIGN-V2.md`](DESIGN-V2.md): each SKU's stock is a row in Postgres, changed with a conditional `UPDATE` so concurrent purchases never oversell, every change is appended to a ledger the database keeps append-only, and idempotent responses are stored beside the claim that made them. Postgres is the only store; a cache was part of the first V2 design and was removed (DESIGN-V2 §9).
+The storage design is V2's own and is documented in [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md): each SKU's stock is a row in Postgres, changed with a conditional `UPDATE` so concurrent purchases never oversell, every change is appended to a ledger the database keeps append-only, and idempotent responses are stored beside the claim that made them. Postgres is the only store; a cache was part of the first V2 design and was removed (DESIGN-V2 §9).
 
 ## Prerequisites
 
@@ -98,7 +98,7 @@ curl -i 'localhost:18080/inventory?limit=2'
 # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1","quantity":5}]  (Link when more than 2 SKUs exist)
 ```
 
-**v2: a SKU with details.** Three additive operations under `/v2/inventory` ([`DESIGN-V2.md`](DESIGN-V2.md) §8) give a SKU a name, description, cost and image URLs. The four operations above are unchanged; stock still changes only through them. Every `SkuItem` response carries an `ETag` (the details version, `"0"` before any details); `PUT` takes an optional `If-Match`. Errors are text/plain like v1, with two new fixed texts (409, 412) that say what to do next:
+**v2: a SKU with details.** Three additive operations under `/v2/inventory` ([`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §8) give a SKU a name, description, cost and image URLs. The four operations above are unchanged; stock still changes only through them. Every `SkuItem` response carries an `ETag` (the details version, `"0"` before any details); `PUT` takes an optional `If-Match`. Errors are text/plain like v1, with two new fixed texts (409, 412) that say what to do next:
 
 ```bash
 curl -i -X POST localhost:18080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
@@ -122,7 +122,7 @@ curl -i 'localhost:18080/v2/inventory?limit=2'           # 200 [{"skuId":"ABC-1"
 
 ## How V2 stores stock
 
-Short version of [`DESIGN-V2.md`](DESIGN-V2.md):
+Short version of [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md):
 
 - **Stock:** `sku.quantity` (`CHECK (quantity >= 0)`) and `sku.version`. A purchase is `UPDATE sku SET quantity = quantity - :q, version = version + 1 WHERE sku_id = :id AND quantity >= :q RETURNING ...` in a READ COMMITTED transaction; no row updated means "insufficient" (or "not found"). Concurrent writers on one SKU queue on the row lock; writers on different SKUs never interact. Adds are guarded the same way against overflowing a bigint.
 - **Ledger:** every change also inserts an `inventory_ledger` row in the same transaction; a trigger makes `UPDATE`/`DELETE` on the ledger (and `DELETE` on `sku`) fail. A test asserts `quantity = SUM(quantity_delta)` for every SKU after the concurrency tests.
@@ -139,7 +139,7 @@ Swagger UI at `/swagger-ui.html`, OpenAPI at `/v3/api-docs` and `/v3/api-docs.ya
 
 ## Assumptions
 
-The spec leaves these open; V2 keeps the first build's answers ([`DECISIONS.md`](DECISIONS.md), IDs in parentheses) except where [`DESIGN-V2.md`](DESIGN-V2.md) §7 supersedes them:
+The spec leaves these open; V2 keeps the first build's answers ([`ai/v2/DECISIONS-v2.md`](ai/v2/DECISIONS-v2.md), IDs in parentheses) except where [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §7 supersedes them:
 
 - SKU IDs are case-sensitive, 1–64 characters, `[A-Za-z0-9][A-Za-z0-9._-]*`; creating another ID (spec or v2, and a v2 PUT) is 400, reading or purchasing it is 404 (G1, G11). An encoded slash is part of the ID (`/inventory/A%2FB` → 404) (C1).
 - Stock is a 64-bit integer; an add that would overflow returns 400 and changes nothing (G2, G12). A request adds or purchases at most 2,147,483,647 (V2).
@@ -157,8 +157,8 @@ The spec leaves these open; V2 keeps the first build's answers ([`DECISIONS.md`]
 
 Both are deferred future improvements, recorded with their reasons, revisit triggers and proposed approach. Neither changes the API described above.
 
-- **Store a domain outcome instead of the HTTP response against an Idempotency-Key** ([#83](https://github.com/kgtech/nuuly-take-home/issues/83), A35, [`DESIGN-V2.md`](DESIGN-V2.md) §11). Not built because every keyed caller today is the HTTP controller, so it would change no behaviour. It would also trade byte-for-byte replays (Y4) for re-rendered ones, and it needs a two-format migration on a table whose rows are never purged (R9).
-- **Messaging: an outbox to Kafka for ERP sync, high throughput and flash sales** ([#85](https://github.com/kgtech/nuuly-take-home/issues/85), A36, [`DESIGN-V2.md`](DESIGN-V2.md) §11). Not built because:
+- **Store a domain outcome instead of the HTTP response against an Idempotency-Key** ([#83](https://github.com/kgtech/nuuly-take-home/issues/83), A35, [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). Not built because every keyed caller today is the HTTP controller, so it would change no behaviour. It would also trade byte-for-byte replays (Y4) for re-rendered ones, and it needs a two-format migration on a table whose rows are never purged (R9).
+- **Messaging: an outbox to Kafka for ERP sync, high throughput and flash sales** ([#85](https://github.com/kgtech/nuuly-take-home/issues/85), A36, [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). Not built because:
   - the spec's operations answer synchronously with fixed status codes (G10), so a queue in front of writes would change the contract;
   - the no-oversell decision and exactly-once already hold in one Postgres transaction, and a broker would add a dual write plus at-least-once delivery that still needs the idempotency claim;
   - no ERP or other consumer exists in this scope;
@@ -168,4 +168,4 @@ Both are deferred future improvements, recorded with their reasons, revisit trig
 
 ## AI use
 
-V2 was built in one autonomous run by the Fable model from a warm-start package produced by a retrospective of the first build: [`PROMPT.md`](PROMPT.md) (the instructions), [`spec/`](spec/), [`DECISIONS.md`](DECISIONS.md), [`CLAUDE.md`](CLAUDE.md), [`issues.md`](issues.md), [`lessons.md`](lessons.md). The run's own records are [`.fable/log.md`](.fable/log.md), [`.fable/current-implementation.md`](.fable/current-implementation.md), [`.fable/plan.md`](.fable/plan.md), [`DESIGN-V2.md`](DESIGN-V2.md), [`DECISIONS-ADDED.md`](DECISIONS-ADDED.md), [`DEVIATIONS.md`](DEVIATIONS.md), [`frontend/DECISIONS.md`](frontend/DECISIONS.md), the self-critique in `.fable/critique.md` and `.fable/interview-defense.md`, and [`FABLE_REPORT.md`](FABLE_REPORT.md).
+V2 was built in one autonomous run by the Fable model from a warm-start package produced by a retrospective of the first build: [`PROMPT.md`](ai/v2/PROMPT.md) (the instructions), [`spec/`](docs/), [`ai/v2/DECISIONS-v2.md`](ai/v2/DECISIONS-v2.md), [`ai/v2/CLAUDE-v2.md`](ai/v2/CLAUDE-v2.md), [`issues.md`](ai/v2/issues.md), [`lessons.md`](ai/v2/lessons.md). The run's own records are [`ai/v2/run-records/log.md`](ai/v2/run-records/log.md), [`ai/v2/run-records/current-implementation.md`](ai/v2/run-records/current-implementation.md), [`ai/v2/run-records/plan.md`](ai/v2/run-records/plan.md), [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md), [`DECISIONS-ADDED.md`](ai/v2/DECISIONS-ADDED.md), [`DEVIATIONS.md`](ai/v2/DEVIATIONS.md), [`frontend/DECISIONS.md`](frontend/DECISIONS.md), the self-critique in `ai/v2/run-records/critique.md` and `ai/v2/run-records/interview-defense.md`, and [`FABLE_REPORT.md`](ai/v2/REPORT.md).
