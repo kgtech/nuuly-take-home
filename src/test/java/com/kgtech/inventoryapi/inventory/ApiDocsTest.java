@@ -95,16 +95,15 @@ class ApiDocsTest {
     }
 
     /**
-     * Issue #71 AC9: the three spec paths are exported byte for byte as before v2 (the baseline is the export at
-     * v2 9afd14a), and the two spec schemas and the info block are unchanged.
+     * Issue #71 AC9, narrowed by F-07: the spec's two schemas and the info block are unchanged since the v2 baseline.
+     * The unversioned paths are no longer byte for byte the baseline (OD-4 removed the Idempotency-Key header, OD-5 the
+     * limit parameter); their documentation is asserted operation by operation below.
      */
     @Test
-    void v1PathsAreByteForByteTheBaseline() throws Exception {
+    void specSchemasAndInfoAreTheBaseline() throws Exception {
         String baseline = Files.readString(Path.of("src/test/resources/openapi-v1-baseline.yaml"), UTF_8);
         String served = new String(servedYamlBytes(), UTF_8);
-        String v1Paths = baseline.substring(baseline.indexOf("paths:\n"), baseline.indexOf("components:\n"));
 
-        assertThat(served).contains(v1Paths);
         assertThat(served).startsWith(baseline.substring(0, baseline.indexOf("paths:\n")));
         Map<String, Object> base = parseYaml(baseline.getBytes(UTF_8));
         Map<String, Object> now = exported();
@@ -187,20 +186,11 @@ class ApiDocsTest {
         return parameters.stream().filter(p -> IDEMPOTENCY_KEY.equals(p.get("name"))).toList();
     }
 
-    /** G8, S3: the unversioned POSTs document the optional Idempotency-Key header as a UUID string. */
+    /** OD-4, H3: the unversioned POSTs document no Idempotency-Key header (the spec has none; it is rejected). */
     @ParameterizedTest
     @ValueSource(strings = {"/inventory/{skuId}", "/inventory/{skuId}/purchase"})
-    void unversionedPostsDocumentOptionalIdempotencyKeyHeader(String path) throws Exception {
-        List<Map<String, Object>> parameters = idempotencyKeyParameters(path, "post");
-
-        assertThat(parameters).singleElement().satisfies(parameter -> {
-            assertThat(parameter.get("in")).isEqualTo("header");
-            assertThat(parameter.get("required")).as("required absent or false").isIn(null, false);
-            assertThat(parameter.get("schema")).isInstanceOfSatisfying(Map.class, schema -> {
-                assertThat(schema.get("type")).isEqualTo("string");
-                assertThat(schema.get("format")).isEqualTo("uuid");
-            });
-        });
+    void unversionedPostsHaveNoIdempotencyKeyHeader(String path) throws Exception {
+        assertThat(idempotencyKeyParameters(path, "post")).isEmpty();
     }
 
     /** H2, S3: the /v2 POSTs document the Idempotency-Key header as a required UUID string. */
@@ -252,8 +242,8 @@ class ApiDocsTest {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Map<String, Object>> listQueryParameters() throws Exception {
-        Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['/inventory'].get");
+    private Map<String, Map<String, Object>> listQueryParameters(String path) throws Exception {
+        Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['" + path + "'].get");
         List<Map<String, Object>> parameters =
                 (List<Map<String, Object>>) operation.getOrDefault("parameters", List.of());
         Map<String, Map<String, Object>> byName = new LinkedHashMap<>();
@@ -263,13 +253,26 @@ class ApiDocsTest {
         return byName;
     }
 
+    /** OD-5, H4: GET /inventory documents only the optional after query parameter; there is no limit. */
+    @Test
+    void listDocumentsOnlyTheAfterQueryParameter() throws Exception {
+        Map<String, Map<String, Object>> parameters = listQueryParameters("/inventory");
+
+        assertThat(parameters.keySet()).containsExactly("after");
+        assertThat(parameters.get("after").get("in")).isEqualTo("query");
+        assertThat(parameters.get("after").get("required")).as("required absent or false").isIn(null, false);
+        assertThat(parameters.get("after").get("description")).isInstanceOf(String.class);
+        assertThat(parameters.get("after").get("schema")).isInstanceOfSatisfying(Map.class,
+                schema -> assertThat(schema.get("type")).isEqualTo("string"));
+    }
+
     /**
-     * G9, R4, R8, C2: GET /inventory documents optional limit (integer 1–250, default 250) and after (string) query
-     * parameters.
+     * G9, R4, R8, C2, H5: GET /v2/inventory documents optional limit (integer 1–250, default 250) and after (string)
+     * query parameters.
      */
     @Test
-    void listDocumentsOptionalLimitAndAfterQueryParameters() throws Exception {
-        Map<String, Map<String, Object>> parameters = listQueryParameters();
+    void v2ListDocumentsOptionalLimitAndAfterQueryParameters() throws Exception {
+        Map<String, Map<String, Object>> parameters = listQueryParameters("/v2/inventory");
 
         assertThat(parameters.keySet()).containsExactlyInAnyOrder("limit", "after");
         for (Map<String, Object> parameter : parameters.values()) {
@@ -290,15 +293,15 @@ class ApiDocsTest {
     }
 
     /**
-     * C2: GET /inventory's description states the default page and the Link, and its 200 response describes one page
-     * of at most 250 items (Q22-07); the summary stays the spec's.
+     * C2, OD-5: GET /inventory's description states the fixed page of 250, the after cursor and the Link, and its 200
+     * response describes one page of at most 250 items (Q22-07); the summary stays the spec's.
      */
     @Test
     void listDocumentsDefaultPage() throws Exception {
         Map<String, Object> operation = JsonPath.read(apiDocs(), "$.paths['/inventory'].get");
 
         assertThat(operation.get("description")).isInstanceOfSatisfying(String.class, description -> assertThat(
-                description).contains("at most 250", "Link"));
+                description).contains("at most 250", "Link").doesNotContain("limit"));
         assertThat(operation.get("summary")).isEqualTo("List all inventory");
         assertThat(JsonPath.<Object>read(apiDocs(), "$.paths['/inventory'].get.responses['200'].description"))
                 .as("200 response description").isInstanceOfSatisfying(String.class,
@@ -314,7 +317,8 @@ class ApiDocsTest {
         Map<String, Object> content = JsonPath.read(docs, "$.paths['/inventory'].get.responses['400'].content");
 
         assertThat(content.keySet()).containsExactly(MediaType.TEXT_PLAIN_VALUE);
-        assertThat((String) listQueryParameters().get("after").get("description")).contains("must not be repeated");
+        assertThat((String) listQueryParameters("/inventory").get("after").get("description"))
+                .contains("must not be repeated");
     }
 
     /** G9: the 200 response documents the Link header; the other operations have none. */

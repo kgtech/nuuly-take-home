@@ -168,13 +168,13 @@ class RouteGuardCoverageTest {
         assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'A'").query(Long.class).single()).isEqualTo(5);
     }
 
-    /** A well-formed request with a valid key: only the ';' in the SKU segment may stop it. */
+    /** A well-formed request, with a valid key on the /v2 routes: only the ';' in the SKU segment may stop it. */
     private static MockHttpServletRequestBuilder build(HttpMethod method, String path) {
         MockHttpServletRequestBuilder request = request(method, URI.create(path)).accept(APPLICATION_JSON);
         if (HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method)) {
             return request;
         }
-        return request.contentType(APPLICATION_JSON).content("{\"quantity\":1}")
-                .header(IDEMPOTENCY_KEY, UUID.randomUUID().toString());
+        request.contentType(APPLICATION_JSON).content("{\"quantity\":1}");
+        return path.startsWith("/v2/") ? request.header(IDEMPOTENCY_KEY, UUID.randomUUID().toString()) : request;
     }
 }

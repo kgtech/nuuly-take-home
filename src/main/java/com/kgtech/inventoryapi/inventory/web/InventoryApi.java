@@ -35,27 +35,30 @@ final class InventoryApi {
 
     static final String SKU_ID_DESCRIPTION = "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-', "
             + "starting with a letter or digit. Case-sensitive.";
-    static final String IDEMPOTENCY_KEY_DESCRIPTION = "Optional UUID. The same key with the same request replays "
-            + "the first response. A different request, or a key older than 24h, returns 400.";
     static final String V2_IDEMPOTENCY_KEY_DESCRIPTION = "Required UUID. The same key with the same request replays "
             + "the first response. A missing or malformed key, a different request, or a key older than 24h returns 400.";
 
     static final String LIST_SUMMARY = "List all inventory";
     static final String LIST_DESCRIPTION = "Returns SKUs sorted by skuId, at most " + MAX_LIMIT + " per response. "
-            + "When more SKUs follow, the Link header holds the next page's URL; follow it until a response has no "
-            + "Link to list all inventory. If no SKUs exist, returns an empty array.";
-    static final String LIST_OK_DESCRIPTION = "One page of inventory items, at most " + MAX_LIMIT + ", sorted by skuId";
+            + "When more SKUs follow, the Link header holds the next page's URL (it carries the after cursor); follow "
+            + "it until a response has no Link to list all inventory. If no SKUs exist, returns an empty array.";
+    static final String LIST_OK_DESCRIPTION = "One page of inventory items, at most " + MAX_LIMIT
+            + ", sorted by skuId; the Link header points to the next page after the last skuId";
     static final String LIST_INVALID_DESCRIPTION = "Invalid request: the query string can't be decoded or repeats after";
     static final String LINK_DESCRIPTION = "Next page, when more SKUs follow: <URL>; rel=\"next\"";
+    static final String AFTER_DESCRIPTION = "Optional exclusive cursor: return only SKUs whose skuId sorts after this "
+            + "value, up to " + MAX_LIMIT + ". It must not be repeated.";
+
     static final String LIMIT_DESCRIPTION = "Optional page size, 1 to " + MAX_LIMIT + " (default " + DEFAULT_LIMIT
             + "). Larger values mean " + MAX_LIMIT + "; other values are ignored and the default applies.";
-    static final String AFTER_DESCRIPTION = "Optional cursor: return only SKUs whose skuId sorts after this value, "
-            + "up to the page size. It must not be repeated.";
+    static final String V2_AFTER_DESCRIPTION = "Optional exclusive cursor: return only SKUs whose skuId sorts after "
+            + "this value, up to the page size. It must not be repeated.";
 
     static final String V2_LIST_SUMMARY = "List all SKUs with details";
     static final String V2_LIST_DESCRIPTION = "Returns SKUs sorted by skuId with their quantity and details (absent "
-            + "for a SKU that has none), at most " + MAX_LIMIT + " per response; the same limit, after and Link rules "
-            + "as GET /inventory.";
+            + "for a SKU that has none), at most " + MAX_LIMIT + " per response. The optional limit (1 to "
+            + MAX_LIMIT + ", default " + MAX_LIMIT + ") sets the page size and after is an exclusive cursor; a Link "
+            + "header with rel=next carries both to the next page.";
     static final String V2_LIST_OK_DESCRIPTION = "One page of SKUs with details, at most " + MAX_LIMIT
             + ", sorted by skuId";
     static final String V2_GET_SUMMARY = "Get a SKU with its details";

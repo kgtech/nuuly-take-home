@@ -138,10 +138,10 @@ class TomcatRejectionIntegrationTest {
         assertThat(count("inventory_ledger")).isEqualTo(1);
     }
 
-    /** S2, R1: the malformed-SKU 400 is not stored against the key. */
+    /** S2, R1, H2: on /v2 the malformed-SKU 400 is not stored against the key (moved from the unversioned POST). */
     @Test
-    void encodedSlashOnKeyedCreateIsNotStored() throws IOException {
-        Response response = send("POST", "/inventory/A%2FB", QUANTITY_BODY,
+    void encodedSlashOnKeyedV2AddIsNotStored() throws IOException {
+        Response response = send("POST", "/v2/inventory/A%2FB", QUANTITY_BODY,
                 RawHttp.header(IDEMPOTENCY_KEY, UUID.randomUUID().toString()));
 
         assertText(response, 400, "Invalid request");

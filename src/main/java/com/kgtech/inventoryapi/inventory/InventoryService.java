@@ -20,9 +20,9 @@ import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 
 /**
- * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2); with
- * an Idempotency-Key the write runs through IdempotencyStore (A33). Reads are one row lookup (§9: no cache). The v2
- * details operations (§8) share the transaction template.
+ * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2). The
+ * unversioned writes know nothing of idempotency (OD-4); the /v2 writes run through IdempotencyStore (A33). Reads are
+ * one row lookup (§9: no cache). The v2 details operations (§8) share the transaction template.
  */
 @Service
 public class InventoryService {
@@ -32,7 +32,7 @@ public class InventoryService {
     private static final BigInteger MAX_LIMIT_BIG = BigInteger.valueOf(MAX_LIMIT);
     /** R4: ASCII digits with an optional sign; anything else is ignored. */
     private static final Pattern LIMIT = Pattern.compile("[+-]?[0-9]+");
-    /** G9, C2: an absent or ignored limit means the largest page. */
+    /** G9, C2: an absent or ignored limit means the largest page; the unversioned list always uses it (OD-5). */
     public static final int DEFAULT_LIMIT = MAX_LIMIT;
     /** Every sku_id is non-empty, so the empty cursor starts before all of them. */
     private static final String FIRST = "";
@@ -54,23 +54,29 @@ public class InventoryService {
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
-    /** A malformed skuId is 400 "Invalid request" (G11). */
-    public WriteResult add(String skuId, int quantity, String idempotencyKey) {
+    /**
+     * POST /inventory/{skuId} (the spec): no key, no idempotency work (OD-4). A malformed skuId is 400 "Invalid
+     * request" (G11).
+     */
+    public WriteResult add(String skuId, int quantity) {
         requirePositive(quantity);
-        return write(Operation.ADD, skuId, idempotencyKey, Integer.toString(quantity), new WriteResult.InvalidRequest(),
-                () -> stock.add(skuId, quantity)
-                        .<WriteResult>map(InventoryService::ok)
-                        .orElseGet(StockOutcome.Overflow::new));
+        if (!SkuId.isValid(skuId)) {
+            return new WriteResult.InvalidRequest();
+        }
+        return transaction.execute(status -> stock.add(skuId, quantity)
+                .<WriteResult>map(InventoryService::ok)
+                .orElseGet(StockOutcome.Overflow::new));
     }
 
     /** A malformed skuId is 404 "SKU not found": GET and purchase have no 400 for it in the spec (G11). */
-    public WriteResult purchase(String skuId, int quantity, String idempotencyKey) {
+    public WriteResult purchase(String skuId, int quantity) {
         requirePositive(quantity);
-        return write(Operation.PURCHASE, skuId, idempotencyKey, Integer.toString(quantity), new StockOutcome.NotFound(),
-                () -> stock.purchase(skuId, quantity)
-                        .<WriteResult>map(InventoryService::ok)
-                        .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient()
-                                : new StockOutcome.NotFound()));
+        if (!SkuId.isValid(skuId)) {
+            return new StockOutcome.NotFound();
+        }
+        return transaction.execute(status -> stock.purchase(skuId, quantity)
+                .<WriteResult>map(InventoryService::ok)
+                .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient() : new StockOutcome.NotFound()));
     }
 
     /**
@@ -98,22 +104,6 @@ public class InventoryService {
     }
 
     /**
-     * U3 after the controller's body validation: the Idempotency-Key format (S3), then the skuId (G11, S2), each once,
-     * before any I/O and never stored. Without a key (G8) the write runs in the service's own READ COMMITTED
-     * transaction. With one, IdempotencyStore.run claims the key, runs the write and stores its response in one
-     * transaction: run opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's transaction
-     * and refuses any other isolation (IllegalStateException); when joined, the caller's now() (T1) and rollback scope
-     * apply (A33).
-     */
-    private WriteResult write(Operation operation, String skuId, String idempotencyKey, String canonicalRequest,
-            WriteResult malformedSkuId, Supplier<WriteResult> action) {
-        if (idempotencyKey == null) {
-            return SkuId.isValid(skuId) ? transaction.execute(status -> action.get()) : malformedSkuId;
-        }
-        return keyed(ApiVersion.UNVERSIONED, operation, skuId, idempotencyKey, canonicalRequest, malformedSkuId, action);
-    }
-
-    /**
      * The key (S3), then the skuId, then the claim and write. A null key is 400: only /v2 gets here without one.
      */
     private WriteResult keyed(ApiVersion version, Operation operation, String skuId, String idempotencyKey,
@@ -126,9 +116,7 @@ public class InventoryService {
             return malformedSkuId;
         }
         Supplier<StoredResponse> stored = () -> responses.toStored(skuId, action.get());
-        return switch (version == ApiVersion.V2
-                ? idempotency.run(key.get(), version, operation, skuId, canonicalRequest, stored)
-                : idempotency.run(key.get(), operation, skuId, canonicalRequest, stored)) {
+        return switch (idempotency.run(key.get(), version, operation, skuId, canonicalRequest, stored)) {
             case Keyed.Response response -> new WriteResult.Stored(response.response());
             case Keyed.Invalid _ -> new WriteResult.InvalidRequest();
         };
@@ -173,7 +161,7 @@ public class InventoryService {
         return details.find(skuId);
     }
 
-    /** The v2 list: the same page rules as {@link #list} with the details joined (§8 "Reads"). */
+    /** The v2 list: {@link #list}'s page rules plus a lenient limit, with the details joined (§8 "Reads"). */
     public SkuPage listSkus(String limit, String after) {
         int n = parseLimit(limit);
         String cursor = truncateAtNul(after);
@@ -196,16 +184,16 @@ public class InventoryService {
         return stock.find(skuId).map(balance -> new InventoryItem(skuId, balance.quantity()));
     }
 
-    /** One page of SKUs in sku_id (COLLATE "C") order, at most 250 (G9, R4, C2). */
-    public InventoryPage list(String limit, String after) {
-        int n = parseLimit(limit);
+    /** OD-5: one page of SKUs in sku_id (COLLATE "C") order, always {@value #MAX_LIMIT}; after is never validated. */
+    public InventoryPage list(String after) {
         String cursor = truncateAtNul(after);
-        List<InventoryItem> items = stock.page(cursor == null ? FIRST : cursor, n + 1L);
-        if (items.size() <= n) {
+        List<InventoryItem> items = stock.page(cursor == null ? FIRST : cursor, MAX_LIMIT + 1L);
+        if (items.size() <= MAX_LIMIT) {
             return new InventoryPage(items, Optional.empty());
         }
-        List<InventoryItem> page = items.subList(0, n);
-        return new InventoryPage(List.copyOf(page), Optional.of(new InventoryPage.Next(n, page.getLast().skuId())));
+        List<InventoryItem> page = items.subList(0, MAX_LIMIT);
+        return new InventoryPage(List.copyOf(page),
+                Optional.of(new InventoryPage.Next(MAX_LIMIT, page.getLast().skuId())));
     }
 
     private static WriteResult ok(Balance balance) {

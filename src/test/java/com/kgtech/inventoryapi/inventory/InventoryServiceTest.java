@@ -43,7 +43,7 @@ class InventoryServiceTest {
 
     @Test
     void addCreatesTheSkuRowAndFirstLedgerRow() {
-        assertThat(service.add("widget", 5, null)).isEqualTo(new StockOutcome.Ok(5));
+        assertThat(service.add("widget", 5)).isEqualTo(new StockOutcome.Ok(5));
 
         assertThat(row("widget")).containsEntry("quantity", 5L).containsEntry("version", 1L);
         assertThat(ledgerRows("widget")).isEqualTo(1);
@@ -52,8 +52,8 @@ class InventoryServiceTest {
 
     @Test
     void addAccumulatesAndBumpsTheVersion() {
-        service.add("widget", 5, null);
-        assertThat(service.add("widget", 7, null)).isEqualTo(new StockOutcome.Ok(12));
+        service.add("widget", 5);
+        assertThat(service.add("widget", 7)).isEqualTo(new StockOutcome.Ok(12));
 
         assertThat(row("widget")).containsEntry("quantity", 12L).containsEntry("version", 2L);
         assertThat(ledgerRows("widget")).isEqualTo(2);
@@ -64,8 +64,8 @@ class InventoryServiceTest {
     void addRejectsOverflowWithoutWriting() {
         Tables.seed(jdbc, "big", Long.MAX_VALUE - 5);
 
-        assertThat(service.add("big", 5, null)).isEqualTo(new StockOutcome.Ok(Long.MAX_VALUE));
-        assertThat(service.add("big", 1, null)).isEqualTo(new StockOutcome.Overflow());
+        assertThat(service.add("big", 5)).isEqualTo(new StockOutcome.Ok(Long.MAX_VALUE));
+        assertThat(service.add("big", 1)).isEqualTo(new StockOutcome.Overflow());
 
         assertThat(row("big")).containsEntry("quantity", Long.MAX_VALUE).containsEntry("version", 2L);
         assertThat(ledgerRows("big")).isEqualTo(2);
@@ -75,7 +75,7 @@ class InventoryServiceTest {
     void purchaseDeductsAndRecords() {
         Tables.seed(jdbc, "widget", 10);
 
-        assertThat(service.purchase("widget", 4, null)).isEqualTo(new StockOutcome.Ok(6));
+        assertThat(service.purchase("widget", 4)).isEqualTo(new StockOutcome.Ok(6));
 
         assertThat(row("widget")).containsEntry("quantity", 6L).containsEntry("version", 2L);
         assertThat(jdbc.sql("SELECT quantity_delta FROM inventory_ledger WHERE sku_id = 'widget' AND reason = 'purchase'")
@@ -86,9 +86,9 @@ class InventoryServiceTest {
     void purchaseNeverOversellsAndWritesNothingWhenShort() {
         Tables.seed(jdbc, "widget", 3);
 
-        assertThat(service.purchase("widget", 4, null)).isEqualTo(new StockOutcome.Insufficient());
-        assertThat(service.purchase("widget", 3, null)).isEqualTo(new StockOutcome.Ok(0));
-        assertThat(service.purchase("widget", 1, null)).isEqualTo(new StockOutcome.Insufficient());
+        assertThat(service.purchase("widget", 4)).isEqualTo(new StockOutcome.Insufficient());
+        assertThat(service.purchase("widget", 3)).isEqualTo(new StockOutcome.Ok(0));
+        assertThat(service.purchase("widget", 1)).isEqualTo(new StockOutcome.Insufficient());
 
         assertThat(row("widget")).containsEntry("quantity", 0L);
         assertThat(ledgerRows("widget")).isEqualTo(2);
@@ -97,7 +97,7 @@ class InventoryServiceTest {
 
     @Test
     void purchaseOfUnknownSkuIsNotFound() {
-        assertThat(service.purchase("ghost", 1, null)).isEqualTo(new StockOutcome.NotFound());
+        assertThat(service.purchase("ghost", 1)).isEqualTo(new StockOutcome.NotFound());
         assertThat(service.find("ghost")).isEmpty();
         assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isZero();
     }
@@ -105,8 +105,8 @@ class InventoryServiceTest {
     /** G1: case-sensitive ids are different SKUs. */
     @Test
     void skuIdsAreCaseSensitive() {
-        service.add("ABC", 1, null);
-        service.add("abc", 2, null);
+        service.add("ABC", 1);
+        service.add("abc", 2);
         assertThat(service.find("ABC")).contains(new InventoryItem("ABC", 1));
         assertThat(service.find("abc")).contains(new InventoryItem("abc", 2));
     }
@@ -114,8 +114,8 @@ class InventoryServiceTest {
     /** S2, G11: malformed ids are rejected before any I/O. */
     @Test
     void malformedSkuIdIsRejectedBeforeAnyWrite() {
-        assertThat(service.add("bad/id", 1, null)).isEqualTo(new WriteResult.InvalidRequest());
-        assertThat(service.purchase("bad/id", 1, null)).isEqualTo(new StockOutcome.NotFound());
+        assertThat(service.add("bad/id", 1)).isEqualTo(new WriteResult.InvalidRequest());
+        assertThat(service.purchase("bad/id", 1)).isEqualTo(new StockOutcome.NotFound());
         assertThat(service.find("bad/id")).isEmpty();
         assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isZero();
     }
@@ -123,19 +123,19 @@ class InventoryServiceTest {
     @ParameterizedTest
     @ValueSource(ints = {0, -1})
     void nonPositiveQuantityIsAProgrammingError(int quantity) {
-        assertThatThrownBy(() -> service.add("widget", quantity, null)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.purchase("widget", quantity, null))
+        assertThatThrownBy(() -> service.add("widget", quantity)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.purchase("widget", quantity))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     /** Recorded (DESIGN-V2 §1): the balance row always equals the ledger sum. */
     @Test
     void balanceEqualsLedgerSum() {
-        service.add("a", 5, null);
-        service.add("a", 6, null);
-        service.purchase("a", 4, null);
-        service.purchase("a", 7, null);
-        service.purchase("a", 1, null);
+        service.add("a", 5);
+        service.add("a", 6);
+        service.purchase("a", 4);
+        service.purchase("a", 7);
+        service.purchase("a", 1);
 
         assertThat(Invariants.balanceMismatches(jdbc)).isEmpty();
         assertThat(row("a")).containsEntry("quantity", 0L).containsEntry("version", 4L);

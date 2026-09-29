@@ -1,7 +1,5 @@
 package com.kgtech.inventoryapi.inventory.web;
 
-import static com.kgtech.inventoryapi.inventory.InventoryService.DEFAULT_LIMIT;
-import static com.kgtech.inventoryapi.inventory.InventoryService.MAX_LIMIT;
 import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
 import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
@@ -14,9 +12,6 @@ import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_OK_DESCR
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_SUMMARY;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.GET_OK_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.GET_SUMMARY;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.IDEMPOTENCY_KEY_DESCRIPTION;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIMIT_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LINK_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.LIST_INVALID_DESCRIPTION;
@@ -35,12 +30,9 @@ import static org.springframework.http.HttpHeaders.LINK;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 import static org.springframework.http.MediaType.TEXT_PLAIN_VALUE;
 
-import java.util.List;
-
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.info.Info;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -56,15 +48,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
 import com.kgtech.inventoryapi.inventory.InventoryPage;
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
 import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
@@ -115,11 +104,11 @@ class InventoryController {
                     schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
             @PathVariable String skuId,
             @Valid @RequestBody InventoryQuantity body,
-            @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = IDEMPOTENCY_KEY_DESCRIPTION,
-                    schema = @Schema(type = "string", format = "uuid"))
-            @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
-        return toResponse(skuId, service.add(skuId, body.quantity(), idempotencyKey));
+            HttpServletRequest request) {
+        if (hasIdempotencyKey(request)) {
+            return TextErrors.invalidRequest();
+        }
+        return toResponse(skuId, service.add(skuId, body.quantity()));
     }
 
     @PostMapping(path = PURCHASE_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
@@ -135,11 +124,11 @@ class InventoryController {
                     schema = @Schema(type = "string", pattern = PATTERN_REGEX, minLength = 1, maxLength = MAX_LENGTH))
             @PathVariable String skuId,
             @Valid @RequestBody InventoryQuantity body,
-            @Parameter(name = IDEMPOTENCY_KEY, in = ParameterIn.HEADER, required = false,
-                    description = IDEMPOTENCY_KEY_DESCRIPTION,
-                    schema = @Schema(type = "string", format = "uuid"))
-            @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
-        return toResponse(skuId, service.purchase(skuId, body.quantity(), idempotencyKey));
+            HttpServletRequest request) {
+        if (hasIdempotencyKey(request)) {
+            return TextErrors.invalidRequest();
+        }
+        return toResponse(skuId, service.purchase(skuId, body.quantity()));
     }
 
     @GetMapping
@@ -151,42 +140,23 @@ class InventoryController {
     @ApiResponse(responseCode = "400", description = LIST_INVALID_DESCRIPTION,
             content = @Content(mediaType = TEXT_PLAIN_VALUE, schema = @Schema(implementation = String.class)))
     ResponseEntity<?> list(
-            @Parameter(description = LIMIT_DESCRIPTION,
-                    schema = @Schema(type = "integer", minimum = "1", maximum = "" + MAX_LIMIT,
-                            defaultValue = "" + DEFAULT_LIMIT))
-            @RequestParam(name = LIMIT, required = false) String limit,
             @Parameter(description = AFTER_DESCRIPTION,
                     schema = @Schema(type = "string"))
             @RequestParam(name = AFTER, required = false) String after,
             HttpServletRequest request) {
-        if (isRepeated(request, AFTER)) {
+        if (Paging.afterRepeated(request)) {
             return TextErrors.invalidRequest();
         }
-        InventoryPage page = service.list(limit, after);
+        InventoryPage page = service.list(after);
         return page.next()
-                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next)).body(page.items()))
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok()
+                        .header(LINK, Paging.nextLink(BASE_PATH, next.after())).body(page.items()))
                 .orElseGet(() -> ResponseEntity.ok(page.items()));
     }
 
-    /** Z3: the cursor is one sku_id, so a second value (even an empty one) makes the request ambiguous. */
-    private static boolean isRepeated(HttpServletRequest request, String name) {
-        String[] values = request.getParameterValues(name);
-        return values != null && values.length > 1;
-    }
-
-    /**
-     * G9, C2: absolute next-page URL from the request's scheme, host, port and context path plus the routed path, never
-     * the raw request URI; only limit and after, with after strictly encoded.
-     */
-    private static String nextLink(Next next) {
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path(BASE_PATH)
-                .queryParam(LIMIT, next.limit())
-                .queryParam(AFTER, "{after}")
-                .encode()
-                .buildAndExpand(next.after())
-                .toUriString();
-        return "<" + url + ">; rel=\"next\"";
+    /** OD-4: the spec has no Idempotency-Key, so any header line, whatever its value, refuses the request. */
+    private static boolean hasIdempotencyKey(HttpServletRequest request) {
+        return request.getHeaders(IDEMPOTENCY_KEY).hasMoreElements();
     }
 
     /**
