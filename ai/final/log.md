@@ -52,3 +52,4 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T20:01:10Z [frontend] PR #110 round-1 tests written (5 unit + 1 e2e red, mock parity fixed); implementer a3cba699d8654eb91 fixing (lost-response message, focus, FE33/34/37 lines).
 - 2026-09-29T20:04:09Z [frontend] PR6 fix commit 71fcd62 pushed but my gate run failed the e2e 'create with details, edit, then purchase' on both projects: getByText('Available') also matches the 'Image unavailable' placeholder (latent build v2 flake, timing). Not merged; test agent fixing the locator (exact match).
 - 2026-09-29T20:05:57Z [frontend] PR6 fixed (f664fac): gate --e2e green (234 unit, 32 e2e); round-2 review requested from a759bd50dbad0d90c.
+- 2026-09-29T20:07:36Z [frontend] PR #110 merged after round-2 review (no BLOCKER/MAJOR; MINORs recorded in FE34); #99 closed. NIT: flag-scope tests (uncertain for A then 412 on B) tracked for the critique.
