@@ -2,7 +2,6 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import java.io.IOException;
-import java.util.List;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,7 +15,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.http.server.PathContainer;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -24,8 +22,6 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.util.ServletRequestPathUtils;
-import org.springframework.web.util.pattern.PathPattern;
-import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * Maps every thrown error to a text/plain response (D6, S5, S6, G6, T3, U2, Z3), except on /actuator/** and the
@@ -36,13 +32,6 @@ import org.springframework.web.util.pattern.PathPatternParser;
 class InventoryErrorAdvice {
 
     private static final Logger log = LoggerFactory.getLogger(InventoryErrorAdvice.class);
-
-    /** Paths that keep library behaviour (S6, G10); /error is not one of them. */
-    private static final List<PathPattern> LIBRARY_PATHS = List.of(
-            "/actuator/**", "/v3/api-docs/**", "/v3/api-docs.yaml/**", "/swagger-ui.html", "/swagger-ui/**")
-            .stream()
-            .map(PathPatternParser.defaultInstance::parse)
-            .toList();
 
     /** Malformed, missing or oversized body, failed @Valid, wrong or missing Content-Type: 400, not 415 (G3, G13). */
     @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentNotValidException.class,
@@ -104,11 +93,8 @@ class InventoryErrorAdvice {
      */
     private static void leaveLibraryPathsToSpring(Exception ex, HttpServletRequest request) throws Exception {
         // The path Spring routed on (parsed by the DispatcherServlet), not the raw URI (L19)
-        PathContainer path = ServletRequestPathUtils.getParsedRequestPath(request).pathWithinApplication();
-        for (PathPattern pattern : LIBRARY_PATHS) {
-            if (pattern.matches(path)) {
-                throw ex;
-            }
+        if (LibraryPaths.matches(ServletRequestPathUtils.getParsedRequestPath(request).pathWithinApplication())) {
+            throw ex;
         }
     }
 }
