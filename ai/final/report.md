@@ -1,6 +1,6 @@
 # Final report: the harmonized Nuuly Inventory API (`final`)
 
-Run of 2026-09-29: the owner's "approve" at the plan gate was at 19:10Z (start of the 5 h budget); the self-critique started at 21:22Z (2 h 12 min in, before the 3 h 15 min limit); the critique fixes and records ran until about 23:00Z; the last 30 minutes of the budget were reserved for the report. Everything here is in the repository; nothing on `main`, `v2` or any other pre-existing branch, issue or PR was changed (`main`'s board artifact was only read).
+Run of 2026-09-29: the owner's "approve" at the plan gate was at 19:10Z (start of the 5 h budget); the self-critique started at 21:22Z (2 h 12 min in, before the 3 h 15 min limit); the critique fixes and records followed; the last 30 minutes of the budget were reserved for the report. Everything here is in the repository; nothing on `main`, `v2` or any other pre-existing branch, issue or PR was changed (`main`'s board artifact was only read).
 
 ## 1. Headline
 - `final` builds; the service suite (998 tests), the front end (257 unit tests, lint, typecheck, `check:api`, build) and 48 Playwright tests pass locally on the tip (`scripts/gate.sh --e2e`, run on every PR branch before merge and again on the final tip).
