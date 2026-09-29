@@ -49,6 +49,7 @@ import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
+import com.tngtech.archunit.core.domain.properties.CanBeAnnotated;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchCondition;
@@ -182,10 +183,17 @@ class ArchitectureTest {
                 .check(MAIN);
     }
 
-    /** D3, S1: SQL runs only through JdbcClient in the repositories and IdempotencyStore. */
+    /**
+     * D3, S1: SQL runs only through JdbcClient in the domain's @Repository classes and IdempotencyStore. The exemption
+     * is the annotation in the inventory package, not a name, so a *Repository class elsewhere is still checked.
+     */
     @Test
     void jdbcClientOnlyInRepositoriesAndIdempotencyStore() {
-        noClasses().that().haveSimpleNameNotEndingWith("Repository")
+        DescribedPredicate<JavaClass> notDomainRepository = DescribedPredicate.not(
+                        JavaClass.Predicates.resideInAPackage(INVENTORY)
+                                .and(CanBeAnnotated.Predicates.annotatedWith(Repository.class)))
+                .as("are not @Repository classes in %s", INVENTORY);
+        noClasses().that(notDomainRepository)
                 .and().doNotHaveFullyQualifiedName(IdempotencyStore.class.getName())
                 .should().dependOnClassesThat()
                 .haveNameMatching("org\\.springframework\\.jdbc\\.core\\.simple\\.JdbcClient(\\$.*)?")
