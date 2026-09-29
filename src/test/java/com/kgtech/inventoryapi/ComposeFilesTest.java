@@ -122,8 +122,19 @@ class ComposeFilesTest {
     }
 
     @Test
-    void appPublishes8080() throws IOException {
-        assertThat(strings(service(OVERRIDE, "app").get("ports"), "app ports")).containsExactly("${APP_PORT:-18080}:8080");
+    void appPublishesHostPort8080ByDefault() throws IOException {
+        assertThat(strings(service(OVERRIDE, "app").get("ports"), "app ports")).containsExactly("${APP_PORT:-8080}:8080"); // H13
+    }
+
+    /** H13: Vite defaults to 5173 (VITE_PORT) and proxies to the API on 8080; Playwright uses the same defaults. */
+    @Test
+    void frontendDefaultsToVite5173AndApi8080() throws IOException {
+        String vite = Files.readString(Path.of("frontend/vite.config.ts"));
+        String playwright = Files.readString(Path.of("frontend/playwright.config.ts"));
+
+        assertThat(vite).contains("process.env.VITE_PORT ?? 5173")
+                .contains("process.env.API_URL ?? 'http://localhost:8080'");
+        assertThat(playwright).contains("process.env.VITE_PORT ?? 5173");
     }
 
     @Test
