@@ -2,18 +2,14 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
-import java.util.Optional;
-
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
-import com.kgtech.inventoryapi.idempotency.IdempotentResults;
-import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.DetailsOutcome.AlreadyExists;
 import com.kgtech.inventoryapi.inventory.DetailsOutcome.Created;
 import com.kgtech.inventoryapi.inventory.InventoryItem;
-import com.kgtech.inventoryapi.inventory.SkuId;
+import com.kgtech.inventoryapi.inventory.KeyedResponses;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
 import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
@@ -24,20 +20,17 @@ import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
 import tools.jackson.databind.json.JsonMapper;
 
-/** How keyed write results are checked, stored against an Idempotency-Key and rebuilt (R1, U1, Y4, Z1, A28). */
+/**
+ * How write outcomes become responses: the one rendering an unkeyed answer gets and a keyed one stores against its
+ * Idempotency-Key (R1, U1, Y4, A28, A33).
+ */
 @Component
-final class OutcomeResponses implements IdempotentResults<WriteResult> {
+final class OutcomeResponses implements KeyedResponses {
 
     private final JsonMapper json;
 
     OutcomeResponses(JsonMapper json) {
         this.json = json;
-    }
-
-    /** S2, U3: the same skuId check the service body runs; the rejection is not stored. */
-    @Override
-    public Optional<WriteResult> beforeClaim(Operation operation, String skuId) {
-        return SkuId.rejection(operation, skuId);
     }
 
     /** Y4, R1, U1: exactly the status, Content-Type and body the unkeyed path sends. */
@@ -55,16 +48,6 @@ final class OutcomeResponses implements IdempotentResults<WriteResult> {
             case Stored _, InvalidRequest _ ->
                     throw new IllegalStateException("not a stock outcome: " + result);
         };
-    }
-
-    @Override
-    public WriteResult stored(StoredResponse response) {
-        return new Stored(response);
-    }
-
-    @Override
-    public WriteResult invalidRequest() {
-        return new InvalidRequest();
     }
 
     /** The same status, Content-Type and body the unkeyed path sends (S5). */

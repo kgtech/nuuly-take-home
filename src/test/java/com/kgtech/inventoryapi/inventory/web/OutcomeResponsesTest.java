@@ -2,50 +2,26 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.ResponseEntity;
 
-import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
-import com.kgtech.inventoryapi.inventory.WriteResult;
 
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Z1, S2, R1, U1, Y4: OutcomeResponses is the IdempotentResults for stock writes. beforeClaim applies the skuId check
- * (create 400, purchase 404); toStored renders exactly what the unkeyed path sends; stored and invalidRequest build
- * the outcome values the controller maps. Plain unit test.
+ * R1, U1, Y4, A33: OutcomeResponses is the KeyedResponses the service stores against a key; toStored renders exactly
+ * what the unkeyed path sends. Plain unit test.
  */
 class OutcomeResponsesTest {
 
     private final OutcomeResponses responses = new OutcomeResponses(JsonMapper.builder().build());
-
-    /** S2, Z1: a malformed skuId on create is the 400 outcome. SkuIdTest holds the full skuId matrix. */
-    @Test
-    void beforeClaimRejectsMalformedSkuIdOnCreateAsInvalidRequest() {
-        assertThat(responses.beforeClaim(Operation.ADD, "-bad")).contains(new WriteResult.InvalidRequest());
-    }
-
-    /** S2, Z1: a malformed skuId on purchase is the 404 outcome. */
-    @Test
-    void beforeClaimRejectsMalformedSkuIdOnPurchaseAsNotFound() {
-        assertThat(responses.beforeClaim(Operation.PURCHASE, "-bad")).contains(new StockOutcome.NotFound());
-    }
-
-    /** A valid skuId passes on both operations. */
-    @ParameterizedTest
-    @EnumSource(Operation.class)
-    void beforeClaimPassesValidSkuId(Operation operation) {
-        assertThat(responses.beforeClaim(operation, "CW-XYCS-BM-01")).isEqualTo(Optional.empty());
-    }
 
     static Stream<Arguments> toStoredMatchesUnkeyedResponse() {
         return Stream.of(
@@ -86,17 +62,5 @@ class OutcomeResponsesTest {
     void toStoredUsesGivenSkuId() {
         assertThat(responses.toStored("AbC-1", new StockOutcome.Ok(3)).body())
                 .isEqualTo("{\"skuId\":\"AbC-1\",\"quantity\":3}");
-    }
-
-    @Test
-    void storedWrapsResponse() {
-        StoredResponse response = new StoredResponse(404, "text/plain", "SKU not found");
-
-        assertThat(responses.stored(response)).isEqualTo(new WriteResult.Stored(response));
-    }
-
-    @Test
-    void invalidRequestIsInvalidRequestOutcome() {
-        assertThat(responses.invalidRequest()).isEqualTo(new WriteResult.InvalidRequest());
     }
 }

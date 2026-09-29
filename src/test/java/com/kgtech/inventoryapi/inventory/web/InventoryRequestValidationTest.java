@@ -37,7 +37,7 @@ import com.kgtech.inventoryapi.inventory.WriteResult;
 
 /**
  * Request validation at the HTTP edge: G13/G3 bodies (AC3), G4/U3 ordering, U2/Y1 Accept handling. Every body or
- * Accept 400 is text/plain "Invalid request" and never reaches the service. G11/S2 (Z1): the controller passes a
+ * Accept 400 is text/plain "Invalid request" and never reaches the service. G11/S2 (A33): the controller passes a
  * malformed skuId to the service unchanged and maps the service's outcome; the no-I/O check is in the service tests.
  */
 @WebMvcTest(InventoryController.class)

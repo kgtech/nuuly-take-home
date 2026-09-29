@@ -1,7 +1,6 @@
 package com.kgtech.inventoryapi.idempotency;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -38,25 +37,19 @@ class IdempotencyKeyTest {
     @ParameterizedTest
     @MethodSource("validKeys")
     void validKeysAccepted(String key) {
-        assertThat(IdempotencyKey.isValid(key)).isTrue();
+        assertThat(IdempotencyKey.parse(key)).contains(UUID.fromString(key));
     }
 
     @ParameterizedTest
     @NullSource
     @MethodSource("invalidKeys")
     void invalidKeysRejected(String key) {
-        assertThat(IdempotencyKey.isValid(key)).isFalse();
+        assertThat(IdempotencyKey.parse(key)).isEmpty();
     }
 
-    /** One valid parse: the matrix above already pins which keys are valid. */
+    /** The key is a uuid: case does not matter (S3). */
     @Test
     void parseReturnsSameUuidRegardlessOfCase() {
-        assertThat(IdempotencyKey.parse(UUID_TEXT.toUpperCase())).isEqualTo(UUID.fromString(UUID_TEXT));
-    }
-
-    /** One invalid parse; parse rejects exactly what isValid rejects. */
-    @Test
-    void parseRejectsInvalid() {
-        assertThatThrownBy(() -> IdempotencyKey.parse("1-1-1-1-1")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(IdempotencyKey.parse(UUID_TEXT.toUpperCase())).contains(UUID.fromString(UUID_TEXT));
     }
 }

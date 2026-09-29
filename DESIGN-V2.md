@@ -1,6 +1,6 @@
 # DESIGN-V2: stock in Postgres rows
 
-(§1–§6 describe the design as first built, with a Redis count cache and replay copy; §9 records their removal. Where they disagree, §9 wins.)
+(§1–§6 describe the design as first built, with a Redis count cache and replay copy; §9 records their removal. Where they disagree, §9 wins. §10 replaces the idempotency advice with an explicit call.)
 
 V2 keeps the API contract of `spec/` and `openapi.yaml` unchanged, including the optional `Idempotency-Key` header, the status codes and the text/plain errors. It replaces the storage design underneath: `main` derives every balance from a SERIALIZABLE `SUM` over an append-only ledger and retries serialization failures; V2 keeps a current balance per SKU as a row, updates it conditionally at READ COMMITTED, still appends every change to the ledger, and uses Redis for two things only: a cache of the most-read stock counts, and a cache of completed idempotent responses.
 
@@ -32,8 +32,8 @@ Redis is a cache in both roles. Everything in it can be lost at any moment witho
 2. `INSERT INTO inventory_ledger (..., -:q, 'purchase')`.
 3. Commit, then the same post-commit cache refresh as add.
 
-**Repeated `Idempotency-Key`** (either POST). The key is handled by the idempotent-receiver advice around the service method (Z1 kept), in this order:
-1. Body validation and key format as on `main` (S3, U3); a malformed key is 400 and never stored.
+**Repeated `Idempotency-Key`** (either POST). The service handles the key with an explicit call to `IdempotencyStore.run` (§10; the idempotent-receiver advice of Z1 was kept until then), in this order:
+1. Body validation, then the key format (S3), then the skuId (G11), as U3 orders them (A34); a malformed key or skuId is answered before any I/O and never stored.
 2. **Redis fast path:** `HGETALL idem:{key}`. Hit with the same operation, skuId and request hash → replay the stored response without touching Postgres. Hit with a different operation, skuId or hash → 400 "Invalid request" without touching Postgres. Miss, or Redis unavailable → step 3.
    The copy carries the row's claim time (`created`); its TTL is the time left until `created + 24h`, written atomically with the fields, and a lookup ignores an entry as old as the row's validity, so an expired key always falls through to Postgres, which rejects it (T1). A replay never extends the copy's life.
 3. **Postgres claim** in the stock transaction: `INSERT INTO idempotency_keys ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING`. Claimed → run the write → `UPDATE` the response columns in the same transaction (all-or-none CHECK, Y4) → commit → after commit, `HSET idem:{key} ...` with a 24h TTL. Not claimed → `SELECT` the row (READ COMMITTED: a concurrent claimer's insert blocks this one on the unique index until it commits or rolls back, so the select sees a completed row or, after a rollback, the retry of the claim succeeds): expired or mismatched → 400; else replay the stored response and back-fill Redis.
@@ -107,7 +107,8 @@ Everything not listed here still applies. IDs from `DECISIONS.md` / `CLAUDE.md`;
 | G7 | Correctness is enforced by the conditional `UPDATE ... WHERE quantity >= :q` and `CHECK (quantity >= 0)`, not by SERIALIZABLE plus retries. |
 | G12 | Overflow is rejected by the `UPDATE ... WHERE quantity <= max - :q`; same 400 "Invalid request". |
 | D5 (migrations content), D1/D9 (JPA parts) | Migrations declare `sku.quantity`, `sku.version`, the append-only trigger and Redis is not in Postgres; `spring.jpa.*` settings and the JPA starter are gone. Flyway and `validate`-equivalent checks stay (a test asserts the schema). |
-| Z1 (isolation clauses only) | The idempotency advice keeps its structure and REQUIRES_NEW, but at READ COMMITTED; the "not SERIALIZABLE → IllegalStateException" guard is removed. |
+| Z1 | First kept in structure (advice, REQUIRES_NEW) at READ COMMITTED, without the "not SERIALIZABLE → IllegalStateException" guard; then replaced by an explicit call to `IdempotencyStore.run` with `PROPAGATION_REQUIRED` (§10, A33). |
+| U3, S2, S3 | The key format and the skuId are checked once each, in the service, in that order, before the claim (§10, A34); the advice's copy of the skuId check is gone. |
 | R2 (40001 clause) | A concurrent claim blocks on the unique index instead of raising 40001; after the first commits, the second replays. |
 | D8, S4 (compose content) | compose.yaml runs Postgres **and Redis**; the app depends on both. Reverted by §9: compose runs Postgres alone, as on `main`. |
 | D10 | Package layout gains `cache/` (Redis) beside `inventory/` and `idempotency/`. Reverted by §9: `inventory/` and `idempotency/` only. |
@@ -164,3 +165,30 @@ The four spec operations stay exactly as they are (byte for byte in `openapi.yam
 **Alternative rejected: keep the cache.** It would have kept a second store to run, monitor and keep consistent, a staleness bound to test and a second clock for key expiry, for a read path that is one primary-key lookup; the owner judged that a wrong trade for this scenario. `sku.version` stays as it is: a change counter bumped by every stock write, read by nothing today. Dropping it would be a second migration and a change to every stock statement for one column; keeping it costs nothing at runtime and it is the optimistic-concurrency token a future `If-Match` on stock or §3's refresh would need. The YAGNI trade is stated, not hidden.
 
 **Superseded by this section.** The title and the introduction as first written, §1 (the Redis column and "Redis is a cache in both roles"), §2 step 2 (the Redis fast path) and step 4 (post-commit refresh), §3 entirely, §4 rows about Redis, §5 alternatives 3–6 (now moot), §6 rows "Reads", "Idempotency", "Moving parts" and the Redis tuning values, A3–A9, A13, A15, A16 the Redis parts of §8 "Reads" (v2 never used the cache; now nothing does), and the §7 rows for D8/S4 and D10 (marked there). Everything else, including the rest of §7 and §8, still applies.
+
+## 10. Idempotency-Key as an explicit call
+
+**Decision** (issue #81, A33, A34). The keyed POSTs no longer go through spring-aop advice. `InventoryService.add`, `purchase` and `create`:
+1. parse the Idempotency-Key (`IdempotencyKey.parse`; a malformed key, `""` included, is 400);
+2. check the skuId (create 400, purchase 404);
+3. without a key, run the write in their own READ COMMITTED `TransactionTemplate`, as before;
+4. with a key, pass the write to `IdempotencyStore.run(key, operation, skuId, canonicalRequest, write)`.
+
+Neither rejection is stored. `run` opens a READ COMMITTED transaction (`PROPAGATION_REQUIRED`), or joins a READ COMMITTED or DEFAULT caller's transaction and refuses any other isolation (`IllegalStateException`); when joined, the caller's `now()` (T1) and rollback scope apply, so the key expires by the caller's transaction start and a failed write marks the caller's transaction rollback-only. A stricter caller is refused because the claim would run at its isolation, where a concurrent claim of the same key fails with 40001 instead of replaying. In that transaction, `run` claims the key, runs the write and stores its response (§2 step 3), or replays or rejects: a different operation, skuId or request (S8), a key older than 24 h (T1), or a response cleared by the README's retention clean-up (A18).
+
+**Why.** Z1 put the advice between `@Retryable` and a SERIALIZABLE transaction, so each retry attempt had to re-claim in a new transaction; the proxy order [Retry, Idempotency, Tx] was the point. §7 removed the isolation and the retry, and the advice was left with nothing to order. What remained cost more than it gave:
+- a pointcut that checked method signatures by reflection;
+- an interceptor that read arguments by position;
+- a generic result strategy looked up per method, with one implementation;
+- a skuId check run twice, once by the advice and once by the service;
+- a `REQUIRES_NEW` that would have suspended a caller's transaction instead of joining it.
+
+The explicit call puts the order of checks in one method a reader can follow.
+
+**Unchanged.** The claim, replay and reject rules and the stored bytes (Y4) are unchanged, and so is the 24 h expiry by the database clock. The stock POSTs' canonical request is still the quantity's digits and the create's is still `CreateSku.fingerprint()`, so rows stored before this change replay unchanged (Y3). The outcome is still rendered to a `StoredResponse` in the web layer: the domain declares `KeyedResponses` and `OutcomeResponses` implements it, so the domain package still imports no HTTP type (Z2). No API, `openapi.yaml`, migration or front-end change.
+
+**Rejected alternatives.**
+- **Keep the advice with `REQUIRED`.** That fixes the propagation but keeps the positional contract, the reflection check and the double skuId check.
+- **Store a domain outcome instead of an HTTP response.** That would drop `content_type` and the status CHECK, so it needs a migration and a new replay format (Y4). It is left for a follow-up.
+
+**Superseded by this section.** The §2 wording "advice around the service method (Z1 kept)", the §7 Z1 row as first written, the §9 phrase "the `@Idempotent` interceptor claims and replays", A10 and A29 (the `Fingerprinted` contract; the canonical form it defined stays).

@@ -3,6 +3,8 @@ package com.kgtech.inventoryapi.inventory;
 import java.math.BigInteger;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
@@ -10,12 +12,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.kgtech.inventoryapi.idempotency.Idempotent;
+import com.kgtech.inventoryapi.idempotency.IdempotencyKey;
+import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
+import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
 import com.kgtech.inventoryapi.idempotency.Operation;
 
 /**
- * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2); the
- * Idempotency-Key is handled by the @Idempotent interceptor (Z1). Reads are one row lookup (§9: no cache). The v2
+ * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2); with
+ * an Idempotency-Key the write runs through IdempotencyStore (A33). Reads are one row lookup (§9: no cache). The v2
  * details operations (§8) share the transaction template.
  */
 @Service
@@ -33,64 +37,88 @@ public class InventoryService {
 
     private final StockRepository stock;
     private final DetailsRepository details;
+    private final IdempotencyStore idempotency;
+    private final KeyedResponses responses;
     private final TransactionTemplate transaction;
 
-    InventoryService(StockRepository stock, DetailsRepository details, PlatformTransactionManager transactionManager) {
+    InventoryService(StockRepository stock, DetailsRepository details, IdempotencyStore idempotency,
+            KeyedResponses responses, PlatformTransactionManager transactionManager) {
         this.stock = stock;
         this.details = details;
+        this.idempotency = idempotency;
+        this.responses = responses;
         this.transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
-    @Idempotent(Operation.ADD)
+    /** A malformed skuId is 400 "Invalid request" (G11). */
     public WriteResult add(String skuId, int quantity, String idempotencyKey) {
-        Optional<WriteResult> rejected = SkuId.rejection(Operation.ADD, skuId);
-        if (rejected.isPresent()) {
-            return rejected.get(); // S2: no repository or transaction access
-        }
         requirePositive(quantity);
-        return transaction.execute(status -> stock.add(skuId, quantity)
-                .<WriteResult>map(InventoryService::ok)
-                .orElseGet(StockOutcome.Overflow::new));
+        return write(Operation.ADD, skuId, idempotencyKey, Integer.toString(quantity), new WriteResult.InvalidRequest(),
+                () -> stock.add(skuId, quantity)
+                        .<WriteResult>map(InventoryService::ok)
+                        .orElseGet(StockOutcome.Overflow::new));
     }
 
-    @Idempotent(Operation.PURCHASE)
+    /** A malformed skuId is 404 "SKU not found": GET and purchase have no 400 for it in the spec (G11). */
     public WriteResult purchase(String skuId, int quantity, String idempotencyKey) {
-        Optional<WriteResult> rejected = SkuId.rejection(Operation.PURCHASE, skuId);
-        if (rejected.isPresent()) {
-            return rejected.get();
-        }
         requirePositive(quantity);
-        return transaction.execute(status -> stock.purchase(skuId, quantity)
-                .<WriteResult>map(InventoryService::ok)
-                .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient() : new StockOutcome.NotFound()));
+        return write(Operation.PURCHASE, skuId, idempotencyKey, Integer.toString(quantity), new StockOutcome.NotFound(),
+                () -> stock.purchase(skuId, quantity)
+                        .<WriteResult>map(InventoryService::ok)
+                        .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient()
+                                : new StockOutcome.NotFound()));
     }
 
     /**
      * DESIGN-V2 §8 "Create": one READ COMMITTED transaction in lock order sku row → details row → ledger. The SKU
      * row's INSERT decides create (row back) or 409 (no row); initial stock goes through the spec's add path and
-     * ledger row. A new row at 0 cannot overflow an int32 initial quantity.
+     * ledger row. A new row at 0 cannot overflow an int32 initial quantity. A malformed skuId is 400.
      */
-    @Idempotent(Operation.CREATE)
     public WriteResult create(String skuId, CreateSku request, String idempotencyKey) {
-        Optional<WriteResult> rejected = SkuId.rejection(Operation.CREATE, skuId);
-        if (rejected.isPresent()) {
-            return rejected.get();
+        return write(Operation.CREATE, skuId, idempotencyKey, request.fingerprint(), new WriteResult.InvalidRequest(),
+                () -> {
+                    if (!details.claimSku(skuId)) {
+                        return new DetailsOutcome.AlreadyExists();
+                    }
+                    long version = details.insert(skuId, request.details());
+                    long quantity = 0;
+                    if (request.initialQuantity() > 0) {
+                        quantity = stock.add(skuId, request.initialQuantity())
+                                .orElseThrow(() -> new IllegalStateException("a new SKU cannot overflow: " + skuId))
+                                .quantity();
+                    }
+                    return new DetailsOutcome.Created(
+                            new SkuItem(skuId, quantity, Optional.of(request.details()), version));
+                });
+    }
+
+    /**
+     * U3 after the controller's body validation: the Idempotency-Key format (S3), then the skuId (G11, S2), each once,
+     * before any I/O and never stored. Without a key (G8) the write runs in the service's own READ COMMITTED
+     * transaction. With one, IdempotencyStore.run claims the key, runs the write and stores its response in one
+     * transaction: run opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's transaction
+     * and refuses any other isolation (IllegalStateException); when joined, the caller's now() (T1) and rollback scope
+     * apply (A33).
+     */
+    private WriteResult write(Operation operation, String skuId, String idempotencyKey, String canonicalRequest,
+            WriteResult malformedSkuId, Supplier<WriteResult> action) {
+        if (idempotencyKey == null) {
+            return SkuId.isValid(skuId) ? transaction.execute(status -> action.get()) : malformedSkuId;
         }
-        return transaction.execute(status -> {
-            if (!details.claimSku(skuId)) {
-                return new DetailsOutcome.AlreadyExists();
-            }
-            long version = details.insert(skuId, request.details());
-            long quantity = 0;
-            if (request.initialQuantity() > 0) {
-                quantity = stock.add(skuId, request.initialQuantity())
-                        .orElseThrow(() -> new IllegalStateException("a new SKU cannot overflow: " + skuId))
-                        .quantity();
-            }
-            return new DetailsOutcome.Created(new SkuItem(skuId, quantity, Optional.of(request.details()), version));
-        });
+        Optional<UUID> key = IdempotencyKey.parse(idempotencyKey);
+        if (key.isEmpty()) {
+            return new WriteResult.InvalidRequest();
+        }
+        if (!SkuId.isValid(skuId)) {
+            return malformedSkuId;
+        }
+        return switch (idempotency.run(key.get(), operation, skuId, canonicalRequest,
+                () -> responses.toStored(skuId, action.get()))) {
+            case Keyed.Response response -> new WriteResult.Stored(response.response());
+            case Keyed.Invalid _ -> new WriteResult.InvalidRequest();
+        };
     }
 
     /** DESIGN-V2 §8 "Edit": full replacement in one transaction; never touches the balance row or the ledger. */
