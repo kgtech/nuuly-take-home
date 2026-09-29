@@ -72,7 +72,7 @@ class RouteGuardCoverageTest {
     private static Answer frozenAnswer(RouteKind kind, HttpMethod method) {
         boolean read = HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method);
         return switch (kind) {
-            case ITEM -> read ? NOT_FOUND : (HttpMethod.POST.equals(method) || HttpMethod.PUT.equals(method)) ? INVALID : null;
+            case ITEM -> read ? NOT_FOUND : HttpMethod.POST.equals(method) ? INVALID : null;
             case PURCHASE -> HttpMethod.POST.equals(method) ? NOT_FOUND : null;
             case DETAILS -> HttpMethod.PUT.equals(method) ? INVALID : null;
             case LIST, OTHER -> null;
@@ -121,13 +121,15 @@ class RouteGuardCoverageTest {
         return false;
     }
 
-    /** Guards the guard: an empty enumeration (a changed mapping style, say) must not pass silently. */
+    /** Guards the guard: an empty enumeration (a changed mapping style, say) must not pass silently; OD-6 removed PUT item. */
     @Test
     void enumerationFindsTheKnownRoutes() {
         List<String> routes = skuRoutes().stream().map(e -> e.getKey() + " " + e.getValue()).toList();
 
-        assertThat(routes).contains("GET /inventory/{skuId}", "POST /inventory/{skuId}",
-                "POST /inventory/{skuId}/purchase", "GET /v2/inventory/{skuId}", "POST /v2/inventory/{skuId}");
+        assertThat(routes).containsExactlyInAnyOrder("GET /inventory/{skuId}", "HEAD /inventory/{skuId}",
+                "POST /inventory/{skuId}", "POST /inventory/{skuId}/purchase", "GET /v2/inventory/{skuId}",
+                "HEAD /v2/inventory/{skuId}", "POST /v2/inventory/{skuId}", "POST /v2/inventory/{skuId}/purchase",
+                "PUT /v2/inventory/{skuId}/details");
     }
 
     @TestFactory

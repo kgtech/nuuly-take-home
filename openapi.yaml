@@ -268,11 +268,10 @@ paths:
       tags:
       - inventory-v2
     post:
-      description: "Creates the SKU with its details and optional initial stock in\
-        \ one transaction; initial stock is recorded in the ledger like an add. A\
-        \ SKU that already exists (including one created by POST /inventory/{skuId})\
-        \ is 409; set its details with PUT and add stock with POST /inventory/{skuId}."
-      operationId: createSku
+      description: "Adds stock, creating the SKU if needed; like POST /inventory/{skuId},\
+        \ but the Idempotency-Key is required and the response is a SkuItem. The same\
+        \ key with the same request replays the first response."
+      operationId: addStock
       parameters:
       - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
           \ starting with a letter or digit. Case-sensitive."
@@ -284,12 +283,12 @@ paths:
           maxLength: 64
           minLength: 1
           pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-      - description: "Optional UUID. The same key with the same request replays the\
-          \ first response. A different request, or a key older than 24h, returns\
-          \ 400."
+      - description: "Required UUID. The same key with the same request replays the\
+          \ first response. A missing or malformed key, a different request, or a\
+          \ key older than 24h returns 400."
         in: header
         name: Idempotency-Key
-        required: false
+        required: true
         schema:
           type: string
           format: uuid
@@ -297,65 +296,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateSkuRequest"
-        required: true
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SkuItem"
-          description: The created SKU
-          headers:
-            ETag:
-              description: "The details version of a new SKU, always \"1\" (also on\
-                \ a replayed 201, even after a later PUT)"
-              schema:
-                type: string
-              style: simple
-        "400":
-          content:
-            text/plain:
-              schema:
-                type: string
-          description: Invalid request
-        "409":
-          content:
-            text/plain:
-              schema:
-                type: string
-          description: "SKU already exists. Set its details with PUT /v2/inventory/{skuId};\
-            \ add stock with POST /inventory/{skuId}."
-      summary: Create a SKU with details
-      tags:
-      - inventory-v2
-    put:
-      description: "Replaces the SKU's details (creates them for a SKU that has none).\
-        \ Stock is not changed. With If-Match, the details are replaced only when\
-        \ their current ETag is one of the listed values, else 412."
-      operationId: replaceSkuDetails
-      parameters:
-      - description: Optional strong ETag(s) from a previous response; "*" or absent
-          means unconditional
-        in: header
-        name: If-Match
-        schema:
-          type: string
-      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
-          \ starting with a letter or digit. Case-sensitive."
-        in: path
-        name: skuId
-        required: true
-        schema:
-          type: string
-          maxLength: 64
-          minLength: 1
-          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SkuDetails"
+              $ref: "#/components/schemas/InventoryQuantity"
         required: true
       responses:
         "200":
@@ -364,33 +305,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/SkuItem"
           description: The SKU after the update
-          headers:
-            ETag:
-              description: "The details version, a strong validator for If-Match;\
-                \ \"0\" before any details"
-              schema:
-                type: string
-              style: simple
         "400":
           content:
             text/plain:
               schema:
                 type: string
           description: Invalid request
-        "404":
-          content:
-            text/plain:
-              schema:
-                type: string
-          description: SKU not found
-        "412":
-          content:
-            text/plain:
-              schema:
-                type: string
-          description: Details changed since you read them. Reload the SKU and retry
-            with its new ETag.
-      summary: Replace a SKU's details
+      summary: Add stock to a SKU
       tags:
       - inventory-v2
   /v2/inventory/{skuId}/details:
@@ -473,22 +394,62 @@ paths:
       summary: Create a SKU or replace its details
       tags:
       - inventory-v2
+  /v2/inventory/{skuId}/purchase:
+    post:
+      description: "Like POST /inventory/{skuId}/purchase, but the Idempotency-Key\
+        \ is required and the response is a SkuItem. The same key with the same request\
+        \ replays the first response."
+      operationId: purchaseStock
+      parameters:
+      - description: "SKU ID: 1 to 64 characters; letters, digits, '.', '_' or '-',\
+          \ starting with a letter or digit. Case-sensitive."
+        in: path
+        name: skuId
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+          minLength: 1
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      - description: "Required UUID. The same key with the same request replays the\
+          \ first response. A missing or malformed key, a different request, or a\
+          \ key older than 24h returns 400."
+        in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InventoryQuantity"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkuItem"
+          description: Purchase successful; the SKU with its remaining quantity
+        "400":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: Insufficient inventory or invalid request
+        "404":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: SKU not found
+      summary: Purchase a quantity of a SKU
+      tags:
+      - inventory-v2
 components:
   schemas:
-    CreateSkuRequest:
-      type: object
-      properties:
-        details:
-          $ref: "#/components/schemas/SkuDetails"
-        initialQuantity:
-          type: integer
-          format: int32
-          default: 0
-          description: "Stock to record at creation (absent or null means 0), through\
-            \ the same ledger as an add"
-          minimum: 0
-      required:
-      - details
     InventoryItem:
       type: object
       properties:

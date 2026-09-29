@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -41,18 +40,11 @@ class InventoryServiceWriteChecksTest {
 
     private static final String KEY = "3f2b8c1e-9a4d-4e7f-b6a0-1c2d3e4f5a6b";
     private static final StoredResponse STORED = new StoredResponse(200, "application/json", "{\"stored\":true}");
-    private static final CreateSku CREATE_REQUEST =
-            new CreateSku(new SkuDetails("Shirt", "", Optional.empty(), List.of()), 7);
 
-    /**
-     * The three keyed writes, each with the answer a malformed skuId gets (G11: only purchase is 404) and its unkeyed
-     * result from the stubs in setUp (create adds its 7 through the stubbed add, so its quantity is 12 too).
-     */
+    /** The two keyed writes, each with the answer a malformed skuId gets (G11: only purchase is 404) and its unkeyed result. */
     enum Write {
         ADD(Operation.ADD, new WriteResult.InvalidRequest(), "7", new StockOutcome.Ok(12)),
-        PURCHASE(Operation.PURCHASE, new StockOutcome.NotFound(), "7", new StockOutcome.Ok(3)),
-        CREATE(Operation.CREATE, new WriteResult.InvalidRequest(), CREATE_REQUEST.fingerprint(),
-                new DetailsOutcome.Created(new SkuItem("widget", 12, Optional.of(CREATE_REQUEST.details()), 0)));
+        PURCHASE(Operation.PURCHASE, new StockOutcome.NotFound(), "7", new StockOutcome.Ok(3));
 
         final Operation operation;
         final WriteResult malformedSkuId;
@@ -70,7 +62,6 @@ class InventoryServiceWriteChecksTest {
             return switch (this) {
                 case ADD -> service.add(skuId, 7, key);
                 case PURCHASE -> service.purchase(skuId, 7, key);
-                case CREATE -> service.create(skuId, CREATE_REQUEST, key);
             };
         }
     }
@@ -88,7 +79,6 @@ class InventoryServiceWriteChecksTest {
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(stock.add("widget", 7)).thenReturn(Optional.of(new Balance(12, 2)));
         when(stock.purchase("widget", 7)).thenReturn(Optional.of(new Balance(3, 2)));
-        when(details.claimSku("widget")).thenReturn(true);
         when(responses.toStored(any(), any())).thenReturn(STORED);
     }
 

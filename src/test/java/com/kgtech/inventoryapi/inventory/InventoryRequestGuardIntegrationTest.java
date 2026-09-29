@@ -31,8 +31,8 @@ import com.kgtech.inventoryapi.IntegrationTest;
 /**
  * Issue #23 (C-04, C-34), F-04 (H11, L21): the request guard's rules hold on every write route of both versions: a raw
  * ';' (or %3B) in the SKU segment, an Accept that excludes JSON, and a body over the cap write nothing. The routes
- * are the spec's, build v2's, and the ones F-04 adds a guard for (v2 purchase and details); the guard answers before
- * routing, so a route that does not exist yet still gets its frozen answer. The filter runs before @Valid (H-M13).
+ * are the spec's and the /v2 add, purchase and details PUT; the guard answers before routing. The filter runs before
+ * @Valid (H-M13).
  */
 @IntegrationTest
 @AutoConfigureMockMvc
@@ -55,7 +55,6 @@ class InventoryRequestGuardIntegrationTest {
 
     private static final String QUANTITY = "{\"quantity\":1";
     private static final String DETAILS = "{\"name\":\"n\"";
-    private static final String V2_CREATE = "{\"details\":{\"name\":\"n\"},\"initialQuantity\":1";
 
     /** A write route of either version: method, path with the SKU ABC-1, and a valid body's JSON without its closing brace. */
     private record Route(HttpMethod method, String path, String body, int cap) {
@@ -66,15 +65,13 @@ class InventoryRequestGuardIntegrationTest {
         }
     }
 
-    // The v2 item POST (create) cap is temporary: that route is repurposed later, and its cap follows the new route.
     private static final Route POST_ITEM = new Route(HttpMethod.POST, "/inventory/ABC-1", QUANTITY, 4096);
     private static final Route POST_PURCHASE = new Route(HttpMethod.POST, "/inventory/ABC-1/purchase", QUANTITY, 4096);
-    private static final Route V2_POST_ITEM = new Route(HttpMethod.POST, "/v2/inventory/ABC-1", V2_CREATE, 65_536);
+    private static final Route V2_POST_ITEM = new Route(HttpMethod.POST, "/v2/inventory/ABC-1", QUANTITY, 4096);
     private static final Route V2_POST_PURCHASE = new Route(HttpMethod.POST, "/v2/inventory/ABC-1/purchase", QUANTITY, 4096);
-    private static final Route V2_PUT_ITEM = new Route(HttpMethod.PUT, "/v2/inventory/ABC-1", DETAILS, 65_536);
     private static final Route V2_PUT_DETAILS = new Route(HttpMethod.PUT, "/v2/inventory/ABC-1/details", DETAILS, 65_536);
     private static final Route[] WRITE_ROUTES =
-            {POST_ITEM, POST_PURCHASE, V2_POST_ITEM, V2_POST_PURCHASE, V2_PUT_ITEM, V2_PUT_DETAILS};
+            {POST_ITEM, POST_PURCHASE, V2_POST_ITEM, V2_POST_PURCHASE, V2_PUT_DETAILS};
 
     private MockHttpServletResponse send(MockHttpServletRequestBuilder request) throws Exception {
         return mvc.perform(request).andReturn().getResponse();
@@ -116,11 +113,12 @@ class InventoryRequestGuardIntegrationTest {
                 Arguments.of("v2 get", get("/v2/inventory/ABC-1;x=y").accept(APPLICATION_JSON), 404, "SKU not found"),
                 Arguments.of("v2 get, %3B", get(URI.create("/v2/inventory/ABC-1%3Bx")).accept(APPLICATION_JSON), 404,
                         "SKU not found"),
-                Arguments.of("v2 create", write(V2_POST_ITEM, "/v2/inventory/ABC-1;lot=7", "application/json"), 400,
+                Arguments.of("v2 add", write(V2_POST_ITEM, "/v2/inventory/ABC-1;lot=7", "application/json"), 400,
                         "Invalid request"),
-                Arguments.of("v2 create, %3B", write(V2_POST_ITEM, "/v2/inventory/ABC-1%3Blot=7", "application/json"),
+                Arguments.of("v2 add, %3B", write(V2_POST_ITEM, "/v2/inventory/ABC-1%3Blot=7", "application/json"),
                         400, "Invalid request"),
-                Arguments.of("v2 put item", write(V2_PUT_ITEM, "/v2/inventory/ABC-1;lot=7", "application/json"), 400,
+                Arguments.of("v2 add, ';' and a bad body",
+                        write(HttpMethod.POST, "/v2/inventory/ABC-1;x", "{\"quantity\":0}", "application/json"), 400,
                         "Invalid request"),
                 Arguments.of("v2 purchase", write(V2_POST_PURCHASE, "/v2/inventory/ABC-1;x/purchase", "application/json"),
                         404, "SKU not found"),
@@ -203,7 +201,7 @@ class InventoryRequestGuardIntegrationTest {
         return head + "d".repeat(bytes - head.length() - 2) + "\"}";
     }
 
-    /** A body over the cap is 400 by Content-Length alone (A19, H11): 4 KB on the spec's routes, 64 KB on /v2 writes. */
+    /** A body over the cap is 400 by Content-Length alone (A19, H11): 4 KB on every POST, 64 KB on the details PUT. */
     @ParameterizedTest(name = "{0}")
     @MethodSource("capRoutes")
     void bodyOverTheCapIs400AndWritesNothing(Route route) throws Exception {
@@ -228,10 +226,19 @@ class InventoryRequestGuardIntegrationTest {
         assertThat(send(write(POST_ITEM.method(), POST_ITEM.path(), padded(POST_ITEM, 4096), "application/json"))
                 .getStatus()).isEqualTo(200);
         assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'ABC-1'").query(Long.class).single()).isEqualTo(5);
-        // v2 create: temporary, follows the route's repurposing
-        Route create = new Route(HttpMethod.POST, "/v2/inventory/AT-CAP", V2_CREATE, 65_536);
-        assertThat(send(write(create.method(), create.path(), padded(create, 65_536), "application/json"))
-                .getStatus()).isEqualTo(201);
+        // the /v2 POSTs have the same 4096-byte cap, on a SKU of their own so ABC-1's balance stays untouched
+        Route add = new Route(HttpMethod.POST, "/v2/inventory/AT-CAP", QUANTITY, 4096);
+        Route purchase = new Route(HttpMethod.POST, "/v2/inventory/AT-CAP/purchase", QUANTITY, 4096);
+        MockHttpServletResponse added = send(write(add.method(), add.path(), padded(add, 4096), "application/json"));
+        assertThat(added.getStatus()).as(added.getContentAsString()).isEqualTo(200);
+        MockHttpServletResponse bought = send(write(purchase.method(), purchase.path(), padded(purchase, 4096),
+                "application/json"));
+        assertThat(bought.getStatus()).as(bought.getContentAsString()).isEqualTo(200);
+        assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'AT-CAP'").query(Long.class).single()).isZero();
+        // the details PUT keeps 65,536
+        Route details = new Route(HttpMethod.PUT, "/v2/inventory/AT-CAP/details", DETAILS, 65_536);
+        assertThat(send(write(details.method(), details.path(), padded(details, 65_536), "application/json"))
+                .getStatus()).isEqualTo(200);
     }
 
     private void assertNothingWritten() {

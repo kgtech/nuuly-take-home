@@ -12,13 +12,16 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import com.kgtech.inventoryapi.inventory.DetailsPrecondition;
 
-/** DESIGN-V2 §8 "Edit": If-Match per RFC 9110 §13.1.1, strong comparison; malformed → empty (400). */
+/**
+ * PUT .../details (OD-6, OD-11): If-Match per RFC 9110 §13.1.1, strong comparison, and If-None-Match: * per §13.1.2;
+ * malformed → empty (400). Only parsePut exists: "*" in If-Match means the SKU must exist (Exists), not "any".
+ */
 class IfMatchTest {
 
     static Stream<Arguments> parsed() {
         return Stream.of(
                 Arguments.of(List.of(), Optional.of(new DetailsPrecondition.Any())),
-                Arguments.of(List.of("*"), Optional.of(new DetailsPrecondition.Any())),
+                Arguments.of(List.of("*"), Optional.of(new DetailsPrecondition.Exists())),
                 Arguments.of(List.of("\"3\""), Optional.of(new DetailsPrecondition.Versions(List.of(3L)))),
                 Arguments.of(List.of("\"3\", \"7\""), Optional.of(new DetailsPrecondition.Versions(List.of(3L, 7L)))),
                 Arguments.of(List.of("\"3\"", "\"7\""), Optional.of(new DetailsPrecondition.Versions(List.of(3L, 7L)))),
@@ -40,6 +43,28 @@ class IfMatchTest {
     @ParameterizedTest(name = "{0} → {1}")
     @MethodSource("parsed")
     void parses(List<String> headerValues, Optional<DetailsPrecondition> expected) {
-        assertThat(IfMatch.parse(headerValues)).isEqualTo(expected);
+        assertThat(IfMatch.parsePut(headerValues, List.of())).isEqualTo(expected);
+    }
+
+    static Stream<Arguments> withIfNoneMatch() {
+        return Stream.of(
+                Arguments.of(List.of(), List.of("*"), Optional.of(new DetailsPrecondition.Absent())),
+                Arguments.of(List.of(), List.of(" * "), Optional.of(new DetailsPrecondition.Absent())),
+                // both present fail on every SKU: a version list that never matches
+                Arguments.of(List.of("\"1\""), List.of("*"), Optional.of(new DetailsPrecondition.Versions(List.of()))),
+                Arguments.of(List.of("*"), List.of("*"), Optional.of(new DetailsPrecondition.Versions(List.of()))),
+                // malformed values are 400 whatever else was sent
+                Arguments.of(List.of("abc"), List.of("*"), Optional.empty()),
+                Arguments.of(List.of(), List.of("\"1\""), Optional.empty()),
+                Arguments.of(List.of(), List.of("W/\"1\""), Optional.empty()),
+                Arguments.of(List.of(), List.of(""), Optional.empty()),
+                Arguments.of(List.of(), List.of("*, \"1\""), Optional.empty()),
+                Arguments.of(List.of(), List.of("*", "*"), Optional.empty()));
+    }
+
+    @ParameterizedTest(name = "If-Match {0}, If-None-Match {1} → {2}")
+    @MethodSource("withIfNoneMatch")
+    void parsesBothHeaders(List<String> ifMatch, List<String> ifNoneMatch, Optional<DetailsPrecondition> expected) {
+        assertThat(IfMatch.parsePut(ifMatch, ifNoneMatch)).isEqualTo(expected);
     }
 }

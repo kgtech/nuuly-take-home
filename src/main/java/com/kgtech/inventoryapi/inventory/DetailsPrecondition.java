@@ -2,10 +2,10 @@ package com.kgtech.inventoryapi.inventory;
 
 import java.util.List;
 
-/** What a PUT of details requires of the current details version (DESIGN-V2 §8 "Edit"): nothing, or one of these. */
+/** What a PUT of details requires of the current details version: nothing, or one of these. */
 public sealed interface DetailsPrecondition {
 
-    /** No condition, or the old PUT's If-Match "*": last write wins. */
+    /** No condition: last write wins. */
     record Any() implements DetailsPrecondition {
     }
 

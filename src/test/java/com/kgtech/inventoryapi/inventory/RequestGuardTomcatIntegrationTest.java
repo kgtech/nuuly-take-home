@@ -46,7 +46,7 @@ class RequestGuardTomcatIntegrationTest {
         Tables.seed(jdbc, "ABC-1", 5);
     }
 
-    private static final String V2_BODY = "{\"details\":{\"name\":\"n\"},\"initialQuantity\":1}";
+    private static final String QUANTITY_JSON = "{\"quantity\":1}";
 
     static Stream<Arguments> requests() {
         return Stream.of(
@@ -59,11 +59,10 @@ class RequestGuardTomcatIntegrationTest {
                 // v2 (DESIGN-V2 §8, review R-06a): the same guard on the routed path
                 Arguments.of("GET /v2/inventory/ABC-1%3Blot=7", "", null, 404, "SKU not found"),
                 Arguments.of("GET /v2/inventory/A%2FB", "", null, 404, "SKU not found"),
-                Arguments.of("POST /v2/inventory/ABC-1%3Blot=7", V2_BODY, null, 400, "Invalid request"),
-                Arguments.of("POST /v2/inventory/A%2FB", V2_BODY, null, 400, "Invalid request"),
-                Arguments.of("PUT /v2/inventory/ABC-1;lot=7", "{\"name\":\"n\"}", null, 400, "Invalid request"),
-                Arguments.of("PUT /v2/%69nventory/A%2FB", "{\"name\":\"n\"}", null, 400, "Invalid request"),
-                Arguments.of("POST /v2/inventory/NEW-9", V2_BODY, "application/json;q=0", 400, "Invalid request"),
+                Arguments.of("POST /v2/inventory/ABC-1%3Blot=7", QUANTITY_JSON, null, 400, "Invalid request"),
+                Arguments.of("POST /v2/inventory/A%2FB", QUANTITY_JSON, null, 400, "Invalid request"),
+                Arguments.of("PUT /v2/%69nventory/A%2FB/details", "{\"name\":\"n\"}", null, 400, "Invalid request"),
+                Arguments.of("POST /v2/inventory/NEW-9", QUANTITY_JSON, "application/json;q=0", 400, "Invalid request"),
                 // F-04: purchase and details are guarded like the other v2 writes
                 Arguments.of("POST /v2/inventory/ABC-1%3Bx/purchase", "{\"quantity\":1}", null, 404, "SKU not found"),
                 Arguments.of("POST /v2;a=b/%69nventory/ABC-1;x/purchase;y", "{\"quantity\":1}", null, 404,
@@ -73,7 +72,7 @@ class RequestGuardTomcatIntegrationTest {
                 Arguments.of("POST /v2/inventory/ABC-1/purchase", "{\"quantity\":1}", "application/json;q=0", 400,
                         "Invalid request"),
                 Arguments.of("PUT /v2/inventory/ABC-1/details", "{\"name\":\"n\"}", "text/html", 400, "Invalid request"),
-                Arguments.of("PUT /v2/inventory/ABC-1", "{\"name\":\"n\"}", "text/html", 400, "Invalid request"));
+                Arguments.of("POST /v2/inventory/ABC-1", QUANTITY_JSON, "text/html", 400, "Invalid request"));
     }
 
     @ParameterizedTest(name = "{0} accept={2}")
@@ -100,20 +99,20 @@ class RequestGuardTomcatIntegrationTest {
     private static final String DETAILS_BODY = "{\"name\":\"n\"";
 
     static Stream<Arguments> chunkedBodies() {
-        String v2Create = "{\"details\":{\"name\":\"n\"},\"initialQuantity\":1";
         return Stream.of(
-                Arguments.of("POST /v2/inventory/CH-1", v2Create, 40_000, 201),
-                Arguments.of("POST /v2/inventory/CH-1", v2Create, 70_000, 400),
-                Arguments.of("PUT /v2/inventory/CH-1", DETAILS_BODY, 70_000, 400),
+                Arguments.of("POST /v2/inventory/CH-1", QUANTITY_BODY, 2_000, 200),
+                Arguments.of("POST /v2/inventory/CH-1", QUANTITY_BODY, 5_000, 400),
+                Arguments.of("POST /v2/inventory/CH-1", QUANTITY_BODY, 70_000, 400),
+                Arguments.of("POST /v2/inventory/ABC-1/purchase", QUANTITY_BODY, 5_000, 400),
+                Arguments.of("PUT /v2/inventory/CH-1/details", DETAILS_BODY, 40_000, 201),
                 Arguments.of("PUT /v2/inventory/CH-1/details", DETAILS_BODY, 70_000, 400),
-                // the chunked v2 purchase row is added by the v2 add/purchase PR that maps that route: a count-while-read cap needs a handler
                 // frozen, not changed (A19): an unversioned chunked body is not capped while read
                 Arguments.of("POST /inventory/CH-1", QUANTITY_BODY, 70_000, 200));
     }
 
     /**
-     * Review R-01, F-04: a chunked body (no Content-Length) is counted as it is read on every v2 write route, purchase
-     * and details included; one within the cap is accepted.
+     * Review R-01, F-04: a chunked body (no Content-Length) is counted as it is read on every v2 write route: 4096 bytes
+     * on the two POSTs, 65,536 on the details PUT; one within the cap is accepted.
      */
     @ParameterizedTest(name = "chunked {0} of about {2} bytes → {3}")
     @MethodSource("chunkedBodies")
@@ -135,8 +134,9 @@ class RequestGuardTomcatIntegrationTest {
             assertThat(response.body()).isEqualTo("Invalid request");
             assertThat(Tables.counts(jdbc)).isEqualTo(before);
         } else {
+            // the add creates CH-1 with 1; the details PUT creates it at 0
             assertThat(jdbc.sql("SELECT quantity FROM sku WHERE sku_id = 'CH-1'").query(Long.class).single())
-                    .isEqualTo(1);
+                    .isEqualTo(requestLine.contains("/details") ? 0 : 1);
         }
     }
 

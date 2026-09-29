@@ -83,12 +83,14 @@ class ApiDocsTest {
         Map<String, Map<String, Map<String, Object>>> paths = operations();
 
         assertThat(paths.keySet()).containsExactlyInAnyOrder("/inventory", "/inventory/{skuId}",
-                "/inventory/{skuId}/purchase", "/v2/inventory", "/v2/inventory/{skuId}", "/v2/inventory/{skuId}/details");
+                "/inventory/{skuId}/purchase", "/v2/inventory", "/v2/inventory/{skuId}", "/v2/inventory/{skuId}/purchase",
+                "/v2/inventory/{skuId}/details");
         assertThat(paths.get("/inventory").keySet()).containsExactly("get");
         assertThat(paths.get("/inventory/{skuId}").keySet()).containsExactlyInAnyOrder("get", "post");
         assertThat(paths.get("/inventory/{skuId}/purchase").keySet()).containsExactly("post");
         assertThat(paths.get("/v2/inventory").keySet()).containsExactly("get");
-        assertThat(paths.get("/v2/inventory/{skuId}").keySet()).containsExactlyInAnyOrder("get", "post", "put");
+        assertThat(paths.get("/v2/inventory/{skuId}").keySet()).as("OD-6: no PUT, no create").containsExactlyInAnyOrder("get", "post");
+        assertThat(paths.get("/v2/inventory/{skuId}/purchase").keySet()).containsExactly("post");
         assertThat(paths.get("/v2/inventory/{skuId}/details").keySet()).containsExactly("put");
     }
 
@@ -121,8 +123,9 @@ class ApiDocsTest {
         "/inventory                  | get  | 200,400",
         "/v2/inventory               | get  | 200,400",
         "/v2/inventory/{skuId}       | get  | 200,404",
-        "/v2/inventory/{skuId}       | post | 201,400,409",
-        "/v2/inventory/{skuId}       | put  | 200,400,404,412"
+        "/v2/inventory/{skuId}       | post | 200,400",
+        "/v2/inventory/{skuId}/purchase | post | 200,400,404",
+        "/v2/inventory/{skuId}/details | put | 200,201,400,412"
     })
     void eachOperationListsExactlyItsSpecCodes(String path, String method, String codes) throws Exception {
         Map<String, Object> responses = JsonPath.read(apiDocs(), "$.paths['" + path + "']." + method + ".responses");
@@ -151,7 +154,7 @@ class ApiDocsTest {
                 }
             }
         }
-        assertThat(checked).isEqualTo(24);
+        assertThat(checked).isEqualTo(22);
     }
 
     /** C-28 (#61): the catch-all handler must stay @Hidden, or springdoc could document a 500 on every operation. */
@@ -184,10 +187,10 @@ class ApiDocsTest {
         return parameters.stream().filter(p -> IDEMPOTENCY_KEY.equals(p.get("name"))).toList();
     }
 
-    /** G8, S3: both POSTs document the optional Idempotency-Key header as a UUID string. */
+    /** G8, S3: the unversioned POSTs document the optional Idempotency-Key header as a UUID string. */
     @ParameterizedTest
-    @ValueSource(strings = {"/inventory/{skuId}", "/inventory/{skuId}/purchase", "/v2/inventory/{skuId}"})
-    void postsDocumentOptionalIdempotencyKeyHeader(String path) throws Exception {
+    @ValueSource(strings = {"/inventory/{skuId}", "/inventory/{skuId}/purchase"})
+    void unversionedPostsDocumentOptionalIdempotencyKeyHeader(String path) throws Exception {
         List<Map<String, Object>> parameters = idempotencyKeyParameters(path, "post");
 
         assertThat(parameters).singleElement().satisfies(parameter -> {
@@ -200,31 +203,50 @@ class ApiDocsTest {
         });
     }
 
+    /** H2, S3: the /v2 POSTs document the Idempotency-Key header as a required UUID string. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/v2/inventory/{skuId}", "/v2/inventory/{skuId}/purchase"})
+    void v2PostsDocumentRequiredIdempotencyKeyHeader(String path) throws Exception {
+        List<Map<String, Object>> parameters = idempotencyKeyParameters(path, "post");
+
+        assertThat(parameters).singleElement().satisfies(parameter -> {
+            assertThat(parameter.get("in")).isEqualTo("header");
+            assertThat(parameter.get("required")).isEqualTo(true);
+            assertThat(parameter.get("schema")).isInstanceOfSatisfying(Map.class, schema -> {
+                assertThat(schema.get("type")).isEqualTo("string");
+                assertThat(schema.get("format")).isEqualTo("uuid");
+            });
+        });
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"/inventory/{skuId}", "/inventory", "/v2/inventory/{skuId}", "/v2/inventory"})
     void getsHaveNoIdempotencyKeyHeader(String path) throws Exception {
         assertThat(idempotencyKeyParameters(path, "get")).isEmpty();
-        assertThat(idempotencyKeyParameters("/v2/inventory/{skuId}", "put")).as("PUT is idempotent by itself")
+        assertThat(idempotencyKeyParameters("/v2/inventory/{skuId}/details", "put")).as("PUT is idempotent by itself")
                 .isEmpty();
     }
 
-    /** §8 "Edit": every v2 item response documents the ETag header; PUT documents an optional If-Match header. */
+    /** OD-6, OD-11: GET carries the ETag; PUT .../details documents it on 200 and 201 and the conditional headers. */
     @Test
     @SuppressWarnings("unchecked")
-    void v2ItemResponsesDocumentEtagAndPutDocumentsIfMatch() throws Exception {
+    void v2ItemResponsesDocumentEtagAndPutDocumentsTheConditionalHeaders() throws Exception {
         String docs = apiDocs();
-        for (String[] op : new String[][] {{"get", "200"}, {"post", "201"}, {"put", "200"}}) {
+        for (String[] op : new String[][] {{"/v2/inventory/{skuId}", "get", "200"},
+                {"/v2/inventory/{skuId}/details", "put", "200"}, {"/v2/inventory/{skuId}/details", "put", "201"}}) {
             Map<String, Map<String, Object>> headers = JsonPath.read(docs,
-                    "$.paths['/v2/inventory/{skuId}']." + op[0] + ".responses['" + op[1] + "'].headers");
-            assertThat(headers.keySet()).as(op[0]).containsExactly(HttpHeaders.ETAG);
+                    "$.paths['" + op[0] + "']." + op[1] + ".responses['" + op[2] + "'].headers");
+            assertThat(headers.keySet()).as(op[1] + " " + op[0] + " " + op[2]).containsExactly(HttpHeaders.ETAG);
         }
-        Map<String, Object> put = JsonPath.read(docs, "$.paths['/v2/inventory/{skuId}'].put");
+        Map<String, Object> put = JsonPath.read(docs, "$.paths['/v2/inventory/{skuId}/details'].put");
         List<Map<String, Object>> parameters = (List<Map<String, Object>>) put.get("parameters");
-        assertThat(parameters.stream().filter(p -> HttpHeaders.IF_MATCH.equals(p.get("name")))).singleElement()
-                .satisfies(p -> {
-                    assertThat(p.get("in")).isEqualTo("header");
-                    assertThat(p.get("required")).isIn(null, false);
-                });
+        for (String header : new String[] {HttpHeaders.IF_MATCH, HttpHeaders.IF_NONE_MATCH}) {
+            assertThat(parameters.stream().filter(p -> header.equals(p.get("name")))).as(header).singleElement()
+                    .satisfies(p -> {
+                        assertThat(p.get("in")).isEqualTo("header");
+                        assertThat(p.get("required")).isIn(null, false);
+                    });
+        }
         Map<String, Object> list = JsonPath.read(docs, "$.paths['/v2/inventory'].get.responses['200'].headers");
         assertThat(list.keySet()).containsExactly(LINK);
     }
@@ -392,7 +414,7 @@ class ApiDocsTest {
                 .satisfies(server -> assertThat(server.get("url")).isEqualTo("http://localhost:8080"));
     }
 
-    /** S5, S12: 12 error responses (5 spec + 7 v2), each text/plain only; the 8 successes are application/json only. */
+    /** S5, S12: 12 error responses (5 spec + 7 v2), each text/plain only; the 10 successes are application/json only. */
     @Test
     void exportedErrorResponsesAreTextPlain() throws Exception {
         Map<String, Object> paths = map(exported(), "paths");
@@ -415,7 +437,7 @@ class ApiDocsTest {
                 }
             }
         }
-        assertThat(errors).as("error responses").isEqualTo(14);
+        assertThat(errors).as("error responses").isEqualTo(12);
         assertThat(successes).as("2xx responses").isEqualTo(10);
     }
 
@@ -474,7 +496,8 @@ class ApiDocsTest {
         "/inventory/{skuId}/purchase | post",
         "/v2/inventory/{skuId}       | get",
         "/v2/inventory/{skuId}       | post",
-        "/v2/inventory/{skuId}       | put"
+        "/v2/inventory/{skuId}/purchase | post",
+        "/v2/inventory/{skuId}/details | put"
     })
     @SuppressWarnings("unchecked")
     void skuIdPathParametersDocumentPattern(String path, String method) throws Exception {
@@ -511,7 +534,8 @@ class ApiDocsTest {
 
     /** G13, V2: the request quantity is a required 32-bit integer with minimum 1. */
     @ParameterizedTest
-    @ValueSource(strings = {"/inventory/{skuId}", "/inventory/{skuId}/purchase"})
+    @ValueSource(strings = {"/inventory/{skuId}", "/inventory/{skuId}/purchase", "/v2/inventory/{skuId}",
+            "/v2/inventory/{skuId}/purchase"})
     void requestQuantityIsInt32WithMinimum1(String path) throws Exception {
         Map<String, Object> doc = exported();
         Map<String, Object> body = resolve(doc, map(doc, "paths", path, "post", "requestBody", "content",
@@ -530,7 +554,8 @@ class ApiDocsTest {
         "/inventory/{skuId}          | post",
         "/inventory/{skuId}/purchase | post",
         "/v2/inventory/{skuId}       | post",
-        "/v2/inventory/{skuId}       | put"
+        "/v2/inventory/{skuId}/purchase | post",
+        "/v2/inventory/{skuId}/details | put"
     })
     void postRequestBodiesAreRequiredJson(String path, String method) throws Exception {
         Map<String, Object> requestBody = map(exported(), "paths", path, method, "requestBody");
@@ -564,14 +589,33 @@ class ApiDocsTest {
         "/inventory                  | get  | listInventory   | List all inventory",
         "/v2/inventory               | get  | listSkus        | List all SKUs with details",
         "/v2/inventory/{skuId}       | get  | getSku          | Get a SKU with its details",
-        "/v2/inventory/{skuId}       | post | createSku       | Create a SKU with details",
-        "/v2/inventory/{skuId}       | put  | replaceSkuDetails | Replace a SKU's details"
+        "/v2/inventory/{skuId}/details | put | putSkuDetails | Create a SKU or replace its details"
     })
     void operationIdsMatchSpec(String path, String method, String operationId, String summary) throws Exception {
         Map<String, Object> operation = map(exported(), "paths", path, method);
 
         assertThat(operation.get("operationId")).isEqualTo(operationId);
         assertThat(operation.get("summary")).isEqualTo(summary);
+    }
+
+    /** H6: every /v2 body is a SkuItem, the stock writes' 200 included. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/v2/inventory/{skuId}", "/v2/inventory/{skuId}/purchase"})
+    void v2StockWrites200IsASkuItem(String path) throws Exception {
+        Map<String, Object> schema = map(exported(), "paths", path, "post", "responses", "200", "content",
+                MediaType.APPLICATION_JSON_VALUE, "schema");
+
+        assertThat(schema.get("$ref")).isEqualTo("#/components/schemas/SkuItem");
+    }
+
+    /** OD-6: the /v2 stock writes have their own operation ids (the front end's generated client names them). */
+    @ParameterizedTest(name = "{1} {0} → {2}")
+    @CsvSource(delimiter = '|', value = {
+        "/v2/inventory/{skuId}          | post | addStock",
+        "/v2/inventory/{skuId}/purchase | post | purchaseStock"
+    })
+    void v2StockWritesHaveOperationIds(String path, String method, String operationId) throws Exception {
+        assertThat(map(exported(), "paths", path, method).get("operationId")).isEqualTo(operationId);
     }
 
     /** OQ1-B (#8): info matches the original spec. */

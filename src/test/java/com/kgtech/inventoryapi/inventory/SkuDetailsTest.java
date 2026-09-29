@@ -52,9 +52,7 @@ class SkuDetailsTest {
                         List.of())),
                 Arguments.of("negative amount", (Runnable) () -> new SkuCost(-1, "USD")),
                 Arguments.of("lowercase currency", (Runnable) () -> new SkuCost(1, "usd")),
-                Arguments.of("two-letter currency", (Runnable) () -> new SkuCost(1, "US")),
-                Arguments.of("negative initial quantity", (Runnable) () -> new CreateSku(
-                        new SkuDetails("n", "", Optional.empty(), List.of()), -1)));
+                Arguments.of("two-letter currency", (Runnable) () -> new SkuCost(1, "US")));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -69,40 +67,8 @@ class SkuDetailsTest {
                 java.util.Collections.nCopies(10, "https://x/" + "a".repeat(2038)));
         assertThat(details.images()).hasSize(10);
         assertThat(details.images().getFirst()).hasSize(2048);
-        assertThat(new CreateSku(details, 0).initialQuantity()).isZero();
-        assertThat(new CreateSku(details, Integer.MAX_VALUE).initialQuantity()).isEqualTo(Integer.MAX_VALUE);
         assertThat(new SkuDetails("n", "", Optional.empty(), List.of()).description()).isEmpty();
         assertThat(new SkuDetails("Caf\u00e9 \ud83d\ude00", "line\nnext\ttab", Optional.empty(), List.of()).name())
                 .isEqualTo("Caf\u00e9 \ud83d\ude00");
-    }
-
-    /** Y3 for creates: the canonical form is built field by field; the same request always renders the same. */
-    @Test
-    void createFingerprintIsCanonicalAndCoversEveryField() {
-        CreateSku base = new CreateSku(new SkuDetails("Shirt", "Long", Optional.of(new SkuCost(5, "USD")),
-                List.of(URL)), 3);
-        String fingerprint = base.fingerprint();
-
-        assertThat(fingerprint).isEqualTo(new CreateSku(new SkuDetails("Shirt", "Long",
-                Optional.of(new SkuCost(5, "USD")), List.of(URL)), 3).fingerprint());
-        assertThat(new CreateSku(base.details(), 4).fingerprint()).as("initialQuantity").isNotEqualTo(fingerprint);
-        assertThat(new CreateSku(new SkuDetails("Shirts", "Long", Optional.of(new SkuCost(5, "USD")), List.of(URL)),
-                3).fingerprint()).as("name").isNotEqualTo(fingerprint);
-        assertThat(new CreateSku(new SkuDetails("Shirt", "Longer", Optional.of(new SkuCost(5, "USD")), List.of(URL)),
-                3).fingerprint()).as("description").isNotEqualTo(fingerprint);
-        assertThat(new CreateSku(new SkuDetails("Shirt", "Long", Optional.of(new SkuCost(6, "USD")), List.of(URL)),
-                3).fingerprint()).as("amount").isNotEqualTo(fingerprint);
-        assertThat(new CreateSku(new SkuDetails("Shirt", "Long", Optional.of(new SkuCost(5, "EUR")), List.of(URL)),
-                3).fingerprint()).as("currency").isNotEqualTo(fingerprint);
-        assertThat(new CreateSku(new SkuDetails("Shirt", "Long", Optional.empty(), List.of(URL)), 3).fingerprint())
-                .as("no cost").isNotEqualTo(fingerprint);
-        assertThat(new CreateSku(new SkuDetails("Shirt", "Long", Optional.of(new SkuCost(5, "USD")), List.of()), 3)
-                .fingerprint()).as("images").isNotEqualTo(fingerprint);
-        // A separator-like value cannot collide with a field boundary: the form is length-prefixed.
-        assertThat(new CreateSku(new SkuDetails("n", "1:a\n", Optional.empty(), List.of()), 1).fingerprint())
-                .isNotEqualTo(new CreateSku(new SkuDetails("n", "a", Optional.empty(), List.of()), 1).fingerprint());
-        assertThat(new CreateSku(new SkuDetails("n", "", Optional.empty(), List.of("https://x/a")), 1).fingerprint())
-                .isNotEqualTo(new CreateSku(new SkuDetails("n", "12:https://x/a", Optional.empty(), List.of()), 1)
-                        .fingerprint());
     }
 }
