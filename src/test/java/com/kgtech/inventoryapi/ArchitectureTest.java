@@ -188,11 +188,13 @@ class ArchitectureTest {
     }
 
     /**
-     * D3, S1: SQL runs only through JdbcClient in the domain's @Repository classes and IdempotencyStore. The exemption
-     * is the annotation in the inventory package, not a name, so a *Repository class elsewhere is still checked.
+     * D3, S1: SQL runs only through JdbcClient in the domain's @Repository classes and IdempotencyStore, so no other
+     * class touches any JDBC type: not JdbcClient, JdbcTemplate or a DataSource utility (org.springframework.jdbc), and
+     * not java.sql or javax.sql. The exemption is the annotation in the inventory package, not a name, so a
+     * *Repository class elsewhere is still checked.
      */
     @Test
-    void jdbcClientOnlyInRepositoriesAndIdempotencyStore() {
+    void jdbcOnlyInRepositoriesAndIdempotencyStore() {
         DescribedPredicate<JavaClass> notDomainRepository = DescribedPredicate.not(
                         JavaClass.Predicates.resideInAPackage(INVENTORY)
                                 .and(CanBeAnnotated.Predicates.annotatedWith(Repository.class)))
@@ -200,7 +202,7 @@ class ArchitectureTest {
         noClasses().that(notDomainRepository)
                 .and().doNotHaveFullyQualifiedName(IdempotencyStore.class.getName())
                 .should().dependOnClassesThat()
-                .haveNameMatching("org\\.springframework\\.jdbc\\.core\\.simple\\.JdbcClient(\\$.*)?")
+                .resideInAnyPackage("org.springframework.jdbc..", "java.sql..", "javax.sql..")
                 .check(MAIN);
     }
 
