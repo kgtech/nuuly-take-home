@@ -41,3 +41,4 @@ Times are UTC. Tags: [setup] [study] [gate] [board] [service] [frontend] [critiq
 - 2026-09-29T19:45:20Z [service] PR5 (details PUT) opened after merging final; gate (no e2e: FE6 implementer may hold 8080/5173) green: 898 tests; compose readiness + PUT probe on 18095 ok.
 - 2026-09-29T19:45:53Z [service] PR #109 (details PUT) opened; reviewer aaf992392eb82be7d. Next: combined /v2 add+purchase / removal PR (7) starts when #109 merges.
 - 2026-09-29T19:46:02Z [frontend] PR6 FE implementer (a3cba699d8654eb91) done: putDetails client, two-step Create (locked form, Retry only re-sends add), Edit via PUT /details with If-Match; FE33/34/37/9/5 lines updated; 228 unit + 30 e2e green. Test agent cleaning the temporary putDetails helper.
+- 2026-09-29T19:46:40Z [frontend] PR6 committed locally in wt-p6 (based on the PR5 branch); PR opens after #109 merges.
