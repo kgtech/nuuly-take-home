@@ -68,57 +68,65 @@ describe('client v2 reads', () => {
 describe('client v2 writes', () => {
   const key = '123e4567-e89b-42d3-a456-426614174000';
 
-  it('creates a SKU with details and initial stock: 201 with the ETag, then 409 on the same id without the key', async () => {
-    const r = await api.createSku('N-1', { details, initialQuantity: 5 }, key);
+  it('creates with If-None-Match * and no Idempotency-Key: 201, quantity 0, ETag "1"; the same again is 412 with the server text', async () => {
+    const r = await api.putDetails('N-1', details, { ifNoneMatch: '*' });
     expect(r.ok && r.status).toBe(201);
     if (!r.ok) throw new Error();
-    expect(r.data).toEqual({ skuId: 'N-1', quantity: 5, details });
+    expect(r.data).toEqual({ skuId: 'N-1', quantity: 0, details });
     expect(r.etag).toBe('"1"');
     const req = store.requests[0]!;
-    expect(req.method).toBe('POST');
-    expect(new URL(req.url).pathname).toBe('/v2/inventory/N-1');
-    expect(req.headers.get('Idempotency-Key')).toBe(key);
-    expect(await req.json()).toEqual({ details, initialQuantity: 5 });
+    expect(req.method).toBe('PUT');
+    expect(new URL(req.url).pathname).toBe('/v2/inventory/N-1/details');
+    expect(req.headers.get('If-None-Match')).toBe('*');
+    expect(req.headers.has('If-Match')).toBe(false);
+    expect(req.headers.has('Idempotency-Key')).toBe(false);
+    expect(await req.json()).toEqual(details);
 
-    const replay = await api.createSku('N-1', { details, initialQuantity: 5 }, key);
-    expect(replay.ok && replay.status).toBe(201);
-    const again = await api.createSku('N-1', { details, initialQuantity: 5 }, null);
-    expect(again).toEqual({ ok: false, status: 409, errorText: TEXT.exists });
-    expect(store.items.get('N-1')).toBe(5);
+    const again = await api.putDetails('N-1', { ...details, name: 'Other' }, { ifNoneMatch: '*' });
+    expect(again).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
+    expect(store.details.get('N-1')?.details.name).toBe('Linen dress');
+    expect(store.items.get('N-1')).toBe(0);
   });
 
-  it('replaces details with If-Match: 200 with a new ETag, 412 on a stale tag, 404 for a missing SKU', async () => {
+  it('replaces details with If-Match: 200 with a new ETag and the stock kept, 412 on a stale tag or a missing SKU, unconditional without a header', async () => {
     store.seedDetails('E', 2, details);
     const edited: SkuDetails = { ...details, name: 'Linen dress, sand' };
-    const r = await api.replaceSkuDetails('E', edited, '"1"');
+    const r = await api.putDetails('E', edited, { ifMatch: '"1"' });
     if (!r.ok) throw new Error();
+    expect(r.status).toBe(200);
     expect(r.data).toEqual({ skuId: 'E', quantity: 2, details: edited });
     expect(r.etag).toBe('"2"');
     const req = store.requests[0]!;
     expect(req.method).toBe('PUT');
+    expect(new URL(req.url).pathname).toBe('/v2/inventory/E/details');
     expect(req.headers.get('If-Match')).toBe('"1"');
+    expect(req.headers.has('If-None-Match')).toBe(false);
 
-    const stale = await api.replaceSkuDetails('E', details, '"1"');
-    expect(stale).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
-    const missing = await api.replaceSkuDetails('nope', details, null);
-    expect(missing).toEqual({ ok: false, status: 404, errorText: TEXT.notFound });
-    const unconditional = await api.replaceSkuDetails('E', details, null);
+    expect(await api.putDetails('E', details, { ifMatch: '"1"' })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
+    expect(await api.putDetails('nope', details, { ifMatch: '"1"' })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
+    expect(await api.putDetails('nope', details, { ifMatch: '*' })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
+    // Well-formed but never a strong match: weak, zero-padded and non-numeric tags are 412, not 400 (as the service).
+    for (const weak of ['W/"2"', '"02"', '"abc"', 'W/"2", "9"']) {
+      expect(await api.putDetails('E', details, { ifMatch: weak })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
+    }
+    expect(store.items.has('nope')).toBe(false);
+    const unconditional = await api.putDetails('E', details);
     expect(unconditional.ok && unconditional.etag).toBe('"3"');
     expect(store.requests.at(-1)!.headers.has('If-Match')).toBe(false);
   });
 
-  it('mock PUT validates the body before the SKU lookup and refuses an empty If-Match, as the service does (F-fe-06)', async () => {
+  it('mock PUT follows H7: 400 for an invalid id, an invalid body (before the SKU lookup), an empty or malformed If-Match and any If-None-Match but *', async () => {
     store.seedDetails('E', 2, details);
-    const badBodyMissingSku = await api.replaceSkuDetails('nope', { name: '' }, null);
-    expect(badBodyMissingSku).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
-    const emptyIfMatch = await api.replaceSkuDetails('E', details, '');
-    expect(emptyIfMatch).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
-    // A G11-invalid skuId and a malformed non-empty If-Match are 400, like the service (R-05).
-    expect(await api.replaceSkuDetails('bad id', details, null)).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
-    for (const bad of ['1', 'W/"1"', '"1', '"1", x', '* , "1"']) {
-      expect(await api.replaceSkuDetails('E', details, bad)).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    expect(await api.putDetails('bad id', details)).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    expect(await api.putDetails('nope', { name: '' })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    expect(await api.putDetails('E', details, { ifMatch: '' })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    for (const bad of ['1', '"1', '"1", x', '* , "1"', '"1" "1"', '"1", *']) {
+      expect(await api.putDetails('E', details, { ifMatch: bad })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
     }
-    expect((await api.replaceSkuDetails('E', details, '"0", "1"')).ok).toBe(true);
+    for (const bad of ['"1"', 'W/"1"', '', '"1", *', '*, "1"', '**']) {
+      expect(await api.putDetails('E', details, { ifNoneMatch: bad })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
+    }
+    expect((await api.putDetails('E', details, { ifMatch: '"0", "1"' })).ok).toBe(true);
     expect(store.details.get('E')?.version).toBe(2);
   });
 
