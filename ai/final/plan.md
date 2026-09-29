@@ -33,3 +33,11 @@ Front end (from `frontend/`): `npm ci`, `npm run lint`, `npm run typecheck`, `np
 Stack: `docker compose up --build`; readiness `curl localhost:8080/actuator/health/readiness`.
 Board export: `node ai/export-board.mjs ai/decision-board.html <db-dir> <out-dir> <yyyy-mm-dd>` (Playwright package next to the script).
 GitHub: `gh issue create`, `gh pr create --base final`, `gh pr merge --squash`.
+
+## As executed
+
+Order actually followed: board (F-01, #91), CI parked (F-02, #92; the token lacked the `workflow` scope, see `deviations.md` D-1), ports and ArchUnit (F-03, #93), guard (F-04, #94), details PUT (F-08 in the table above), front-end create and edit, combined `/v2` writes (F-05), front-end stock forms (F-06), unversioned side (F-07), OpenAPI (F-11), invariants (F-12), docs (F-14, #104).
+
+Why the order changed: `POST /v2/inventory/{skuId}` was build v2's create route (201/409) and the new add route at the same path, so the add could not land beside the old create. The details PUT and the front end's create and edit pages moved before the combined `/v2` writes, which then replaced the create route in the same PR that added the keyed add and purchase; the separate "remove create" step (PR 10) folded into it, with V4 riding along. The unversioned side followed once the front end no longer needed the key or `limit` there.
+
+Issue mapping: F-01..F-14 = GitHub #91..#104 (F-01 #91, F-02 #92, F-03 #93, F-04 #94, F-05 #95, F-06 #96, F-07 #97, F-08 #98, F-09 #99, F-10 #100, F-11 #101, F-12 #102, F-13 #103, F-14 #104). The exact PR-to-issue record is `log.md`.

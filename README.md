@@ -1,10 +1,6 @@
-# Nuuly Inventory API, V2
+# Nuuly Inventory API
 
-
-**Decisions:** the decision board for this build is a private artifact, https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG (main's board is separate and read only). [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md) are generated from it (`ai/export-board.mjs`); its database is dumped in [`ai/final/board-db/`](ai/final/board-db/) so the exports can be reproduced without the artifact.
-V2 of the inventory service for the Nuuly Services assessment: it receives stock by SKU, processes purchases and lists inventory through the API in [`openapi.yaml`](openapi.yaml), and adds a React front end in [`frontend/`](frontend/). It is built with Java 25, Spring Boot 4.1.x (built with 4.1.1) and PostgreSQL 18.
-
-The storage design is V2's own and is documented in [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md): each SKU's stock is a row in Postgres, changed with a conditional `UPDATE` so concurrent purchases never oversell, every change is appended to a ledger the database keeps append-only, and idempotent responses are stored beside the claim that made them. Postgres is the only store; a cache was part of the first V2 design and was removed (DESIGN-V2 §9).
+Inventory service for the Nuuly Services assessment ([`spec`](docs/NUULY-ASSESSMENT-README-JUL-2026.md)): it receives stock by SKU, processes purchases and lists inventory, backed by PostgreSQL 18 and built with Java 25 and Spring Boot 4.1.x (built with 4.1.1). The spec's four operations are served unversioned at `/inventory`, exactly as the spec describes them plus two recorded deviations (see [Deviations](#deviations)); everything the spec did not ask for (idempotency-keyed writes, page-size control, SKU details) lives under `/v2`. Both versions read and write the same stock. A React front end in [`frontend/`](frontend/) uses `/v2` only. The design is in [`DESIGN.md`](DESIGN.md); the decisions behind it are in [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md), which are generated from a decision board (the board is a private artifact, https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG; its database is dumped in [`ai/final/board-db/`](ai/final/board-db/) so the exports can be reproduced with `ai/export-board.mjs`).
 
 ## Prerequisites
 
@@ -12,35 +8,30 @@ The storage design is V2's own and is documented in [`DESIGN-V2.md`](ai/v2/DESIG
 
 **To build and test it (developers):** JDK 25 (the Gradle wrapper, Gradle 9.1+, downloads Gradle and finds the toolchain), Docker (Testcontainers starts Postgres), Node 20+ and npm for the front end.
 
-Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), springdoc-openapi 3.1.x (built with 3.1.1), Gradle 9.1+, PostgreSQL 18. Library versions live only in `gradle/libs.versions.toml`; the compose and Docker image tags repeat them (S10).
+Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), springdoc-openapi 3.1.x (built with 3.1.1), Gradle 9.1+, PostgreSQL 18. Library versions live only in `gradle/libs.versions.toml`; the compose and Docker image tags repeat them.
 
-## Build and run
-
-**Reviewers (Docker with Compose v2):**
+## Run the service
 
 ```bash
 docker compose up --build
-# API:        http://localhost:8080/inventory
+# API:        http://localhost:8080/inventory  and  http://localhost:8080/v2/inventory
 # Swagger UI: http://localhost:8080/swagger-ui.html
 # Health:     http://localhost:8080/actuator/health  (/liveness, /readiness)
 docker compose down -v   # stop and remove the database
 ```
 
-This builds the app image, starts Postgres 18, waits for its health check and starts the app on host port 8080 (`APP_PORT` overrides it; the container listens on 8080). If 8080 is taken, set `APP_PORT`. Postgres is published on loopback only, on a random host port (`docker compose port postgres 5432`). The app container has a readiness health check and an explicit heap policy (`-XX:MaxRAMPercentage=75.0`).
-
-To wait until the app is ready:
+This builds the app image, starts Postgres 18, waits for its health check and starts the app on host port 8080 (`APP_PORT=9090 docker compose up --build` changes the host port; the container always listens on 8080). Postgres is published on loopback only, on a random host port (`docker compose port postgres 5432`). The app container has a readiness health check and an explicit heap policy (`-XX:MaxRAMPercentage=75.0`). To wait until the app is ready when running detached:
 
 ```bash
-docker compose up --build -d
+docker compose up --build -d --wait
 until curl -sf localhost:8080/actuator/health/readiness >/dev/null; do sleep 2; done
 ```
 
 **Development (JDK 25 + Docker):**
 
 ```bash
-./gradlew clean build --warning-mode=fail   # compile with -Werror and run every test (Testcontainers: Postgres)
-./gradlew bootRun                           # starts Postgres from compose.yaml, stops it on exit
-docker compose up -d postgres               # the database alone, e.g. for a debugger-launched app
+./gradlew bootRun              # starts Postgres from compose.yaml, stops it on exit; app on :8080
+docker compose up -d postgres  # the database alone, e.g. for a debugger-launched app
 ```
 
 An app started outside `bootRun` needs the database's address:
@@ -50,21 +41,62 @@ export SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:$(docker compose port 
 export SPRING_DATASOURCE_USERNAME=inventory SPRING_DATASOURCE_PASSWORD=inventory
 ```
 
-`compose.yaml` defines Postgres; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: both want host port 8080 and both start the database from compose.yaml.
+`compose.yaml` defines Postgres; `compose.override.yaml` adds the app. `bootRun` reads `compose.yaml` only. Don't run `docker compose up` and `bootRun` together: both want host port 8080.
 
-**Front end** (see [`frontend/README.md`](frontend/README.md) and [`frontend/DECISIONS.md`](frontend/DECISIONS.md)):
+## Run the front end
+
+See [`frontend/README.md`](frontend/README.md) and [`frontend/DECISIONS.md`](frontend/DECISIONS.md). Start the service first, then:
 
 ```bash
 cd frontend
 npm ci
-npm run dev          # http://localhost:5173, proxies /v2 to http://localhost:8080 (start the service first; VITE_PORT and API_URL override)
-npm run lint && npm run typecheck && npm test && npm run build
-npm run test:e2e     # Playwright against the real service on :8080 (add then purchase; a double submit changes stock once)
+npm run dev          # http://localhost:5173, proxies /v2 to http://localhost:8080 (VITE_PORT and API_URL override)
+npm run test:e2e     # Playwright against the real service through the dev proxy (run `npx playwright install chromium` once)
 ```
+
+The front end calls only `/v2`: it lists, views, creates and edits SKUs with their details, and adds and purchases stock with an `Idempotency-Key` created once per user action.
+
+## Run all the tests
+
+```bash
+./gradlew build      # compiles with -Werror and runs every service test (Testcontainers: Postgres); also checks the committed OpenAPI export
+cd frontend && npm ci && npm run lint && npm run typecheck && npm run check:api && npm test && npm run build
+cd frontend && npm run test:e2e          # Playwright, with the service running (see above)
+scripts/gate.sh [--e2e]                  # all of the above; --e2e also starts the compose stack and runs Playwright
+```
+
+`scripts/gate.sh` accepts `--service-only` and `--frontend-only`; it uses `APP_PORT` (default 8080) and `VITE_PORT` (default 5173) and, with `--e2e`, stops if either port is busy. The same steps are written as a GitHub Actions workflow that is parked at [`ai/final/ci-workflow.yml`](ai/final/ci-workflow.yml) (see [Deviations](#deviations)), so the gate is the local one.
+
+## API versions
+
+**Policy (OD-2).** The unversioned API is the spec and is frozen to it: an extension never lands there. `/v2` may grow compatibly (new operations, new optional fields, new optional headers); a change that would break a `/v2` caller gets a new prefix, `/v3`. Both versions read and write the same rows: a SKU added through one is visible through the other, and concurrent purchases through both never oversell.
+
+| | Unversioned (`/inventory`), the spec | `/v2/inventory` |
+|---|---|---|
+| Read one | `GET /inventory/{skuId}` → `{skuId, quantity}` | `GET /v2/inventory/{skuId}` → `{skuId, quantity, details?}` with an `ETag` (the details version, `"0"` before any details) and `Cache-Control: no-store` |
+| Add stock | `POST /inventory/{skuId}`, creates the SKU; no key | `POST /v2/inventory/{skuId}`, `Idempotency-Key` required; a repeat replays the first response |
+| Purchase | `POST /inventory/{skuId}/purchase`; no key | `POST /v2/inventory/{skuId}/purchase`, `Idempotency-Key` required |
+| List | `GET /inventory`: a fixed page of 250 and an `after` cursor; `limit` is ignored | `GET /v2/inventory`: `limit` 1–250 (default 250) and `after`; items carry their details where a SKU has them |
+| Details | not offered | `PUT /v2/inventory/{skuId}/details`: create (201) or replace (200) a SKU's name, description, cost and images, with `If-Match` or `If-None-Match: *`; never changes stock |
+| Errors | `text/plain`: `SKU not found`, `Insufficient inventory`, `Invalid request`, `Internal server error` | the same, plus 412 `Details changed since you read them. Reload the SKU and retry with its new ETag.` on the details PUT |
+
+**Unversioned POSTs are not retry-safe, and they reject the key.** A request to `POST /inventory/{skuId}` or `…/purchase` that carries an `Idempotency-Key` header, with any value including an empty one, gets 400 `Invalid request` and changes nothing. That is deliberate: an endpoint that cannot deduplicate must not look as if it can, so a caller that needs retries uses `/v2`. Retrying an unversioned POST after a lost response adds or purchases again.
+
+**Reaching every SKU.**
+
+- **Unversioned:** `GET /inventory` returns the first 250 SKUs sorted by `skuId`; while more exist the response has `Link: <…/inventory?after=LAST>; rel="next"`. Follow the `Link` until a page has none. `GET /inventory/{skuId}` reads one.
+- **`/v2`:** the same walk with `GET /v2/inventory`, whose `Link` carries `limit` and `after`; `limit` (1–250) shrinks the page, and items carry their details where a SKU has them. `GET /v2/inventory/{skuId}` reads one.
+- Walking either list visits the same `(skuId, quantity)` pairs in the same order (a test asserts it), and a purchase through one version is visible through the other.
+
+## API docs
+
+Swagger UI at `/swagger-ui.html` shows both versions. There are two OpenAPI documents: [`openapi.yaml`](openapi.yaml) is the unversioned API (1.0.0) and `openapi-v2.yaml` the `/v2` API (2.0.0); the running service serves each as `/v3/api-docs.yaml/{group}` (and as JSON under `/v3/api-docs/{group}`). Both files are committed exports that a test regenerates and fails on when the code and the file differ, and a conformance test compares `openapi.yaml` with the YAML block in the spec, allowing only the differences listed in the test (each with its decision ID). The front end's types are generated from `openapi-v2.yaml` only, so a call to an unversioned path fails the type check.
 
 ## Try it
 
-Start from an empty database (`docker compose down -v && docker compose up --build`). Error bodies are `text/plain`; successful bodies are JSON.
+Start from an empty database (`docker compose down -v && docker compose up --build`). Error bodies are `text/plain`; successful bodies are JSON. Outputs below were produced by these commands against the running stack.
+
+### The spec API (unversioned)
 
 ```bash
 curl -i localhost:8080/inventory                     # 200 []
@@ -80,94 +112,128 @@ curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/jso
      -d '{"quantity":0}'                             # 400 Invalid request
 ```
 
-**Idempotency-Key.** Either POST accepts an optional `Idempotency-Key` UUID header. The same request with the same key within 24 hours returns the first response and changes stock once; the same key with a different SKU, endpoint or quantity, or a key older than 24 hours, returns 400 `Invalid request`:
+An unversioned POST with an `Idempotency-Key` is rejected and writes nothing (OD-4):
+
+```bash
+curl -i -X POST localhost:8080/inventory/ABC-1 -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: $(uuidgen)" -d '{"quantity":5}'    # 400 Invalid request; ABC-1 is still 3
+```
+
+### The `/v2` API
+
+Add and purchase require a UUID `Idempotency-Key`. The same key with the same request within 24 hours replays the first response and changes stock once; the same key with a different SKU, operation or quantity, or a key older than 24 hours, is 400 `Invalid request`; a missing or malformed key is 400 as well:
 
 ```bash
 KEY=$(uuidgen)
 for q in 5 5 6; do
-  curl -i -X POST localhost:8080/inventory/K-1 -H 'Content-Type: application/json' \
+  curl -i -X POST localhost:8080/v2/inventory/K-1 -H 'Content-Type: application/json' \
        -H "Idempotency-Key: $KEY" -d "{\"quantity\":$q}"
 done
 # 200 {"skuId":"K-1","quantity":5}
 # 200 {"skuId":"K-1","quantity":5}   replayed from the stored row
 # 400 Invalid request                 same key, different quantity
+curl -i -X POST localhost:8080/v2/inventory/K-1 -H 'Content-Type: application/json' \
+     -d '{"quantity":5}'                                  # 400 Invalid request (no key)
+curl -i -X POST localhost:8080/v2/inventory/K-1/purchase -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: $(uuidgen)" -d '{"quantity":2}' # 200 {"skuId":"K-1","quantity":3}
+curl -i -X POST localhost:8080/v2/inventory/K-1/purchase -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: $(uuidgen)" -d '{"quantity":20}' # 400 Insufficient inventory
 ```
 
-**Paging.** `GET /inventory` returns SKUs sorted by SKU ID, at most 250 per response, with a `Link: <url>; rel="next"` header while more follow; `limit` (1–250) sets a smaller page and `after` is the last SKU ID of the previous page:
+**Details.** `PUT /v2/inventory/{skuId}/details` sets a SKU's details and never changes its stock. If the SKU does not exist it is created at quantity 0 (201, `ETag: "1"`); `If-None-Match: *` makes that create refuse to overwrite an existing SKU (412). If it exists the details are replaced (200, a new `ETag`); `If-Match` makes the replace succeed only against the tag you read (412 otherwise, including any `If-Match` on a SKU that does not exist yet). The idempotency key is ignored here: PUT is idempotent by method.
 
 ```bash
-curl -i 'localhost:8080/inventory?limit=2'
-# 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1","quantity":5}]  (Link when more than 2 SKUs exist)
-```
-
-**v2: a SKU with details.** Three additive operations under `/v2/inventory` ([`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §8) give a SKU a name, description, cost and image URLs. The four operations above are unchanged; stock still changes only through them. Every `SkuItem` response carries an `ETag` (the details version, `"0"` before any details); `PUT` takes an optional `If-Match`. Errors are text/plain like v1, with two new fixed texts (409, 412) that say what to do next:
-
-```bash
-curl -i -X POST localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
-     -d '{"details":{"name":"Linen shirt","description":"Long sleeve","cost":{"amount":12900,"currency":"USD"},
-          "images":["https://cdn.example.com/a.jpg"]},"initialQuantity":5}'
-# 201 ETag: "1"  {"skuId":"LN-1","quantity":5,"details":{"name":"Linen shirt",...}}   (one ledger row, reason add)
-curl -i -X POST localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' \
-     -d '{"details":{"name":"Other"}}'
-# 409 SKU already exists. Set its details with PUT /v2/inventory/{skuId}; add stock with POST /inventory/{skuId}.
-curl -i -X PUT localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
+curl -i -X PUT localhost:8080/v2/inventory/LN-1/details -H 'Content-Type: application/json' -H 'If-None-Match: *' \
+     -d '{"name":"Linen shirt","description":"Long sleeve","cost":{"amount":12900,"currency":"USD"},
+          "images":["https://cdn.example.com/a.jpg"]}'
+# 201 ETag: "1"  {"skuId":"LN-1","quantity":0,"details":{"name":"Linen shirt",...}}
+curl -i -X PUT localhost:8080/v2/inventory/LN-1/details -H 'Content-Type: application/json' -H 'If-None-Match: *' \
+     -d '{"name":"Other"}'
+# 412 Details changed since you read them. Reload the SKU and retry with its new ETag.   (the SKU exists)
+curl -i -X PUT localhost:8080/v2/inventory/LN-1/details -H 'Content-Type: application/json' -H 'If-Match: "1"' \
      -d '{"name":"Linen shirt, navy","images":[]}'
-# 200 ETag: "2"  {"skuId":"LN-1","quantity":5,"details":{"name":"Linen shirt, navy","description":"","images":[]}}
-curl -i -X PUT localhost:8080/v2/inventory/LN-1 -H 'Content-Type: application/json' -H 'If-Match: "1"' \
+# 200 ETag: "2"  {"skuId":"LN-1","quantity":0,"details":{"name":"Linen shirt, navy","description":"","images":[]}}
+curl -i -X PUT localhost:8080/v2/inventory/LN-1/details -H 'Content-Type: application/json' -H 'If-Match: "1"' \
      -d '{"name":"Stale edit"}'
-# 412 Details changed since you read them. Reload the SKU and retry with its new ETag.
-curl -i localhost:8080/v2/inventory/ABC-1              # 200 ETag: "0"  {"skuId":"ABC-1","quantity":3}   (no details yet)
-curl -i 'localhost:8080/v2/inventory?limit=2'           # 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1",...}]  (Link as v1)
+# 412 (the tag is now "2")
+curl -i localhost:8080/v2/inventory/ABC-1   # 200 ETag: "0"  {"skuId":"ABC-1","quantity":3}   (no details yet)
 ```
 
-`POST /v2/inventory/{skuId}` honours `Idempotency-Key` like the spec POSTs: the whole request (details and initial quantity) is the fingerprint, and 201 and 409 are replayed. Field rules: `name` 1–120 characters, `description` up to 2,000, `cost.amount` an integer in minor units with a three-letter uppercase `cost.currency` (both or neither), up to 10 absolute http(s) `images` URLs of up to 2,048 characters, `initialQuantity` 0 to 2,147,483,647; a body above 64 KB is 400. Details are read from Postgres with the count in one join.
+Field rules: `name` 1–120 characters, `description` up to 2,000, `cost.amount` an integer in minor units with a three-letter uppercase `cost.currency` (both or neither), up to 10 absolute http(s) `images` URLs of up to 2,048 characters. A SKU created by the details PUT can then be given stock with a keyed `POST /v2/inventory/LN-1`.
 
-## How V2 stores stock
+**Paging.** Both lists are sorted by SKU ID, at most 250 per response, with a `Link: <url>; rel="next"` header while more follow. `after` is the last SKU ID of the previous page:
 
-Short version of [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md):
+```bash
+curl -i 'localhost:8080/v2/inventory?limit=2'
+# 200 [{"skuId":"ABC-1","quantity":3},{"skuId":"K-1","quantity":3}]
+# Link: <http://localhost:8080/v2/inventory?limit=2&after=K-1>; rel="next"
+curl -i 'localhost:8080/v2/inventory?limit=2&after=K-1'   # the next page (its items carry details when they have them)
+curl -i 'localhost:8080/inventory?limit=2'                # limit is ignored: every SKU up to 250; with more than 250,
+                                                          # Link: <http://localhost:8080/inventory?after=...>; rel="next"
+```
 
-- **Stock:** `sku.quantity` (`CHECK (quantity >= 0)`) and `sku.version`. A purchase is `UPDATE sku SET quantity = quantity - :q, version = version + 1 WHERE sku_id = :id AND quantity >= :q RETURNING ...` in a READ COMMITTED transaction; no row updated means "insufficient" (or "not found"). Concurrent writers on one SKU queue on the row lock; writers on different SKUs never interact. Adds are guarded the same way against overflowing a bigint.
-- **Ledger:** every change also inserts an `inventory_ledger` row in the same transaction; a trigger makes `UPDATE`/`DELETE` on the ledger (and `DELETE` on `sku`) fail. A test asserts `quantity = SUM(quantity_delta)` for every SKU after the concurrency tests.
-- **Idempotency:** the claim (`INSERT ... ON CONFLICT DO NOTHING`) and the stored response live in Postgres in the stock transaction, so a key changes stock at most once even for concurrent repeats.
-- **Reads:** `GET /inventory/{skuId}` reads the `sku` row: one primary-key lookup at READ COMMITTED autocommit, which never waits on a writer, so a read is always the last committed count. There is no cache (DESIGN-V2 §9).
+## How stock is stored
 
-**Failure behaviour.** Postgres down: reads and writes answer 500 `Internal server error`, nothing is acknowledged, and `/actuator/health/readiness` reports DOWN. A crash inside a transaction rolls it back (no stock change, no ledger row, no claim); a client retry with the same key claims afresh. `/actuator/health` names its component (`db`) without details.
+Short version of [`DESIGN.md`](DESIGN.md) (§3–§5):
 
-**Operations.** `idempotency_keys` rows are kept (T1 needs them to reject an old key). To reclaim space, clear the stored `status`, `content_type` and `body` of rows older than 24 h (`UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL WHERE created_at < now() - interval '24 hours'`); a cleared row still rejects reuse with 400, whatever its age. The table has no index on `created_at`, so run that statement off-peak or add the index first; the freed space returns after VACUUM. Growth: one `inventory_ledger` row (about 60 bytes) per successful add or purchase, kept forever (the trigger forbids deletion; archive by partitioning if a year of traffic matters), and one `idempotency_keys` row (about 200 bytes with its body) per keyed request that passes validation, including 404s from unknown callers, since there is no authentication.
+- **Stock:** `sku.quantity` (`CHECK (quantity >= 0)`) and `sku.version`. A purchase is `UPDATE sku SET quantity = quantity - :q, … WHERE sku_id = :id AND quantity >= :q RETURNING …` in a READ COMMITTED transaction; no row updated means "insufficient" (or "not found"). Concurrent writers on one SKU queue on the row lock; writers on different SKUs never interact. Adds are guarded the same way against overflowing a bigint.
+- **Ledger:** every change also inserts an `inventory_ledger` row in the same transaction; a trigger makes `UPDATE`/`DELETE` on the ledger (and `DELETE` on `sku`) fail. Tests assert `quantity = SUM(quantity_delta)` for every SKU after every test that writes.
+- **Details:** `sku_details` is a separate row per SKU, never columns on `sku`, so the hot stock row stays narrow.
+- **Idempotency (`/v2` only):** the claim (`INSERT … ON CONFLICT DO NOTHING`) and the stored response live in Postgres in the stock transaction, so a key changes stock at most once even for concurrent repeats. The request hash includes the API version.
+- **Reads:** one primary-key read at READ COMMITTED, so a read is always the last committed count. There is no cache; Postgres is the only store.
 
-## API docs
+**Failure behaviour.** Postgres down: reads and writes answer 500 `Internal server error`, nothing is acknowledged, and `/actuator/health/readiness` reports DOWN. A crash inside a transaction rolls it back (no stock change, no ledger row, no claim); a `/v2` retry with the same key claims afresh. `/actuator/health` names its component (`db`) without details.
 
-Swagger UI at `/swagger-ui.html`, OpenAPI at `/v3/api-docs` and `/v3/api-docs.yaml`. [`openapi.yaml`](openapi.yaml) is the committed export; `ApiDocsTest` regenerates it and fails when the code and the file differ. The docs list exactly the spec's status codes per operation, with `text/plain` errors, plus `GET /inventory`'s paging parameters and its 400 for an undecodable or repeated `after`.
+**Operations.** `idempotency_keys` rows are kept (a key older than 24 h must keep being rejected). To reclaim space, clear the stored `status`, `content_type` and `body` of rows older than 24 h (`UPDATE idempotency_keys SET status = NULL, content_type = NULL, body = NULL WHERE created_at < now() - interval '24 hours'`); a cleared row still rejects reuse with 400, whatever its age. The table has no index on `created_at`, so run that statement off-peak or add the index first; the freed space returns after VACUUM. Growth: one `inventory_ledger` row (about 60 bytes) per successful add or purchase, kept forever (the trigger forbids deletion; archive by partitioning if a year of traffic matters), and one `idempotency_keys` row (about 200 bytes with its body) per keyed `/v2` request that passes validation, including 404s, since there is no authentication. Only the versioned writes touch that table.
 
 ## Assumptions
 
-The spec leaves these open; V2 keeps the first build's answers ([`ai/v2/DECISIONS-v2.md`](ai/v2/DECISIONS-v2.md), IDs in parentheses) except where [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §7 supersedes them:
+The spec leaves these open. The decision IDs in parentheses are cards in [`DECISIONS.md`](DECISIONS.md) (OD-n are the owner's decisions in [`ai/final/PROMPT.md`](ai/final/PROMPT.md)).
 
-- SKU IDs are case-sensitive, 1–64 characters, `[A-Za-z0-9][A-Za-z0-9._-]*`; creating another ID (spec or v2, and a v2 PUT) is 400, reading or purchasing it is 404 (G1, G11). An encoded slash is part of the ID (`/inventory/A%2FB` → 404) (C1).
-- Stock is a 64-bit integer; an add that would overflow returns 400 and changes nothing (G2, G12). A request adds or purchases at most 2,147,483,647 (V2).
-- Malformed JSON (including trailing tokens), a missing body, a body above 4 KB, a wrong Content-Type, a non-integer `quantity`, a raw `;` in the SKU segment, or an Accept whose most specific range for JSON has q=0 on POST return 400; unknown fields are ignored; GET ignores Accept (G3, G13, U2, C3). An undecodable query string (`?x=%zz`) is 400 only where the query is read (`GET /inventory`, `/actuator/**`, springdoc); the item GET and the POSTs ignore it (C1, Z3).
-- A SKU sold to 0 keeps its row and stays listed (G5). Error bodies are exactly `SKU not found`, `Insufficient inventory`, `Invalid request` or `Internal server error` (G6); the v2 operations add the fixed 409 and 412 texts shown above (A23, A24).
-- v2 details are a separate row per SKU; a `POST /v2` on an existing SKU is 409 rather than an upsert, a `PUT` without `If-Match` is last-write-wins, and a `PUT` never changes stock (DESIGN-V2 §8, A21–A29).
-- Concurrent purchases never oversell, however many app instances run: the conditional `UPDATE` and the `CHECK` enforce it in Postgres (G7 as superseded).
-- `Idempotency-Key` is optional and must be a UUID; a repeated request replays the first response, including 404 and 400 outcomes; a different body, SKU or endpoint, or a key older than 24 h, returns 400 (G8, G14, R1, S3, T1, U1, Y3). Two simultaneous requests with the same key produce one change (R2).
-- The list is sorted by SKU ID with at most 250 per response and a `Link` to the next page built from the request's `Host` (no `X-Forwarded-*` handling); a bad `limit` is ignored, a repeated `after` or an undecodable query is 400 (G9, R4, R8, Z3, C2).
-- No authentication (G10). Requests outside the spec's operations get standard codes with the reason phrase as text; `/actuator/**` and the springdoc paths keep Spring Boot's own responses, except Tomcat-level rejections and undecodable queries, which are text/plain everywhere (S6, T3, C1).
-- A read is always the last committed count; there is no cache (DESIGN-V2 §9).
-- The app is published on 0.0.0.0:8080 with no authentication (G10) so reviewers can reach it; Postgres is on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one (`mem_limit`) in a real deployment.
+- **SKU IDs** are case-sensitive, 1–64 characters, `[A-Za-z0-9][A-Za-z0-9._-]*` (G1, G11). An invalid ID is 404 on reads and purchases, 400 where it would be created (unversioned add, `/v2` add, details PUT). An encoded slash is part of the ID (`/inventory/A%2FB` → 404) (C1).
+- **`;` in the SKU segment.** Spring drops `;` content from a path variable, which would send `/inventory/ABC-1;lot=7` to `ABC-1`; a request guard treats the segment as sent (`ABC-1;lot=7`, also as `%3B`), so it is an invalid ID and nothing is written. `;` on the literal segments (`/inventory;v=1/…`) is ignored, as Spring does (C3). The guard applies to every write route of both versions.
+- **Quantities** are 64-bit in storage and responses; a request adds or purchases 1 to 2,147,483,647. An add that would overflow returns 400 and changes nothing (G2, G12, V2).
+- **Strict JSON, 400 and not 415.** Malformed JSON (including trailing tokens), a missing body, a wrong or missing Content-Type, a non-integer or null `quantity` and any other client error on the POSTs and the details PUT answer 400 `Invalid request`; unknown fields are ignored (G3, G13). A failed precondition on the details PUT is 412.
+- **Body caps.** A POST body over 4 KB is 400 (A19); a details PUT body over 64 KB is 400. On `/v2` the caps also count chunked bodies while they are read.
+- **Accept.** GET ignores Accept. A POST whose Accept excludes JSON, or gives it q=0 (most specific matching range decides), is 400 (U2, Y1, C3).
+- **Undecodable query string** (`?x=%zz`) is 400 only where the query is read (`GET /inventory`, `GET /v2/inventory`, `/actuator/**`, springdoc); the item routes and POSTs ignore it. A repeated `after` is 400; a bad `limit` (non-numeric or below 1) is ignored and above 250 means 250 (Z3, R4, C2).
+- **Error texts.** Exactly `SKU not found`, `Insufficient inventory`, `Invalid request`, `Internal server error` (G6) and the 412 text above; every other status uses its standard reason phrase (`Method Not Allowed`, …). Errors are `text/plain`, including Tomcat-level rejections (bad percent-escapes, oversized headers) and TRACE (C1, S5).
+- **A SKU sold to 0** keeps its row and stays listed (G5).
+- **`Idempotency-Key`** (`/v2`) is a UUID; a repeated request replays the first response, including 404 and 400 outcomes (a stored 200 keeps the details the first request saw); a different SKU, operation or quantity, a key older than 24 h, and a claimed-but-incomplete key are 400. The request hash is computed from the parsed request (whitespace and unknown fields don't matter) and includes the API version (Y3, H10).
+- **The list `Link`** is built from the request's scheme and `Host` (no `X-Forwarded-*` handling) and the routed path (C2).
+- **No authentication** (G10). Requests outside the API's operations get standard codes with the reason phrase as text; `/actuator/**` and the springdoc paths keep their own responses, except Tomcat-level rejections and undecodable queries, which are text/plain everywhere (S6, T3, C1).
+- **Deployment.** The app is published on 0.0.0.0:8080 without authentication so reviewers can reach it; Postgres is on loopback. `-XX:MaxRAMPercentage=75.0` is relative to the container's memory limit, so set one in a real deployment.
+- **No performance claim.** No benchmark has been run; nothing here says how fast the service is.
+
+## Deviations
+
+From the spec, on the unversioned paths (recorded in [`DECISIONS.md`](DECISIONS.md) as H3 and H4):
+
+- **OD-5: the list is paged.** `GET /inventory` returns at most 250 SKUs and takes an `after` cursor with a `Link: rel="next"` header; `limit` and other parameters are ignored. The spec's list is unbounded, which failed with an OutOfMemoryError at 1M SKUs in build v1's critique (C-02). `openapi.yaml` documents the cap, the cursor, the `Link` header and a 400 (undecodable or repeated `after`).
+- **OD-4: any `Idempotency-Key` is 400.** The spec has no such header; the unversioned POSTs refuse it rather than pretend to be retry-safe.
+
+From the build process ([`ai/final/deviations.md`](ai/final/deviations.md)):
+
+- **D-1: the CI workflow is not active.** GitHub rejected the push of `.github/workflows/ci.yml` because the token lacks the `workflow` scope. The workflow is parked at `ai/final/ci-workflow.yml` and has never run on GitHub, so it is untested there; the local `scripts/gate.sh --e2e` was the merge gate for every PR instead. **Owner action:** `gh auth refresh -h github.com -s workflow`, then `git mv ai/final/ci-workflow.yml .github/workflows/ci.yml` and push (issue #92 stays open until a run is green).
+
+Known divergences kept frozen from build v2 (recorded, not fixed; changing one is the owner's decision):
+
+- **M-13:** the request guard runs before `@Valid`, so a `;` SKU with a bad body on purchase answers 404, not 400.
+- **Accept tie-break:** among equally specific Accept ranges the first listed decides (main's C3 amendment says the highest q).
+- **Unversioned chunked bodies are uncapped:** the unversioned POSTs are capped only by `Content-Length`; `/v2` counts a chunked body while reading.
 
 ## Designed, not built
 
-Both are deferred future improvements, recorded with their reasons, revisit triggers and proposed approach. Neither changes the API described above.
+Deferred, with their reasons and decision IDs; none changes the API above.
 
-- **Store a domain outcome instead of the HTTP response against an Idempotency-Key** ([#83](https://github.com/kgtech/nuuly-take-home/issues/83), A35, [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). Not built because every keyed caller today is the HTTP controller, so it would change no behaviour. It would also trade byte-for-byte replays (Y4) for re-rendered ones, and it needs a two-format migration on a table whose rows are never purged (R9).
-- **Messaging: an outbox to Kafka for ERP sync, high throughput and flash sales** ([#85](https://github.com/kgtech/nuuly-take-home/issues/85), A36, [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). Not built because:
-  - the spec's operations answer synchronously with fixed status codes (G10), so a queue in front of writes would change the contract;
-  - the no-oversell decision and exactly-once already hold in one Postgres transaction, and a broker would add a dual write plus at-least-once delivery that still needs the idempotency claim;
-  - no ERP or other consumer exists in this scope;
-  - hot-SKU throughput has not been measured.
+- **Store a domain outcome instead of the HTTP response against an Idempotency-Key** (A35, [#83](https://github.com/kgtech/nuuly-take-home/issues/83), [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). Every keyed caller today is the HTTP controller, so it would change no behavior, and it would trade byte-for-byte replays (Y4) for re-rendered ones.
+- **Messaging: an outbox to a broker for ERP sync, throughput and flash sales** (A36, [#85](https://github.com/kgtech/nuuly-take-home/issues/85), [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). The spec's operations answer synchronously (G10); the no-oversell and exactly-once guarantees already hold in one Postgres transaction; no consumer exists in this scope; hot-SKU throughput has not been measured. The first step is a load test.
+- **Redis, a cache or a replay copy** (A30, A31, A32). Postgres alone holds every guarantee; no benchmark showed a need.
+- **Authentication** (G10).
+- **`X-Forwarded-*` handling and servlet-path support** (scope). The `Link` is built from `Host`; the app runs at the root context.
+- **Typed `WriteResult<O>` and one `Page<T>`** (A38). The code keeps the sealed, non-generic `WriteResult` and two page records; the card follows the code ([`ai/final/board-followups.md`](ai/final/board-followups.md), item 11).
+- **Any performance claim** waits for a benchmark recorded here.
 
-  The first step when it is picked up is a load test. After that, events go out through a transactional outbox with no contract change; ERP adjustments come in through a consumer keyed by message ID (after #83); and flash-sale options are applied from least to most contract change.
+## AI process
 
-## AI use
-
-V2 was built in one autonomous run by the Fable model from a warm-start package produced by a retrospective of the first build: [`PROMPT.md`](ai/v2/PROMPT.md) (the instructions), [`spec/`](docs/), [`ai/v2/DECISIONS-v2.md`](ai/v2/DECISIONS-v2.md), [`ai/v2/CLAUDE-v2.md`](ai/v2/CLAUDE-v2.md), [`issues.md`](ai/v2/issues.md), [`lessons.md`](ai/v2/lessons.md). The run's own records are [`ai/v2/run-records/log.md`](ai/v2/run-records/log.md), [`ai/v2/run-records/current-implementation.md`](ai/v2/run-records/current-implementation.md), [`ai/v2/run-records/plan.md`](ai/v2/run-records/plan.md), [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md), [`DECISIONS-ADDED.md`](ai/v2/DECISIONS-ADDED.md), [`DEVIATIONS.md`](ai/v2/DEVIATIONS.md), [`frontend/DECISIONS.md`](frontend/DECISIONS.md), the self-critique in `ai/v2/run-records/critique.md` and `ai/v2/run-records/interview-defense.md`, and [`FABLE_REPORT.md`](ai/v2/REPORT.md).
+The final build was made in one autonomous run of the Fable model after a plan gate. Its records: the instructions [`ai/final/PROMPT.md`](ai/final/PROMPT.md), [`lessons.md`](ai/final/lessons.md) (what both earlier builds learned, with the test or rule that enforces each), [`plan.md`](ai/final/plan.md), [`log.md`](ai/final/log.md), [`current-state.md`](ai/final/current-state.md), [`board-cards.md`](ai/final/board-cards.md), [`issues.md`](ai/final/issues.md), [`preflight.md`](ai/final/preflight.md), [`deviations.md`](ai/final/deviations.md), and the decision board's URL above. `ai/final/report.md` (the final report) is written at the end of the run and linked here when it exists. Build v2's history is in [`ai/v2/`](ai/v2/) ([`DESIGN-V2.md`](ai/v2/DESIGN-V2.md), [`DECISIONS-v2.md`](ai/v2/DECISIONS-v2.md), [`REPORT.md`](ai/v2/REPORT.md), [`run-records/`](ai/v2/run-records/)); build v1 is on `main`. The per-session prompt log is [`agent-prompts.md`](agent-prompts.md).
