@@ -2,6 +2,8 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -11,6 +13,10 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.ResponseEntity;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
+import com.kgtech.inventoryapi.inventory.DetailsOutcome;
+import com.kgtech.inventoryapi.inventory.SkuCost;
+import com.kgtech.inventoryapi.inventory.SkuDetails;
+import com.kgtech.inventoryapi.inventory.SkuItem;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -38,6 +44,30 @@ class OutcomeResponsesTest {
     @ParameterizedTest(name = "{0}")
     @MethodSource
     void toStoredMatchesUnkeyedResponse(StockOutcome outcome, int status, String contentType, String body) {
+        assertThat(responses.toStored("widget", outcome)).isEqualTo(new StoredResponse(status, contentType, body));
+    }
+
+    static Stream<Arguments> toStoredMatchesUnkeyedCreateResponse() {
+        SkuDetails details = new SkuDetails("Linen shirt", "Long sleeve", Optional.of(new SkuCost(12900, "USD")),
+                List.of("https://cdn.example.com/a.jpg"));
+        return Stream.of(
+                Arguments.of(new DetailsOutcome.Created(new SkuItem("widget", 5, Optional.of(details), 1)), 201,
+                        "application/json", "{\"skuId\":\"widget\",\"quantity\":5,\"details\":{"
+                                + "\"name\":\"Linen shirt\",\"description\":\"Long sleeve\","
+                                + "\"cost\":{\"amount\":12900,\"currency\":\"USD\"},"
+                                + "\"images\":[\"https://cdn.example.com/a.jpg\"]}}"),
+                Arguments.of(new DetailsOutcome.Created(new SkuItem("widget", 0, Optional.empty(), 0)), 201,
+                        "application/json", "{\"skuId\":\"widget\",\"quantity\":0}"),
+                Arguments.of(new DetailsOutcome.AlreadyExists(), 409, "text/plain", TextErrors.SKU_EXISTS));
+    }
+
+    /**
+     * Y4, A28, A38: the v2 create's 201 (the item, without the ETag's details version) and 409 are stored exactly as
+     * the unkeyed create sends them; the first details version rides in the ETag, not the body.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void toStoredMatchesUnkeyedCreateResponse(DetailsOutcome outcome, int status, String contentType, String body) {
         assertThat(responses.toStored("widget", outcome)).isEqualTo(new StoredResponse(status, contentType, body));
     }
 

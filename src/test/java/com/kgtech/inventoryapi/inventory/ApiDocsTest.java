@@ -156,7 +156,8 @@ class ApiDocsTest {
     /** C-28 (#61): the catch-all handler must stay @Hidden, or springdoc could document a 500 on every operation. */
     @Test
     void catchAllHandlerIsHidden() throws Exception {
-        Class<?> advice = Class.forName("com.kgtech.inventoryapi.inventory.web.InventoryErrorAdvice");
+        // The advice is package-private in web (A37), so it is loaded by name.
+        Class<?> advice = Class.forName("com.kgtech.inventoryapi.web.InventoryErrorAdvice");
         java.lang.reflect.Method anyOther = advice.getDeclaredMethod("anyOther", Exception.class,
                 jakarta.servlet.http.HttpServletRequest.class);
         assertThat(anyOther.isAnnotationPresent(io.swagger.v3.oas.annotations.Hidden.class)).isTrue();

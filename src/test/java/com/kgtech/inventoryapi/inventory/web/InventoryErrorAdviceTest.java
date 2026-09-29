@@ -1,7 +1,6 @@
 package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
@@ -100,16 +99,13 @@ class InventoryErrorAdviceTest {
                 .andExpect(content().string(body));
     }
 
-    /** T3: 405 keeps the Allow header and uses the standard reason phrase. */
-    @Test
-    void deleteSkuReturns405WithAllowHeader() throws Exception {
-        expectText(mvc.perform(delete("/inventory/x").accept(MediaType.APPLICATION_JSON)), 405, "Method Not Allowed")
-                .andExpect(header().string(ALLOW, allOf(containsString("GET"), containsString("POST"))));
-    }
-
+    /**
+     * T3: 405 keeps the Allow header and uses the standard reason phrase. DELETE /inventory/x and PUT /inventory, and
+     * the unknown paths /nope and /inventory/a/b, are asserted through real Tomcat (exact Allow set, text/plain, exact
+     * body) in LibraryPathErrorsIntegrationTest.inventoryAndUnknownPathsKeepTextPlain.
+     */
     @ParameterizedTest(name = "{0} {1}")
     @CsvSource({
-        "PUT, /inventory",
         "DELETE, /inventory/x/purchase",
         "GET, /inventory/x/purchase"
     })
@@ -117,12 +113,6 @@ class InventoryErrorAdviceTest {
         expectText(mvc.perform(request(HttpMethod.valueOf(method), path).accept(MediaType.APPLICATION_JSON)),
                 405, "Method Not Allowed")
                 .andExpect(header().exists(ALLOW));
-    }
-
-    @ParameterizedTest
-    @CsvSource({"/nope", "/inventory/a/b"})
-    void unknownPathReturns404NotFound(String path) throws Exception {
-        expectText(mvc.perform(get(path).accept(MediaType.APPLICATION_JSON)), 404, "Not Found");
     }
 
     /**
@@ -139,10 +129,9 @@ class InventoryErrorAdviceTest {
                 .andExpect(content().string(""));
     }
 
-    /** S6, C1: paths that only look like library paths keep the text/plain contract. */
+    /** S6, C1: paths that only look like library paths keep the text/plain contract (/actuatorx: real Tomcat). */
     @ParameterizedTest
-    @ValueSource(strings = {"/actuatorx", "/v3/api-docsx", "/v3/api-docs.yaml/x", "/swagger-uix",
-        "/swagger-ui.htmlx"})
+    @ValueSource(strings = {"/v3/api-docsx", "/v3/api-docs.yaml/x", "/swagger-uix", "/swagger-ui.htmlx"})
     void lookalikePathsKeepTextPlain(String path) throws Exception {
         expectText(mvc.perform(get(path).accept(MediaType.APPLICATION_JSON)), 404, "Not Found");
     }
