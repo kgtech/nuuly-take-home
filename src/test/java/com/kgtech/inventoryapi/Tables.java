@@ -1,5 +1,8 @@
 package com.kgtech.inventoryapi;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -17,6 +20,18 @@ public final class Tables {
 
     public static void reset(JdbcTemplate jdbc) {
         jdbc.update(TRUNCATE);
+    }
+
+    /**
+     * Row counts of every table a write can touch, so a test can assert that a rejected request wrote nothing: no sku,
+     * sku_details, inventory_ledger or idempotency_keys row.
+     */
+    public static Map<String, Long> counts(JdbcClient jdbc) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (String table : new String[] {"sku", "sku_details", "inventory_ledger", "idempotency_keys"}) {
+            counts.put(table, jdbc.sql("SELECT count(*) FROM " + table).query(Long.class).single());
+        }
+        return counts;
     }
 
     /** Seeds stock the way a committed add would leave it: the balance row plus one ledger row (DESIGN-V2 §1). */

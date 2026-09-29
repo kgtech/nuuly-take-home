@@ -1,7 +1,5 @@
 package com.kgtech.inventoryapi.inventory.web;
 
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.V2_BASE_PATH;
 import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.http.HttpHeaders.IF_MODIFIED_SINCE;
 import static org.springframework.http.HttpHeaders.IF_NONE_MATCH;
@@ -20,9 +18,6 @@ import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.http.HttpMethod;
-import org.springframework.http.server.PathContainer.Element;
-import org.springframework.http.server.PathContainer.PathSegment;
-import org.springframework.http.server.RequestPath;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -38,25 +33,7 @@ final class JsonAcceptForGetFilter extends OncePerRequestFilter {
     /** Only GET under /inventory and /v2/inventory; springdoc, actuator and every write are untouched (S6). */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        if (!HttpMethod.GET.matches(request.getMethod())) {
-            return true;
-        }
-        String path = routedPath(request);
-        return !(under(path, BASE_PATH) || under(path, V2_BASE_PATH));
-    }
-
-    private static boolean under(String path, String base) {
-        return path.equals(base) || path.startsWith(base + "/");
-    }
-
-    /** requestURI minus contextPath, decoded and without ";" parameters: the path Spring matches handlers on. */
-    private static String routedPath(HttpServletRequest request) {
-        StringBuilder path = new StringBuilder();
-        for (Element element
-                : RequestPath.parse(request.getRequestURI(), request.getContextPath()).pathWithinApplication().elements()) {
-            path.append(element instanceof PathSegment segment ? segment.valueToMatch() : element.value());
-        }
-        return path.toString();
+        return !HttpMethod.GET.matches(request.getMethod()) || RoutedPath.of(request).isEmpty();
     }
 
     @Override

@@ -28,11 +28,14 @@ class ArchitectureTest {
 
     private static final String ROOT = "com.kgtech.inventoryapi";
 
-    /** Package-private classes, so named by string. */
+    /**
+     * Package-private classes, so named by string. RoutedPath is the one parser of the request path (F-04).
+     * InventoryErrorAdvice is listed for its log lines only, which print the raw method and path; it must not decide
+     * anything from the raw path.
+     */
     private static final Set<String> RAW_PATH_ALLOW_LIST = Set.of(
-            ROOT + ".inventory.web.InventoryErrorAdvice",
-            ROOT + ".inventory.web.InventoryRequestGuardFilter",
-            ROOT + ".inventory.web.JsonAcceptForGetFilter");
+            ROOT + ".inventory.web.RoutedPath",
+            ROOT + ".inventory.web.InventoryErrorAdvice");
 
     private static JavaClasses main;
     private static JavaClasses tests;
@@ -44,8 +47,8 @@ class ArchitectureTest {
     }
 
     /**
-     * L19: build Links and path checks from the routed path, never the raw URI. The allow-list is exactly the classes
-     * that read the raw path today; the RoutedPath helper (F-04) replaces it with one class.
+     * L19: build Links and path checks from the routed path, never the raw URI. Only RoutedPath parses it; the guard
+     * and accept filters ask RoutedPath. The error advice's log lines are the one other reader.
      */
     @Test
     void rawRequestPathIsReadOnlyByTheAllowListedClasses() {
