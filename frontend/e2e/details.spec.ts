@@ -56,10 +56,10 @@ test('create with details, edit them, then purchase', async ({ page }) => {
 
   // The SKU page shows the details and the initial quantity.
   await expect(page.getByRole('heading', { level: 2, name: 'Linen dress' })).toBeVisible();
-  await expect(page.getByText('A midi dress in sand.')).toBeVisible();
+  await expect(page.getByText('A midi dress in sand.', { exact: true })).toBeVisible();
   await expect(page.getByTestId('cost')).toHaveText('$129.00');
   await expect(page.getByTestId('quantity')).toHaveText('5');
-  await expect(page.getByText('Available')).toBeVisible();
+  await expect(page.getByText('Available', { exact: true })).toBeVisible();
   // example.com serves no image: the thumbnail falls back and keeps the name.
   await expect(page.getByRole('img', { name: /Linen dress/ })).toBeVisible();
 
@@ -281,7 +281,7 @@ test('a SKU created by add stock has no details and offers to add them', async (
   await addForm.getByRole('button', { name: 'Add stock' }).click();
   await expect(page.getByRole('status')).toBeVisible();
   await page.reload();
-  await expect(page.getByText('No details yet')).toBeVisible();
+  await expect(page.getByText('No details yet', { exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Add details' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Add details' })).toBeVisible();
   await page.getByLabel('Name', { exact: true }).fill('Plain tee');
