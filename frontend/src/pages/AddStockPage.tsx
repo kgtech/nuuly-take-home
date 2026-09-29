@@ -46,7 +46,7 @@ export function AddStockPage() {
         <StockOutcomeView outcome={outcome} />
         {created && (
           <p style={{ margin: 0 }}>
-            <a href={skuHref(created.skuId ?? skuId)} className="back">
+            <a href={skuHref(created.skuId)} className="back">
               View {created.skuId}
               <ArrowRight />
             </a>

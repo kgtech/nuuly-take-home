@@ -2,7 +2,6 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import type { components } from '../api/schema';
 
-type Item = components['schemas']['InventoryItem'];
 type Body = components['schemas']['InventoryQuantity'];
 type SkuItem = components['schemas']['SkuItem'];
 type SkuDetails = components['schemas']['SkuDetails'];
@@ -20,8 +19,10 @@ const CURRENCY = /^[A-Z]{3}$/;
 const MAX_PAGE = 250;
 
 /**
- * In-memory store mocking the contract: v1 stock (ordering, Link paging, Idempotency-Key
- * replay) and v2 details (ETag versions, PUT details with If-Match and If-None-Match: *, 412 on a failed precondition).
+ * In-memory store mocking the /v2 contract: paging with Link, stock writes (POST add and purchase, both
+ * requiring an Idempotency-Key, replayed by key) and details (ETag versions, PUT details with If-Match and
+ * If-None-Match: *, 412 on a failed precondition). There are no unversioned handlers: the front end calls
+ * only /v2 (OD-7), and an unversioned call fails the test (onUnhandledRequest is 'error').
  */
 export const store = {
   items: new Map<string, number>(),
@@ -64,7 +65,7 @@ function sortedIds(): string[] {
   return [...store.items.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-function page(url: URL, path: '/inventory' | '/v2/inventory'): Response {
+function page(url: URL): Response {
   const afterAll = url.searchParams.getAll('after');
   if (afterAll.length > 1) return text(400, TEXT.invalid);
   const after = afterAll[0] ?? null;
@@ -76,14 +77,11 @@ function page(url: URL, path: '/inventory' | '/v2/inventory'): Response {
   const ids = sortedIds();
   const rest = after === null ? ids : ids.filter((id) => id > after);
   const slice = rest.slice(0, limit);
-  const body: (Item | SkuItem)[] =
-    path === '/inventory'
-      ? slice.map((id) => ({ skuId: id, quantity: store.items.get(id) ?? 0 }))
-      : slice.map(skuItem);
+  const body: SkuItem[] = slice.map(skuItem);
   const headers: Record<string, string> = {};
   if (rest.length > limit) {
     const last = slice[slice.length - 1];
-    const next = new URL(url.origin + path);
+    const next = new URL(url.origin + '/v2/inventory');
     next.searchParams.set('limit', String(limit));
     next.searchParams.set('after', last ?? '');
     headers.Link = `<${next.toString()}>; rel="next"`;
@@ -91,6 +89,7 @@ function page(url: URL, path: '/inventory' | '/v2/inventory'): Response {
   return HttpResponse.json(body, { headers });
 }
 
+/** POST /v2/inventory/{skuId}[/purchase]: body, then Idempotency-Key (required), then skuId (U3), then the write. */
 async function write(
   request: Request,
   skuId: string,
@@ -106,23 +105,20 @@ async function write(
     return text(400, TEXT.invalid);
   }
   const key = request.headers.get('Idempotency-Key');
-  if (key !== null && !UUID.test(key)) return text(400, TEXT.invalid);
+  if (key === null || !UUID.test(key)) return text(400, TEXT.invalid);
   if (!SKU.test(skuId)) return op === 'add' ? text(400, TEXT.invalid) : text(404, TEXT.notFound);
 
   const hash = `${op}\n${skuId}\n${body.quantity}`;
-  if (key !== null) {
-    const replay = replayFor(key, hash);
-    if (replay) return replay;
-  }
+  const replay = replayFor(key, hash);
+  if (replay) return replay;
   let status: number;
   let out: string;
   let contentType: string;
   const current = store.items.get(skuId);
   if (op === 'add') {
-    const next = (current ?? 0) + body.quantity;
-    store.items.set(skuId, next);
+    store.items.set(skuId, (current ?? 0) + body.quantity);
     status = 200;
-    out = JSON.stringify({ skuId, quantity: next } satisfies Item);
+    out = JSON.stringify(skuItem(skuId));
     contentType = 'application/json';
   } else if (current === undefined) {
     status = 404;
@@ -135,10 +131,10 @@ async function write(
   } else {
     store.items.set(skuId, current - body.quantity);
     status = 200;
-    out = JSON.stringify({ skuId, quantity: current - body.quantity } satisfies Item);
+    out = JSON.stringify(skuItem(skuId));
     contentType = 'application/json';
   }
-  if (key !== null) store.keys.set(key, { hash, status, body: out, contentType });
+  store.keys.set(key, { hash, status, body: out, contentType });
   return new HttpResponse(out, { status, headers: { 'Content-Type': contentType } });
 }
 
@@ -228,28 +224,17 @@ async function putDetails(request: Request, skuId: string): Promise<Response> {
 }
 
 export const handlers = [
-  // v2 first: MSW's "*" also matches "/v2", so the v1 patterns below would otherwise catch these.
-  http.get('*/v2/inventory', ({ request }) => page(new URL(request.url), '/v2/inventory')),
+  http.get('*/v2/inventory', ({ request }) => page(new URL(request.url))),
   http.get('*/v2/inventory/:skuId', ({ params }) => {
     const skuId = String(params.skuId);
     if (!SKU.test(skuId) || !store.items.has(skuId)) return text(404, TEXT.notFound);
     return withEtag(skuId, skuItem(skuId));
   }),
   http.put('*/v2/inventory/:skuId/details', ({ request, params }) => putDetails(request, String(params.skuId))),
-
-  http.get('*/inventory', ({ request }) => page(new URL(request.url), '/inventory')),
-  http.get('*/inventory/:skuId', ({ params }) => {
-    const skuId = String(params.skuId);
-    const q = store.items.get(skuId);
-    if (!SKU.test(skuId) || q === undefined) return text(404, TEXT.notFound);
-    return HttpResponse.json({ skuId, quantity: q } satisfies Item);
-  }),
-  http.post('*/inventory/:skuId/purchase', ({ request, params }) =>
+  http.post('*/v2/inventory/:skuId/purchase', ({ request, params }) =>
     write(request, String(params.skuId), 'purchase'),
   ),
-  http.post('*/inventory/:skuId', ({ request, params }) =>
-    write(request, String(params.skuId), 'add'),
-  ),
+  http.post('*/v2/inventory/:skuId', ({ request, params }) => write(request, String(params.skuId), 'add')),
 ];
 
 export const server = setupServer(...handlers);

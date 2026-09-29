@@ -98,7 +98,7 @@ describe('SkuView', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('after an add that follows a non-404 load error, re-fetches GET /v2 instead of showing "No details yet" (F-fe-05)', async () => {
+  it('after an add that follows a non-404 load error, shows the write response with its details and makes no GET (FE38)', async () => {
     const user = userEvent.setup();
     store.seedDetails('D-1', 1, details);
     server.use(http.get('*/v2/inventory/:skuId', () => new HttpResponse(null, { status: 502 }), { once: true }));
@@ -108,32 +108,26 @@ describe('SkuView', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Linen dress' })).toBeInTheDocument();
     expect(screen.getByTestId('quantity')).toHaveTextContent('5');
     expect(screen.queryByText('No details yet')).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not load the details/i)).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Added 4 to D-1: now 5.');
-    expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(1);
   });
 
-  it('when the re-fetch after an add fails too, keeps the quantity and shows a details error with Retry, not "No details yet" (R-04)', async () => {
+  it('after an add to a missing SKU, shows the created SKU without details and makes no GET', async () => {
     const user = userEvent.setup();
-    store.seedDetails('D-1', 1, details);
-    let gets = 0;
-    server.use(
-      http.get('*/v2/inventory/:skuId', () => {
-        gets += 1;
-        return gets <= 2 ? new HttpResponse(null, { status: 502 }) : undefined;
-      }),
-    );
-    render(<SkuView skuId="D-1" />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('HTTP 502');
-    await user.type(form('Add stock').getByLabelText(/quantity/i), '4{Enter}');
-    expect(await screen.findByRole('status')).toHaveTextContent('Added 4 to D-1: now 5.');
-    await waitFor(() => expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(2));
-    expect(screen.getByTestId('quantity')).toHaveTextContent('5');
-    expect(screen.queryByText('No details yet')).not.toBeInTheDocument();
-    const detailsError = await screen.findByText(/could not load the details/i);
-    expect(detailsError.closest('[role="alert"]')).toHaveTextContent('HTTP 502');
-    await user.click(screen.getByRole('button', { name: /retry details/i }));
-    expect(await screen.findByRole('heading', { level: 2, name: 'Linen dress' })).toBeInTheDocument();
-    expect(screen.getByTestId('quantity')).toHaveTextContent('5');
+    render(<SkuView skuId="fresh" />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(TEXT.notFound);
+    await user.type(form('Add stock').getByLabelText(/quantity/i), '2{Enter}');
+    expect(await screen.findByRole('status')).toHaveTextContent('Added 2 to fresh: now 2.');
+    expect(screen.getByTestId('quantity')).toHaveTextContent('2');
+    expect(await screen.findByText('No details yet')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(1);
+    expect(store.requests.filter((r) => r.method === 'POST').map((r) => new URL(r.url).pathname)).toEqual([
+      '/v2/inventory/fresh',
+    ]);
   });
 
   it('formats a large quantity with separators (F-fe-08)', async () => {
@@ -225,7 +219,7 @@ describe('SkuView', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
-  it('keeps the details on screen after an add and a purchase (v1 responses carry only the quantity)', async () => {
+  it('keeps the details on screen after an add and a purchase without any re-fetch: the item is the write response (FE38)', async () => {
     const user = userEvent.setup();
     store.seedDetails('D-1', 1, details);
     render(<SkuView skuId="D-1" />);
@@ -234,5 +228,26 @@ describe('SkuView', () => {
     await waitFor(() => expect(screen.getByTestId('quantity')).toHaveTextContent('5'));
     expect(screen.getByRole('heading', { level: 2, name: 'Linen dress' })).toBeInTheDocument();
     expect(screen.getByTestId('cost')).toHaveTextContent('$129.00');
+    await user.type(form('Purchase').getByLabelText(/quantity/i), '2{Enter}');
+    await waitFor(() => expect(screen.getByTestId('quantity')).toHaveTextContent('3'));
+    expect(screen.getByRole('heading', { level: 2, name: 'Linen dress' })).toBeInTheDocument();
+    expect(screen.getByTestId('cost')).toHaveTextContent('$129.00');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(1);
+    expect(store.requests.filter((r) => r.method === 'POST').map((r) => new URL(r.url).pathname)).toEqual([
+      '/v2/inventory/D-1',
+      '/v2/inventory/D-1/purchase',
+    ]);
+  });
+
+  it.each(['add', 'purchase'] as const)('after a %s, shows the details from the response, not a merge with what was read', async (op) => {
+    const user = userEvent.setup();
+    store.seedDetails('D-1', 5, details);
+    render(<SkuView skuId="D-1" />);
+    await screen.findByRole('heading', { level: 2, name: 'Linen dress' });
+    store.details.set('D-1', { details: { ...details, name: 'Linen dress, sand' }, version: 2 }); // edited elsewhere
+    await user.type(form(op === 'add' ? 'Add stock' : 'Purchase').getByLabelText(/quantity/i), '1{Enter}');
+    expect(await screen.findByRole('heading', { level: 2, name: 'Linen dress, sand' })).toBeInTheDocument();
+    expect(store.requests.filter((r) => r.method === 'GET')).toHaveLength(1);
   });
 });

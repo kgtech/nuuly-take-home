@@ -30,7 +30,7 @@ describe('arbitrary server error texts are shown verbatim, first, with one guida
     ['500', boom, 'Internal server error', GUIDANCE.retrySafe],
   ] as const) {
     it(`add: ${label}`, async () => {
-      server.use(http.post('*/inventory/:skuId', reply));
+      server.use(http.post('*/v2/inventory/:skuId', reply));
       const user = userEvent.setup();
       render(<Form operation="add" />);
       await user.type(screen.getByLabelText(/quantity/i), '1');
@@ -40,7 +40,7 @@ describe('arbitrary server error texts are shown verbatim, first, with one guida
       expect(alert.textContent!.replace(text, '').trim()).toBe(guidance ?? '');
     });
     it(`purchase: ${label}`, async () => {
-      server.use(http.post('*/inventory/:skuId/purchase', reply));
+      server.use(http.post('*/v2/inventory/:skuId/purchase', reply));
       const user = userEvent.setup();
       render(<Form operation="purchase" />);
       await user.type(screen.getByLabelText(/quantity/i), '1');
@@ -50,12 +50,12 @@ describe('arbitrary server error texts are shown verbatim, first, with one guida
       expect(alert.textContent!.replace(text, '').trim()).toBe(guidance ?? '');
     });
     it(`view: ${label}`, async () => {
-      server.use(http.get('*/inventory/:skuId', reply));
+      server.use(http.get('*/v2/inventory/:skuId', reply));
       render(<SkuView skuId="A" />);
       expect(await screen.findByRole('alert')).toHaveTextContent(text);
     });
     it(`list: ${label}`, async () => {
-      server.use(http.get('*/inventory', reply));
+      server.use(http.get('*/v2/inventory', reply));
       render(<InventoryList />);
       expect(await screen.findByRole('alert')).toHaveTextContent(text);
     });
@@ -65,7 +65,7 @@ describe('arbitrary server error texts are shown verbatim, first, with one guida
 describe('network failure shows an error state with Retry', () => {
   it('SkuView', async () => {
     store.seed({ A: 2 });
-    server.use(http.get('*/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    server.use(http.get('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
     const user = userEvent.setup();
     render(<SkuView skuId="A" />);
     expect(await screen.findByRole('alert')).toHaveTextContent(/network/i);
@@ -74,7 +74,7 @@ describe('network failure shows an error state with Retry', () => {
   });
   it('InventoryList', async () => {
     store.seed({ A: 2 });
-    server.use(http.get('*/inventory', () => HttpResponse.error(), { once: true }));
+    server.use(http.get('*/v2/inventory', () => HttpResponse.error(), { once: true }));
     const user = userEvent.setup();
     render(<InventoryList />);
     expect(await screen.findByRole('alert')).toHaveTextContent(/network/i);

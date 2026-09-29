@@ -62,7 +62,7 @@ describe('InventoryList', () => {
 
   it('shows the error text verbatim', async () => {
     server.use(
-      http.get('*/inventory', () =>
+      http.get('*/v2/inventory', () =>
         new HttpResponse(TEXT.invalid, { status: 400, headers: { 'Content-Type': 'text/plain' } }),
       ),
     );

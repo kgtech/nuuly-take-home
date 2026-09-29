@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { createClient, type SkuDetails } from './client';
+import { createClient, type SkuDetails, type SkuItem } from './client';
 import { server, store, TEXT } from '../test/server';
 
 const api = createClient('http://localhost:3000');
@@ -130,25 +130,124 @@ describe('client v2 writes', () => {
     expect(store.details.get('E')?.version).toBe(2);
   });
 
-  it('sends the Idempotency-Key header on add stock (v1)', async () => {
+  it('add stock: POST /v2/inventory/{id} with the key and body; the response is the SkuItem, details included', async () => {
+    store.seedDetails('A', 1, details);
     const r = await api.addStock('A', { quantity: 3 }, key);
-    expect(r.ok).toBe(true);
-    expect(store.requests[0]?.headers.get('Idempotency-Key')).toBe(key);
-    const again = await api.addStock('A', { quantity: 3 }, key);
-    if (!again.ok) throw new Error();
-    expect(again.data).toEqual({ skuId: 'A', quantity: 3 });
-    expect(again.etag).toBeNull();
+    if (!r.ok) throw new Error();
+    expect(r.status).toBe(200);
+    expect(r.data).toEqual({ skuId: 'A', quantity: 4, details });
+    const req = store.requests[0]!;
+    expect(req.method).toBe('POST');
+    expect(new URL(req.url).pathname).toBe('/v2/inventory/A');
+    expect(req.headers.get('Idempotency-Key')).toBe(key);
+    expect(await req.json()).toEqual({ quantity: 3 });
+    const plain = await api.addStock('P', { quantity: 2 }, '123e4567-e89b-42d3-a456-426614174001');
+    if (!plain.ok) throw new Error();
+    expect(plain.data).toEqual({ skuId: 'P', quantity: 2 });
+    expect('details' in plain.data).toBe(false);
+  });
+
+  it('purchase: POST /v2/inventory/{id}/purchase with the key; the response is the SkuItem, details included', async () => {
+    store.seedDetails('A', 5, details);
+    const r = await api.purchase('A', { quantity: 2 }, key);
+    if (!r.ok) throw new Error();
+    expect(r.data).toEqual({ skuId: 'A', quantity: 3, details });
+    const req = store.requests[0]!;
+    expect(req.method).toBe('POST');
+    expect(new URL(req.url).pathname).toBe('/v2/inventory/A/purchase');
+    expect(req.headers.get('Idempotency-Key')).toBe(key);
+    expect(await req.json()).toEqual({ quantity: 2 });
+  });
+
+  it('the key is mandatory and both writes return a SkuItem with a required skuId (types)', async () => {
+    store.seed({ A: 5 });
+    const added = await api.addStock('A', { quantity: 1 }, key);
+    const bought = await api.purchase('A', { quantity: 1 }, '123e4567-e89b-42d3-a456-426614174009');
+    if (!added.ok || !bought.ok) throw new Error();
+    expectTypeOf(added.data).toEqualTypeOf<SkuItem>();
+    expectTypeOf(bought.data).toEqualTypeOf<SkuItem>();
+    expectTypeOf(added.data.skuId).toEqualTypeOf<string>();
+    expectTypeOf(api.addStock).parameter(2).toEqualTypeOf<string>();
+    expectTypeOf(api.purchase).parameter(2).toEqualTypeOf<string>();
+    const nullKeys = () => [
+      // @ts-expect-error the Idempotency-Key is required on /v2 (null is not a key)
+      api.addStock('A', { quantity: 1 }, null),
+      // @ts-expect-error the Idempotency-Key is required on /v2 (null is not a key)
+      api.purchase('A', { quantity: 1 }, null),
+    ];
+    expect(nullKeys).toBeTypeOf('function');
+  });
+
+  it('mock POST: replays the stored response for the same key and request, 400 for a different quantity, SKU or operation', async () => {
+    store.seed({ A: 5, B: 5 });
+    const first = await api.addStock('A', { quantity: 2 }, key);
+    const again = await api.addStock('A', { quantity: 2 }, key);
+    expect(first.ok && again.ok).toBe(true);
+    if (!first.ok || !again.ok) throw new Error();
+    expect(again.data).toEqual(first.data);
+    expect(store.items.get('A')).toBe(7);
+    const bad = { ok: false, status: 400, errorText: TEXT.invalid };
+    expect(await api.addStock('A', { quantity: 3 }, key)).toEqual(bad);
+    expect(await api.addStock('B', { quantity: 2 }, key)).toEqual(bad);
+    expect(await api.purchase('A', { quantity: 2 }, key)).toEqual(bad);
+    expect(store.items.get('A')).toBe(7);
+    // A stored failure is replayed as the failure.
+    const k2 = '123e4567-e89b-42d3-a456-426614174002';
+    const fail = { ok: false, status: 400, errorText: TEXT.insufficient };
+    expect(await api.purchase('B', { quantity: 9 }, k2)).toEqual(fail);
+    store.items.set('B', 50);
+    expect(await api.purchase('B', { quantity: 9 }, k2)).toEqual(fail);
+    expect(store.items.get('B')).toBe(50);
+  });
+
+  it('mock POST: purchase is 400 "Insufficient inventory" or 404 "SKU not found"; the SKU is unchanged by a refusal', async () => {
+    store.seed({ A: 1 });
+    expect(await api.purchase('A', { quantity: 2 }, key)).toEqual({ ok: false, status: 400, errorText: TEXT.insufficient });
+    expect(await api.purchase('nope', { quantity: 1 }, '123e4567-e89b-42d3-a456-426614174003')).toEqual({
+      ok: false,
+      status: 404,
+      errorText: TEXT.notFound,
+    });
+    expect(store.items.get('A')).toBe(1);
+  });
+
+  it('mock POST: a missing or malformed Idempotency-Key is 400 "Invalid request" and writes nothing', async () => {
+    store.seed({ A: 1 });
+    for (const path of ['/v2/inventory/A', '/v2/inventory/A/purchase']) {
+      for (const headers of [{}, { 'Idempotency-Key': '' }, { 'Idempotency-Key': 'not-a-uuid' }]) {
+        const res = await fetch(`http://localhost:3000${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({ quantity: 1 }),
+        });
+        expect(res.status).toBe(400);
+        expect(await res.text()).toBe(TEXT.invalid);
+      }
+    }
+    expect(store.items.get('A')).toBe(1);
+  });
+
+  it('the mock has no unversioned handlers: an unversioned call fails', async () => {
+    store.seed({ A: 1 });
+    for (const [method, path] of [
+      ['GET', '/inventory'],
+      ['GET', '/inventory/A'],
+      ['POST', '/inventory/A'],
+      ['POST', '/inventory/A/purchase'],
+    ] as const) {
+      await expect(fetch(`http://localhost:3000${path}`, { method, body: method === 'POST' ? '{"quantity":1}' : null })).rejects.toThrow();
+    }
   });
 
   it('times out and reports it like a network failure', async () => {
     server.use(
-      http.post('*/inventory/:skuId/purchase', async () => {
+      http.post('*/v2/inventory/:skuId/purchase', async () => {
         await new Promise((r) => setTimeout(r, 300));
         return HttpResponse.json({ skuId: 'A', quantity: 1 });
       }),
     );
     const slow = createClient('http://localhost:3000', { timeoutMs: 50 });
-    const r = await slow.purchase('A', { quantity: 1 }, null);
+    const r = await slow.purchase('A', { quantity: 1 }, key);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error();
     expect(r.status).toBe(0);
@@ -156,8 +255,8 @@ describe('client v2 writes', () => {
   });
 
   it('reports a network failure with status 0', async () => {
-    server.use(http.post('*/inventory/:skuId/purchase', () => HttpResponse.error()));
-    const r = await api.purchase('A', { quantity: 1 }, null);
+    server.use(http.post('*/v2/inventory/:skuId/purchase', () => HttpResponse.error()));
+    const r = await api.purchase('A', { quantity: 1 }, key);
     expect(r.ok).toBe(false);
     if (r.ok) throw new Error();
     expect(r.status).toBe(0);

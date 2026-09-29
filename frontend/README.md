@@ -2,12 +2,12 @@
 
 Single-page app (React 19, TypeScript strict, Vite) for listing, viewing, creating and editing SKUs and adding and purchasing stock through the Inventory API in `../openapi.yaml`.
 
-Routes (hash router): `#/` list, `#/new` create a SKU with details (v2), `#/sku/:id` one SKU with its details, add stock and purchase, `#/sku/:id/edit` edit the details (v2, `If-Match`), `#/add` add stock to any SKU (v1, creates it).
+Routes (hash router): `#/` list, `#/new` create a SKU with details (v2), `#/sku/:id` one SKU with its details, add stock and purchase, `#/sku/:id/edit` edit the details (v2, `If-Match`), `#/add` add stock to any SKU (`/v2`, creates it).
 
 ## Run
 
     npm install
-    npm run dev          # http://localhost:5173, proxies /inventory and /v2 to http://localhost:8080 (override: VITE_PORT, API_URL)
+    npm run dev          # http://localhost:5173, proxies /v2 to http://localhost:8080 (override: VITE_PORT, API_URL)
 
 Start the service first (`docker compose up --build` in the repo root).
 

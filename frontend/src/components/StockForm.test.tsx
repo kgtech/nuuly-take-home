@@ -121,7 +121,7 @@ describe('StockForm unavailable button (review items 1, 2, 4)', () => {
     const user = userEvent.setup();
     let release: () => void = () => {};
     server.use(
-      http.post('*/inventory/:skuId', async () => {
+      http.post('*/v2/inventory/:skuId', async () => {
         await new Promise<void>((r) => (release = r));
         return HttpResponse.json({ skuId: 'x', quantity: 2 });
       }),
@@ -170,7 +170,7 @@ describe('StockForm add', () => {
   it('shows a server 400 verbatim with the check-the-values line', async () => {
     const user = userEvent.setup();
     server.use(
-      http.post('*/inventory/:skuId', () =>
+      http.post('*/v2/inventory/:skuId', () =>
         new HttpResponse(TEXT.invalid, { status: 400, headers: { 'Content-Type': 'text/plain' } }),
       ),
     );
@@ -189,7 +189,7 @@ describe('StockForm add', () => {
 
   it('drops the Idempotency-Key when the quantity changes after a network failure', async () => {
     const user = userEvent.setup();
-    server.use(http.post('*/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    server.use(http.post('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
     render(<Harness operation="add" skuId="x" />);
     const input = qty();
     await user.type(input, '2');
@@ -207,7 +207,7 @@ describe('StockForm add', () => {
 
   it('reuses the Idempotency-Key after a network failure, says a retry is safe, and regenerates it after a response', async () => {
     const user = userEvent.setup();
-    server.use(http.post('*/inventory/:skuId', () => HttpResponse.error(), { once: true }));
+    server.use(http.post('*/v2/inventory/:skuId', () => HttpResponse.error(), { once: true }));
     render(<Harness operation="add" skuId="x" />);
     await user.type(qty(), '2');
     const submit = button(/add stock/i);
@@ -241,10 +241,59 @@ describe('StockForm add', () => {
   });
 });
 
+describe('StockForm /v2 writes (OD-7)', () => {
+  it.each([
+    ['add', 'POST /v2/inventory/{id}', /^\/v2\/inventory\/A$/, /add stock/i],
+    ['purchase', 'POST /v2/inventory/{id}/purchase', /^\/v2\/inventory\/A\/purchase$/, /^purchase$/i],
+  ] as const)('%s: %s, every request carries a UUID Idempotency-Key, and a response with details is passed on whole', async (operation, _l, path, name) => {
+    const user = userEvent.setup();
+    const onOutcome = vi.fn();
+    const d = { name: 'Linen dress', description: '', images: [] };
+    store.seedDetails('A', 5, d);
+    render(<Harness operation={operation} skuId="A" onOutcome={onOutcome} />);
+    await user.type(qty(), '9');
+    await user.click(button(name)); // add succeeds; purchase of 9 from 5 is refused with 400
+    await screen.findByRole(operation === 'add' ? 'status' : 'alert');
+    await user.clear(qty());
+    await user.type(qty(), '1');
+    await user.click(button(name));
+    await waitFor(() => expect(onOutcome).toHaveBeenCalledTimes(2));
+    expect(store.requests).toHaveLength(2);
+    for (const r of store.requests) {
+      expect(r.method).toBe('POST');
+      expect(new URL(r.url).pathname).toMatch(path);
+      expect(r.headers.get('Idempotency-Key')).toMatch(UUID);
+    }
+    expect(onOutcome).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'done', item: { skuId: 'A', quantity: operation === 'add' ? 15 : 4, details: d } }),
+    );
+  });
+
+  it('keeps the key on a 429 and a 408 (FE9)', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post('*/v2/inventory/:skuId', () => new HttpResponse('slow down', { status: 429, headers: { 'Content-Type': 'text/plain' } }), { once: true }),
+      http.post('*/v2/inventory/:skuId', () => new HttpResponse('timeout', { status: 408, headers: { 'Content-Type': 'text/plain' } }), { once: true }),
+    );
+    render(<Harness operation="add" skuId="x" />);
+    await user.type(qty(), '2');
+    await user.click(button(/add stock/i));
+    await screen.findByRole('alert');
+    await user.click(button(/add stock/i));
+    await waitFor(() => expect(store.requests).toHaveLength(2));
+    await screen.findByText(/timeout/);
+    await user.click(button(/add stock/i));
+    await screen.findByRole('status');
+    const keys = store.requests.map((r) => r.headers.get('Idempotency-Key'));
+    expect(keys[0]).toMatch(UUID);
+    expect(new Set(keys).size).toBe(1);
+  });
+});
+
 describe('StockForm 5xx', () => {
   it('shows HTTP 502 for an empty body with the retry line and reuses the key on the retry', async () => {
     const user = userEvent.setup();
-    server.use(http.post('*/inventory/:skuId', () => new HttpResponse(null, { status: 502 }), { once: true }));
+    server.use(http.post('*/v2/inventory/:skuId', () => new HttpResponse(null, { status: 502 }), { once: true }));
     render(<Harness operation="add" skuId="x" />);
     await user.type(qty(), '2{Enter}');
     const alert = await screen.findByRole('alert');
@@ -265,7 +314,7 @@ describe('StockForm purchase', () => {
     await user.type(qty(), '3');
     await user.click(button(/^purchase$/i));
     expect(await screen.findByRole('status')).toHaveTextContent('Purchased 3 of A: 2 left.');
-    expect(store.requests[0]?.url).toMatch(/\/inventory\/A\/purchase$/);
+    expect(store.requests[0]?.url).toMatch(/\/v2\/inventory\/A\/purchase$/);
   });
 
   it('shows "Insufficient inventory" verbatim as the first line', async () => {
