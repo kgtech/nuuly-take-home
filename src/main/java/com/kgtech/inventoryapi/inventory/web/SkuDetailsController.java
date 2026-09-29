@@ -116,7 +116,7 @@ class SkuDetailsController {
             @PathVariable String skuId) {
         return service.findSku(skuId)
                 .<ResponseEntity<?>>map(item -> withEtag(ResponseEntity.ok(), item))
-                .orElseGet(TextErrors::skuNotFound);
+                .orElseGet(InventoryErrors::skuNotFound);
     }
 
     @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
@@ -168,8 +168,8 @@ class SkuDetailsController {
         ReplaceResult result = service.replaceDetails(skuId, body, precondition.get());
         return switch (result) {
             case Replaced replaced -> withEtag(ResponseEntity.ok(), replaced.item());
-            case NotFound _ -> TextErrors.skuNotFound();
-            case VersionMismatch _ -> TextErrors.detailsChanged();
+            case NotFound _ -> InventoryErrors.skuNotFound();
+            case VersionMismatch _ -> InventoryErrors.detailsChanged();
             case ReplaceResult.InvalidRequest _ -> TextErrors.invalidRequest();
         };
     }

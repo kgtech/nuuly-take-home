@@ -94,7 +94,7 @@ class InventoryController {
             @PathVariable String skuId) {
         return service.find(skuId)
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
-                .orElseGet(TextErrors::skuNotFound);
+                .orElseGet(InventoryErrors::skuNotFound);
     }
 
     @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)

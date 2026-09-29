@@ -73,7 +73,7 @@ final class InventoryRequestGuardFilter extends OncePerRequestFilter {
         if (segments.size() >= 2 && (get && single || write && (single || purchase))) {
             PathSegment sku = segments.get(1);
             if (sku.value().indexOf(';') >= 0 || !sku.parameters().isEmpty()) {
-                write(response, write && single ? TextErrors.invalidRequest() : TextErrors.skuNotFound());
+                write(response, write && single ? TextErrors.invalidRequest() : InventoryErrors.skuNotFound());
                 return;
             }
             if (write && !acceptsJson(request)) {

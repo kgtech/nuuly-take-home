@@ -39,8 +39,8 @@ final class OutcomeResponses implements KeyedResponses {
         return switch (outcome) {
             case Ok ok -> new StoredResponse(200, APPLICATION_JSON_VALUE,
                     json.writeValueAsString(new InventoryItem(skuId, ok.quantity())));
-            case NotFound _ -> text(TextErrors.skuNotFound());
-            case Insufficient _ -> text(TextErrors.insufficientInventory());
+            case NotFound _ -> text(InventoryErrors.skuNotFound());
+            case Insufficient _ -> text(InventoryErrors.insufficientInventory());
             case Overflow _ -> text(TextErrors.invalidRequest());
         };
     }
@@ -51,7 +51,7 @@ final class OutcomeResponses implements KeyedResponses {
         return switch (outcome) {
             case Created created -> new StoredResponse(201, APPLICATION_JSON_VALUE,
                     json.writeValueAsString(created.item()));
-            case AlreadyExists _ -> text(TextErrors.skuExists());
+            case AlreadyExists _ -> text(InventoryErrors.skuExists());
         };
     }
 
