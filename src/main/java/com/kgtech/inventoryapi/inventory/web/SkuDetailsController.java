@@ -67,14 +67,12 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.CreateSku;
 import com.kgtech.inventoryapi.inventory.DetailsOutcome.AlreadyExists;
 import com.kgtech.inventoryapi.inventory.DetailsOutcome.Created;
 import com.kgtech.inventoryapi.inventory.DetailsPrecondition;
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
 import com.kgtech.inventoryapi.inventory.ReplaceResult;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.NotFound;
@@ -194,27 +192,14 @@ class SkuDetailsController {
                     schema = @Schema(type = "string"))
             @RequestParam(name = AFTER, required = false) String after,
             HttpServletRequest request) {
-        String[] afters = request.getParameterValues(AFTER);
-        if (afters != null && afters.length > 1) {
+        if (Paging.repeatsAfter(request)) {
             return TextErrors.invalidRequest(); // Z3
         }
         SkuPage page = service.listSkus(limit, after);
         return page.next()
-                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next))
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, Paging.nextLink(V2_BASE_PATH, next))
                         .header(CACHE_CONTROL, NO_STORE).body(page.items()))
                 .orElseGet(() -> ResponseEntity.ok().header(CACHE_CONTROL, NO_STORE).body(page.items()));
-    }
-
-    /** C2 for v2: the Link is built from the request's origin plus the routed base path. */
-    private static String nextLink(Next next) {
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path(V2_BASE_PATH)
-                .queryParam(LIMIT, next.limit())
-                .queryParam(AFTER, "{after}")
-                .encode()
-                .buildAndExpand(next.after())
-                .toUriString();
-        return "<" + url + ">; rel=\"next\"";
     }
 
     /** The ETag is a details validator for If-Match, not a cache key for the count: no store, no 304 (§8). */
