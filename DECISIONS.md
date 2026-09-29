@@ -9,8 +9,8 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | G11 | Spec gap | What characters, length and sort collation does a skuId get? | D: final: ASCII allowlist, 1–64 chars, COLLATE "C"; the guard filter answers ";" first; details PUT → 400 | Yes |
 | G2 | Spec gap | How wide is quantity: 32-bit or 64-bit? | B: int64 (Java long, Postgres bigint) | No |
 | G12 | Spec gap | What happens when an add would push stock past the bigint maximum (9,223,372,036,854,775,807)? | A: Guard in the SQL, no row → 400 | Yes |
-| G3 | Spec gap | What status does a malformed or unsupported request get? | C: final: all client request errors → 400 text/plain on both versions' POSTs and on PUT details | Yes |
-| G13 | Spec gap | How strictly is the JSON body parsed? | D: final: strict numbers, ignore unknown fields, on every write body | Yes |
+| G3 | Spec gap | What status does a malformed or unsupported request get? | D: final: every client error → 400 text/plain on the POSTs and PUT details, except 412 for a failed precondition | Yes |
+| G13 | Spec gap | How strictly is the JSON body parsed? | E: final: strict numbers (5.0 and 1e2 refused), strict duplicate names, ignore unknown fields, on every JSON body | Yes |
 | G4 | Spec gap | On purchase, which wins: 404 (SKU missing) or 400 (bad body)? | C: 400 wins (Spring default) | No |
 | G5 | Spec gap | What happens to a SKU that sells down to 0? | D: final: keep the row; GET returns 0; listed; sku_details rows are never deleted either | Yes |
 | G6 | Spec gap | What exact text goes in error bodies? | D: final: the four texts plus the 412 text on PUT /v2 details only | Yes |
@@ -18,7 +18,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | G8 | Spec gap | Should the POST endpoints accept an Idempotency-Key, and is it required? | E: final: unversioned POSTs reject the key; /v2 stock POSTs require it | Yes |
 | G14 | Spec gap | How does an Idempotency-Key behave on reuse, overlap and expiry? | D: final: /v2 only: same transaction, replay, spec codes only | Yes |
 | G9 | Spec gap | How is the inventory list ordered and paged? | E: final: unversioned list fixed at 250 with after only; /v2 adds limit | Yes |
-| G10 | Spec gap | Auth, and which HTTP status codes may the API return? | E: final: no auth; spec codes on the spec's operations, listed codes on /v2, standard HTTP elsewhere | Yes |
+| G10 | Spec gap | Auth, and which HTTP status codes may the API return? | F: final: no auth; spec codes on the spec's operations, listed codes on /v2, standard HTTP elsewhere; library paths as coded | Yes |
 | D0 | Design | Where do AI prompts and artifacts live in the repo? | A: agent-prompts.md + CLAUDE.md + DECISIONS.md | Yes |
 | D1 | Design | Java and Spring Boot versions | A: Java 25 + Spring Boot 4.1.1 | Yes |
 | D2 | Design | Build tool | A: Gradle wrapper 9.x (Kotlin DSL) | Yes |
@@ -36,7 +36,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | R4 | Spec gap | What does GET /inventory do with a bad limit or after? | D: final: unversioned list ignores limit; /v2 leniency as before | Yes |
 | R5 | Spec gap | G4's reasoning argues the opposite of its choice. Which one stands? | A: Keep G4-C; replace the note | Yes |
 | R6 | Design | Gradle build script: Kotlin DSL or Groovy DSL? | A: Kotlin DSL (build.gradle.kts) | Yes |
-| R7 | Spec gap | Confirm the skuId pattern | A: Alphanumeric first, 1–64: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ | Yes |
+| R7 | Spec gap | Confirm the skuId pattern | D: final: alphanumeric first, 1–64; the pattern applies to add | Yes |
 | R8 | Spec gap | Confirm the maximum page size for limit | D: final: 250 is the maximum and default page on both versions; limit exists on /v2 only | Yes |
 | R9 | Spec gap | Confirm how and when Idempotency-Keys expire | E: final: on /v2, 24h, expire on read (no deletes) | Yes |
 | S1 | Design | How does the code run a write statement that returns a row (RETURNING), given that @Modifying queries cannot return rows? | E: final: JdbcClient statements in StockRepository, DetailsRepository and IdempotencyStore (superseded by E2) | Yes |
@@ -44,7 +44,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | S3 | Spec gap | What does a valid Idempotency-Key look like, and what happens to an empty or oversized one? | D: final: /v2 requires a UUID key; the unversioned POSTs reject any key | Yes |
 | S4 | Design | How do reviewers start app + Postgres with Docker while bootRun starts only Postgres? | E: final: two files, app in compose.override.yaml on host port 8080 (APP_PORT overrides) | Yes |
 | S5 | Spec gap | How do error responses guarantee a text/plain body when the client's Accept header asks for JSON? | A: Always set contentType(TEXT_PLAIN) explicitly | Yes |
-| S6 | Spec gap | What does a 500 look like, and which URLs does the "spec codes only" rule cover? | A: Catch-all → 500 "Internal server error" text/plain; scope G10 to /inventory/** | Yes |
+| S6 | Spec gap | What does a 500 look like, and which URLs does the "spec codes only" rule cover? | E: final: catch-all → 500 text/plain; library paths keep library behaviour; unknown springdoc group is 404 | Yes |
 | S7 | Design | Where does the one complete add statement (with the G12 overflow guard) and the purchase statement (with RETURNING) get written down? | A: One canonical statement in the D4 rules | Yes |
 | S8 | Spec gap | Is an Idempotency-Key unique per SKU and endpoint, or across the whole API? | D: final: on /v2 the key is global: primary key = key | Yes |
 | S9 | Design | Should DECISIONS.md show D8's options A and B as part of the chosen option, and should D0 cover the ai/ folder the repo already has? | A: List combined options as included; refine D0's rule | Yes |
@@ -68,47 +68,48 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | Y3 | Spec gap | What goes into the Idempotency-Key request hash? | C: final: SHA-256 of ("v2", operation, skuId, quantity) after parsing | Yes |
 | Y4 | Design | How does a replayed response get its Content-Type? | C: final: store content_type with status and body; /v2 replays a SkuItem | Yes |
 | Z1 | Design | Where do Idempotency-Key handling, input checks and the idempotency transaction sit? | B: Service-layer @Idempotent interceptor | Yes |
-| Z2 | Design | How is the inventory feature split between web and domain code? | C: final: domain package + web sub-package, listed from the code | Yes |
-| Z3 | Spec gap | What does GET /inventory return for a query string it can't read unambiguously? | D: final: 400 "Invalid request" on both lists; repeated after on both | Yes |
-| C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | E: final: text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths (inventory.web) | Yes |
-| C2 | Spec gap | What does GET /inventory return when no limit is given? | E: final: fixed 250 page and after-only Link unversioned; limit, limit Link and skuId schema on /v2 | Yes |
+| Z2 | Design | How is the inventory feature split between web and domain code? | D: final: domain package + web sub-package, listed from the code (as built) | Yes |
+| Z3 | Spec gap | What does GET /inventory return for a query string it can't read unambiguously? | E: final: 400 "Invalid request" on both lists; every path that reads its query | Yes |
+| C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | F: final: text/plain valve, %2F passthrough, TRACE, /error and bad chunk framing text/plain, advice declines library paths | Yes |
+| C2 | Spec gap | What does GET /inventory return when no limit is given? | F: final: fixed 250 page and after-only Link unversioned; limit, limit Link and skuId schema on /v2 (classes as built) | Yes |
 | C3 | Spec gap | What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0? | D: final: guard filter, driven by route kind, for every route of both versions; first listed range wins | Yes |
-| E1 | Design | Where does stock live, and how does a write stay correct under concurrency without retries? | E: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read | Yes |
+| E1 | Design | Where does stock live, and how does a write stay correct under concurrency without retries? | F: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read (DESIGN-V2 path cited) | Yes |
 | E2 | Design | How does the code run SQL once nothing needs Spring Data JPA? | D: final: JdbcClient only, in three places | Yes |
-| E3 | Design | How does an existing v1 database move to the balance row, and how is the ledger kept append-only? | E: final: V1 carries the balance row and triggers; no backfill, no upgrade from main | Yes |
+| E3 | Design | How does an existing v1 database move to the balance row, and how is the ledger kept append-only? | F: final: V1 carries the balance row and triggers; no backfill, no upgrade from main; append-only holds against the API | Yes |
 | A11 | Design | Which error does the append-only trigger raise? | A: P0001 from RAISE EXCEPTION | Yes |
 | A14 | Design | Is quantity = SUM(quantity_delta) kept by the database or asserted by tests? | D: final: asserted by tests after every write test | Yes |
 | A18 | Spec gap | What does a keyed POST get when its key's row is committed without a stored response? | C: final: on /v2, 400 "Invalid request" for a row with no stored response | Yes |
 | A33 | Design | Where does Idempotency-Key handling sit once nothing needs ordering against a retry? | D: final: explicit IdempotencyStore.run on the keyed /v2 entry points only | Yes |
 | A34 | Spec gap | In what order are a POST's body, Idempotency-Key and skuId checked, and where? | D: final: unversioned order rejects the key; /v2 order requires it; each check once in the service | Yes |
-| A37 | Design | Where does app-wide HTTP code live, and which types and members are public? | D: final: HTTP code stays in inventory.web (package-private); web/ holds HttpConstants only | Yes |
-| A38 | Design | What does each write return, and how does the controller render it? | D: final: per-operation typed results after create is removed; one Page<T> | Yes |
+| A37 | Design | Where does app-wide HTTP code live, and which types and members are public? | E: final: HTTP code stays in inventory.web (package-private); web/ holds HttpConstants only; classes as built | Yes |
+| A38 | Design | What does each write return, and how does the controller render it? | E: final: sealed non-generic WriteResult; typed WriteResult<O> and one Page<T> were designed, not built | Yes |
 | A39 | Design | How is the package layout checked on the compiled classes? | D: final: ArchUnit core with the rules that hold on the real layout | Yes |
-| H1 | Spec gap | How are the spec and the extensions versioned? | A: Path prefix: spec at /inventory, extensions under /v2 | Yes |
+| H1 | Spec gap | How are the spec and the extensions versioned? | E: final: path prefix; the spec's URLs stay byte for byte; "compatible" defined; removal only by an owner decision | Yes |
 | H2 | Spec gap | Are /v2 stock writes keyed, and is the key required? | A: Idempotency-Key required on /v2 add and purchase | Yes |
 | H3 | Spec gap | What does an unversioned POST do with an Idempotency-Key? | A: Reject any present header with 400 and change nothing | Yes |
 | H4 | Spec gap | What is the unversioned list's page size? | A: Fixed 250, only after; the Link carries only after | Yes |
 | H5 | Spec gap | How does /v2 list? | A: limit 1–250 (lenient, default 250) and after; Link with both | Yes |
 | H6 | Spec gap | Where do the spec operations appear under /v2, and where do details go? | A: /v2 mirrors the spec operations; details are PUT …/details | Yes |
-| H7 | Spec gap | How does the details PUT create and replace? | A: PUT creates a missing SKU at quantity 0 (201) and replaces an existing SKU's details (200); optional If-Match and If-None-Match: *; 412 when one fails | Yes |
+| H7 | Spec gap | How does the details PUT create and replace? | D: final: PUT creates (201) or replaces (200); If-Match and If-None-Match: *; 412; costs recorded | Yes |
 | H8 | Spec gap | What is the 412 text? | A: One fixed text for every 412 | Yes |
 | H9 | Design | What does V4 do to the idempotency CHECKs for 'create' and 201/409? | A: V4 narrows both CHECKs with NOT VALID | Yes |
 | H10 | Spec gap | Does the request hash include the API version? | A: Yes: hash input "v2" + operation + skuId + quantity | Yes |
-| H11 | Spec gap | What drives the guard filter? | A: Classify each request by route kind and apply every frozen check to every route | Yes |
+| H11 | Spec gap | What drives the guard filter? | C: final: route-kind guard filter with the body cap counted while read on every write route | Yes |
 | H12 | Design | How is OpenAPI documented across the two versions? | A: Two springdoc groups, two committed files, plus a conformance test against the spec | Yes |
 | H13 | Design | Which host ports do the app and the dev server use? | A: App on host 8080, Vite on 5173 (main's) | Yes |
 | H14 | Design | What order and budget does the final build follow? | A: Follow ai/final/plan.md; stop and push what is green at the end of the budget | Yes |
 | H15 | Design | Which architecture guards does the final build add? | A: ArchUnit with only the rules that hold on the real layout | Yes |
 | H16 | Spec gap | Does the guard filter run before body validation? (M-13) | A: Freeze it: the guard filter answers before the body is validated | Yes |
 | A17 | Spec gap | What format does the Idempotency-Key have, and does a replay say so? | A: UUID; no replay header | Yes |
-| A19 | Spec gap | How large may a write body be? | A: 4 KB on both POSTs, 64 KB on PUT details; over the cap → 400 before parsing | Yes |
+| A19 | Spec gap | How large may a write body be? | C: final: 4096 bytes on both POSTs of both versions (chunked counted while read), 65536 on PUT details | Yes |
 | A22 | Design | Where do SKU details live? | A: Own table sku_details (PK sku_id, version) | Yes |
 | A25 | Spec gap | What format do /v2 errors have? | A: text/plain fixed texts through the S5 helper | Yes |
 | A26 | Spec gap | What are the cost and SkuDetails field rules? | A: Integer minor units with an ISO currency; bounded name, description and images | Yes |
-| A27 | Design | How is a /v2 read served? | A: One sku LEFT JOIN sku_details query, no transaction; ETag and no-store; conditional GET ignored | Yes |
+| A27 | Design | How is a /v2 read served? | C: final: one join, no transaction; ETag is the details version only; no-store; conditional GET ignored | Yes |
 | A30 | Design | Does the service use any store besides Postgres? | A: Postgres only | Yes |
 | A35 | Design | Does the idempotency row store a domain outcome instead of the HTTP response? | A: Keep the rendered response (deferred #83) | Yes |
 | A36 | Design | Does the service use a message broker? | A: No broker | Yes |
+| H17 | Design | Which server-side time bounds does the service set? | A: Hikari connection-timeout 3000 ms and Postgres lock_timeout 5 s | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -158,22 +159,24 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## G3: What status does a malformed or unsupported request get?
 
 - **Type:** Spec gap
-- **Choice:** C: final: all client request errors → 400 text/plain on both versions' POSTs and on PUT details
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** D: final: every client error → 400 text/plain on the POSTs and PUT details, except 412 for a failed precondition
+- **My reasoning:** Follow-up 1: the 400 rule names the 412 of a failed precondition as its only exception.
 - **Rejected:**
   - A: All client request errors → 400 text/plain. Superseded: the rule now names /v2 and the details PUT beside the spec POSTs.
   - B: Spec'd cases → 400; Spring defaults elsewhere. Drawback noted in research: Returns codes the spec doesn't list.
+  - C: final: all client request errors → 400 text/plain on both versions' POSTs and on PUT details. Superseded by follow-up 1: "every client error is 400" contradicted H7 and H8 (412).
 - **Matched recommendation:** Yes
 
 ## G13: How strictly is the JSON body parsed?
 
 - **Type:** Spec gap
-- **Choice:** D: final: strict numbers, ignore unknown fields, on every write body
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** E: final: strict numbers (5.0 and 1e2 refused), strict duplicate names, ignore unknown fields, on every JSON body
+- **My reasoning:** Critique M-11: the last of two duplicate names won ({"quantity":1,"quantity":2} added 2), so a parser differential could change the amount; strict detection is adopted as a new check. Critique M-16: refusing 5.0 and 1e2 is deliberate (the spec's quantity is an integer written as digits).
 - **Rejected:**
   - A: Strict numbers, ignore unknown fields. Superseded: the rule now names the /v2 bodies and the details body.
   - B: Strict numbers and reject unknown fields. Drawback noted in research: The schema doesn't set additionalProperties: false, so this is stricter than the contract.
   - C: Jackson defaults. Drawback noted in research: May accept "10" and truncate 1.5 (unverified).
+  - D: final: strict numbers, ignore unknown fields, on every write body. Superseded by critique M-11 and M-16: duplicate names were accepted (last one won), and the refusal of 5.0 and 1e2 was undocumented.
 - **Matched recommendation:** Yes
 
 ## G4: On purchase, which wins: 404 (SKU missing) or 400 (bad body)?
@@ -238,10 +241,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** D: final: /v2 only: same transaction, replay, spec codes only
-- **My reasoning:** Owner OD-3 and OD-4
+- **My reasoning:** Owner OD-3 and OD-4. One 400, like the spec (critique M-07): a reused key with a different request and an expired key both answer 400 "Invalid request", because the spec's POSTs list one client-error code; an in-flight duplicate does not answer an error at all, it waits on the first request's row and replays its response (the draft's 409 is not used). Accepted cost: the client cannot tell mismatch and expiry apart. The old reason for rejecting 409/422 ("adds status codes the spec does not list") no longer holds, because /v2 also answers 412. Comparison: IETF draft-ietf-httpapi-idempotency-key-header revision -07 (2025-10-15, "Expired & archived"; https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/) says SHOULD reply 422 for a different payload, 409 for an in-flight duplicate and 400 for a missing key; it is not a standard and has expired. Stripe (https://docs.stripe.com/api/idempotent_requests) answers a reused key with different parameters with a 400-class idempotency error.
 - **Rejected:**
   - A: Same transaction, replay, spec codes only. Superseded by OD-3: only /v2 writes touch the table.
-  - B: IETF draft codes (409 / 422). Drawback noted in research: Adds status codes the spec doesn't list.
+  - B: IETF draft codes (409 / 422). The real reason is one 400 for every request problem, like the spec's single client-error code; the client cannot tell mismatch and expiry apart (accepted); an in-flight duplicate waits and replays instead of answering 409. The earlier reason (status codes the spec does not list) fails because /v2 answers 412 too. Draft revision -07 (expired and archived) says 422 for a different payload, 409 for an in-flight duplicate, 400 for a missing key; Stripe answers a mismatched reuse with a 400-class idempotency error (critique M-07).
   - C: Replay successes only. Drawback noted in research: Two stores of truth for the same key over time.
 - **Matched recommendation:** Yes
 
@@ -249,24 +252,25 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** E: final: unversioned list fixed at 250 with after only; /v2 adds limit
-- **My reasoning:** Owner OD-5
+- **My reasoning:** Owner OD-5. Accepted risk (critique M-09): a client that ignores Link sees 250 of N SKUs with no truncation signal; the cap is disclosed in openapi.yaml and the README.
 - **Rejected:**
   - A: Sorted by skuId, no paging. Drawback noted in research: Unbounded response.
   - B: Opt-in keyset paging, bare array, Link header. Superseded by OD-5: opt-in limit on the unversioned list is now a /v2 extension; the unversioned page is fixed at 250.
   - C: Opt-in offset paging (page, size). Drawback noted in research: OFFSET cost grows; rows shift between pages when stock is added.
-  - D: Paged by default (e.g. 50). Drawback noted in research: A client that sends no params no longer gets all SKUs, which breaks the contract.
+  - D: Paged by default (e.g. 50). Superseded by OD-5: a default page size is what OD-5 now does on GET /inventory (fixed 250, after only). It was rejected earlier because a spec client would no longer get every SKU; it is accepted now because an unbounded list ran out of memory at 1M SKUs (C-02).
 - **Matched recommendation:** Yes
 
 ## G10: Auth, and which HTTP status codes may the API return?
 
 - **Type:** Spec gap
-- **Choice:** E: final: no auth; spec codes on the spec's operations, listed codes on /v2, standard HTTP elsewhere
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** F: final: no auth; spec codes on the spec's operations, listed codes on /v2, standard HTTP elsewhere; library paths as coded
+- **My reasoning:** Follow-up 13 and critique M-02.
 - **Rejected:**
   - A: No auth; only spec status codes. Drawback noted in research: Not production-safe (documented).
   - B: No auth; framework defaults. Drawback noted in research: Codes outside the contract.
   - C: Static API key header. Drawback noted in research: Adds setup for reviewers.
   - D: No auth; spec codes on the spec's operations, standard HTTP elsewhere. Superseded: /v2/inventory/** is named next to /inventory/**, with its own listed codes.
+  - E: final: no auth; spec codes on the spec's operations, listed codes on /v2, standard HTTP elsewhere. Superseded by follow-up 13 and critique M-02: the library-path list and the two 404s follow the code.
 - **Matched recommendation:** Yes
 
 ## D0: Where do AI prompts and artifacts live in the repo?
@@ -325,7 +329,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Design choice
 - **Choice:** D: SERIALIZABLE isolation + retry
-- **My reasoning:** This is the initial approach. A production system could have a cart service and even a reservation service that holds inventory for a set short period of time. Similar to purchasing ibventory from Ticketmaster the inventory is reserved for x minutes then released if not purchased.
+- **My reasoning:** This is the initial approach. A production system could have a cart service and even a reservation service that holds inventory for a set short period of time. Similar to purchasing ibventory from Ticketmaster the inventory is reserved for x minutes then released if not purchased. Concurrency design history (critique M-10): the ledger-SUM design with SERIALIZABLE transactions and retries was built first (V1-C, W1-B, D4-D); #26 showed 40001 serialization failures on writes to different SKUs; it was replaced by a balance row plus the append-only ledger at READ COMMITTED (E1, which supersedes W1, W2, X1, Y2 and Z1). This card stays chosen so the supersession is visible.
 - **Rejected:**
   - A: Atomic conditional UPDATE + ON CONFLICT upsert. Drawback noted in research: 0 rows is ambiguous: one extra SELECT to choose 404 vs 400.
   - B: Pessimistic row lock. Drawback noted in research: Two concurrent creates of a new SKU still race (needs ON CONFLICT or retry).
@@ -472,9 +476,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## R7: Confirm the skuId pattern
 
 - **Type:** Spec gap
-- **Choice:** A: Alphanumeric first, 1–64: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
-- **My reasoning:** Square recommends starting with an alphanumeric character and not including punctuation.  SKUs: Each SKU should be unique for accurate inventory tracking. Avoid duplicate SKUs, even if it’s a variation of the same product. Do not use special characters or punctuation; only use numbers and letters from the alphabet. Keep it concise and logical. The first few letters should represent the highest category of importance depending on your business (for example, brand, make, then model). Always starting with a letter can help employees easily identify product categories. Maintain consistency in your SKU format across all products to streamline your inventory management. This consistency makes it easier for employees to understand and manage the SKUs. Periodically review and update your SKU system to ensure it remains relevant and efficient, especially as your product assortments evolve. https://squareup.com/us/en/the-bottom-line/operating-your-business/stock-keeping-unit
+- **Choice:** D: final: alphanumeric first, 1–64; the pattern applies to add
+- **My reasoning:** Follow-up 5: "add", not "create".
 - **Rejected:**
+  - A: Alphanumeric first, 1–64: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Superseded by follow-up 5: "POST create" no longer exists after OD-6.
   - B: Keep ^[A-Za-z0-9._-]{1,64}$ and reject "." and ".." explicitly. Drawback noted in research: Special cases in code.
   - C: Alphanumeric first, up to 255. Drawback noted in research: Longer keys for no stated need.
 - **Matched recommendation:** Yes
@@ -566,17 +571,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## S6: What does a 500 look like, and which URLs does the "spec codes only" rule cover?
 
 - **Type:** Spec gap
-- **Choice:** A: Catch-all → 500 "Internal server error" text/plain; scope G10 to /inventory/**
-- **My reasoning:** _No notes recorded._
+- **Choice:** E: final: catch-all → 500 text/plain; library paths keep library behaviour; unknown springdoc group is 404
+- **My reasoning:** Follow-up 13 and critique M-42.
 - **Rejected:**
+  - A: Catch-all → 500 "Internal server error" text/plain; scope G10 to /inventory/**. Superseded by follow-up 13 and critique M-42: the code covers /v3/api-docs.yaml/**, an unknown group is 404, and the query rule is not literally "every path".
   - B: Let Boot's /error handle 500s. Drawback noted in research: Breaks D6 (every error text/plain) and R3's text/plain rule for exactly the case clients handle worst: an outage..
   - C: Catch-all → 500 with an empty text/plain body. Drawback noted in research: A client or reviewer sees a bare 500 with nothing to read; an empty body is harder to tell apart from the empty-body bug in S5..
   - D: 503 for database outages, 500 for the rest. Drawback noted in research: Conflicts with G10-D: 503 is not a listed code and G10 allows only 500 for faults. Priority 3 (spec over convention) says no..
 - **Matched recommendation:** Yes
-- **Refined by:** T3, C1
-- **Current rules (after refinement):**
-  - The advice has one @Hidden @ExceptionHandler(Exception.class): log the stack trace at ERROR and return 500 text/plain "Internal server error". If the exception is an ErrorResponse, use its status and G6's fixed text, or the status's standard reason phrase when G6 has none. (refined by T3)
-  - G10 and the text/plain error contract cover /inventory/** and every other path except /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**). On those library paths InventoryErrorAdvice rethrows the exception, so their errors keep library behaviour (Spring Boot's /error JSON, an empty 406, health 503 when DOWN, the Swagger UI redirect), except an undecodable query string, which gets 400 text/plain "Invalid request" on every path. A request Tomcat rejects before routing is text/plain on every path (C1). (refined by C1)
 
 ## S7: Where does the one complete add statement (with the G12 overflow guard) and the purchase statement (with RETURNING) get written down?
 
@@ -648,9 +650,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** E: final: on /v2, never reuse an expired key
-- **My reasoning:** Owner OD-3 and OD-4
+- **My reasoning:** Owner OD-3 and OD-4. Why an expired key is rejected, not treated as new (critique M-07): Stripe removes keys after 24 hours and treats a reused pruned key as a new request (https://docs.stripe.com/api/idempotent_requests); here a retry of a request whose first response was lost more than 24 hours ago would then run as a fresh write, the double write the key exists to prevent. Refusing is safe: the client gets 400 and decides. The IETF draft (-07, expired) only says the server SHOULD define and publish an expiry policy.
 - **Rejected:**
-  - A: Take over expired keys inside the claim statement. Drawback noted in research: The claim SQL gets longer.
+  - A: Take over expired keys inside the claim statement. Treating an expired key as new (as Stripe does after pruning) would let a retry of a request answered more than 24 hours ago run again as a fresh write, the double write the key exists to prevent; refusing is safe and the client decides (critique M-07).
   - B: Delete the expired row, then claim. Drawback noted in research: Two statements whose safety depends on lock ordering; harder to explain.
   - C: Lock the key row first. Drawback noted in research: More code paths (row exists / doesn't exist).
   - D: Never reuse an expired key. Superseded by OD-3: scoped to /v2.
@@ -723,7 +725,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Design choice
 - **Choice:** C: Ledger only (balance = SUM of deltas)
-- **My reasoning:** This will help bring this system into closer alignment with shopify https://shopify.engineering/scaling-inventory-reservations Claim: When payment succeeds, we permanently deduct quantity from the inventory ledger (source of truth). They use a reserve and claim process but we're eschewing reserve for now.
+- **My reasoning:** This will help bring this system into closer alignment with shopify https://shopify.engineering/scaling-inventory-reservations Claim: When payment succeeds, we permanently deduct quantity from the inventory ledger (source of truth). They use a reserve and claim process but we're eschewing reserve for now. Concurrency design history (critique M-10): the ledger-SUM design with SERIALIZABLE transactions and retries was built first (V1-C, W1-B, D4-D); #26 showed 40001 serialization failures on writes to different SKUs; it was replaced by a balance row plus the append-only ledger at READ COMMITTED (E1). The old "about 4h more" cost note is cleared.
 - **Rejected:**
   - A: No ledger; list it under Future improvements. Drawback noted in research: No stock history in the build.
   - B: Hybrid: balance row + ledger row in the same statement. Drawback noted in research: About 2h with tests.
@@ -731,7 +733,6 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Refined by:** W1, E1
 - **Current rules (after refinement):**
   - Superseded by E1: stock is sku.quantity, changed by one conditional statement per write at READ COMMITTED; every change still appends an inventory_ledger row in the same transaction, and triggers keep the ledger append-only (E3). (refined by W1, E1)
-- **Unresolved conflicts at export:** About 4h more, plus a new concurrency design.
 
 ## V2: With quantities stored as bigint/long, how wide is the request quantity, and what happens to the overflow guard?
 
@@ -748,7 +749,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Design choice
 - **Choice:** B: SERIALIZABLE transactions with retry (D4 → D)
-- **My reasoning:** _No notes recorded._
+- **My reasoning:** Concurrency design history (critique M-10): the ledger-SUM design with SERIALIZABLE transactions and retries was built first (V1-C, W1-B, D4-D); #26 showed 40001 serialization failures on writes to different SKUs; it was replaced by a balance row plus the append-only ledger at READ COMMITTED (E1, which supersedes W1, W2, X1, Y2 and Z1).
 - **Rejected:**
   - A: Lock the SKU row, then check and insert (D4 → B). Drawback noted in research: Two statements per write.
   - C: Go back to the hybrid (V1 → B). Drawback noted in research: The ledger isn't the source of truth.
@@ -850,47 +851,51 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## Z2: How is the inventory feature split between web and domain code?
 
 - **Type:** Design choice
-- **Choice:** C: final: domain package + web sub-package, listed from the code
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** D: final: domain package + web sub-package, listed from the code (as built)
+- **My reasoning:** Class names follow the code.
 - **Rejected:**
   - A: One flat inventory package. Drawback noted in research: Web and domain code mix; nothing stops the domain importing HTTP types.
   - B: Domain package + web sub-package. Superseded: the list was stale; it is rewritten from the code.
+  - C: final: domain package + web sub-package, listed from the code. Superseded: the class list follows the code (no Page, OpenApiConfiguration).
 - **Matched recommendation:** Yes
 
 ## Z3: What does GET /inventory return for a query string it can't read unambiguously?
 
 - **Type:** Spec gap
-- **Choice:** D: final: 400 "Invalid request" on both lists; repeated after on both
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** E: final: 400 "Invalid request" on both lists; every path that reads its query
+- **My reasoning:** Critique M-42: reworded.
 - **Rejected:**
   - A: Ignore what can't be read, 200. Drawback noted in research: Hand-written query parsing in the controller.
   - A2: Catch and ignore both parameters. Drawback noted in research: One bad unrelated parameter drops a valid limit.
   - B: 400 "Invalid request". Superseded: the repeated-after 400 and its documentation now cover GET /v2/inventory too, and the class names follow the real layout (A37).
   - C: Leave the 500. Drawback noted in research: A client error answers 500, against G10.
+  - D: final: 400 "Invalid request" on both lists; repeated after on both. Superseded by critique M-42: "/nope?x=%ZZ" is 404 and "/v3/api-docs?x=%ZZ" is 200, so "every path" was not literally true.
 - **Matched recommendation:** Yes
 
 ## C1: How are errors that Spring MVC never sees, and errors on library paths, rendered?
 
 - **Type:** Spec gap
-- **Choice:** E: final: text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths (inventory.web)
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** F: final: text/plain valve, %2F passthrough, TRACE, /error and bad chunk framing text/plain, advice declines library paths
+- **My reasoning:** Critique M-02 (MAJOR): /error answered 500 with Boot's JSON or Whitelabel HTML, and a bad chunk size answered 400 application/json; both now answer text/plain. M-42: the undecodable-query rule says "every path that reads its query". Follow-up 5: "add", not "create". Reviewer nit: the guard filter, interceptor and Tomcat valve write text/plain;charset=UTF-8 while the advice writes text/plain (same media type, charset parameter differs; S5).
 - **Rejected:**
   - A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths. Superseded: the classes live in inventory.web (A37), and /v2 paths are named.
   - B: Leave Tomcat's HTML pages; document them. Drawback noted in research: Breaks D6/S5 (every error is text/plain) and G11's 404 for GET /inventory/A%2FB.
   - C: Hard-code the Allow lists in the valve for TRACE. Drawback noted in research: A second copy of the routing that drifts from the controller.
   - D: Keep %2F rejected; map it in the valve. Drawback noted in research: Hand-written path parsing in a Tomcat valve.
+  - E: final: text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths (inventory.web). Superseded by critique M-02 (MAJOR): a direct /error request and malformed chunk framing answered Boot's JSON or HTML with 500 or 400; and by M-42 and follow-up 5 (wording).
 - **Matched recommendation:** Yes
 
 ## C2: What does GET /inventory return when no limit is given?
 
 - **Type:** Spec gap
-- **Choice:** E: final: fixed 250 page and after-only Link unversioned; limit, limit Link and skuId schema on /v2
-- **My reasoning:** Owner OD-5
+- **Choice:** F: final: fixed 250 page and after-only Link unversioned; limit, limit Link and skuId schema on /v2 (classes as built)
+- **My reasoning:** Class name follows the code.
 - **Rejected:**
   - A: Default page of 250 (the R8 maximum), Link for the rest. Superseded by OD-5: the unversioned Link no longer carries limit, and the documented skuId schema moves to /v2.
   - B: Keep every row; document the risk. Drawback noted in research: Any unauthenticated client can exhaust the heap (C-02).
   - C: Stream every row. Drawback noted in research: Response time and database load still grow with the table.
   - D: Default page of 50. Drawback noted in research: More round trips; a second number to document next to R8's 250.
+  - E: final: fixed 250 page and after-only Link unversioned; limit, limit Link and skuId schema on /v2. Superseded: the class is OpenApiGroups.
 - **Matched recommendation:** Yes
 
 ## C3: What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0?
@@ -907,13 +912,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## E1: Where does stock live, and how does a write stay correct under concurrency without retries?
 
 - **Type:** Design choice
-- **Choice:** E: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** F: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read (DESIGN-V2 path cited)
+- **My reasoning:** Follow-up 8.
 - **Rejected:**
   - A: Balance row, conditional UPDATE at READ COMMITTED. Superseded: the code runs the purchase as an UPDATE plus a second SELECT, not one statement.
   - B: Keep SUM, SERIALIZABLE and retries. Drawback noted in research: Writes to different SKUs still fail with 40001 under SSI (#26), and every write sums a ledger that only grows.
   - C: Balance kept by a trigger. Drawback noted in research: The trigger, not the conditional UPDATE, decides and returns the balance, and every write runs a second UPDATE (A14).
   - D: Lock, then check. Drawback noted in research: Two statements and a Java-side check (G7) for what one conditional UPDATE does.
+  - E: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read. Superseded by follow-up 8: DESIGN-V2 is now cited with its path.
 - **Matched recommendation:** Yes
 
 ## E2: How does the code run SQL once nothing needs Spring Data JPA?
@@ -930,13 +936,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## E3: How does an existing v1 database move to the balance row, and how is the ledger kept append-only?
 
 - **Type:** Design choice
-- **Choice:** E: final: V1 carries the balance row and triggers; no backfill, no upgrade from main
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** F: final: V1 carries the balance row and triggers; no backfill, no upgrade from main; append-only holds against the API
+- **My reasoning:** Critique M-36: append-only by trigger holds against the API, not against the DB owner.
 - **Rejected:**
   - A: V3: backfill from the ledger, then row-level triggers. Superseded: build v2 rewrote V1, so there is no V3 backfill and no MigrationUpgradeTest, and no in-place upgrade from main.
   - B: Backfill version as 0. Drawback noted in research: version would count every change for new SKUs but only later ones for migrated SKUs.
   - C: Statement-level triggers (#63). Drawback noted in research: Rejects every UPDATE on sku, which the balance row needs on every write, and blocks the TRUNCATE that test cleanup uses.
   - D: Privilege separation. Drawback noted in research: The deployment has one database role, so it needs a second role and separate migration credentials first.
+  - E: final: V1 carries the balance row and triggers; no backfill, no upgrade from main. Superseded by critique M-36: the limit of the trigger guarantee is now stated.
 - **Matched recommendation:** Yes
 
 ## A11: Which error does the append-only trigger raise?
@@ -994,23 +1001,25 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## A37: Where does app-wide HTTP code live, and which types and members are public?
 
 - **Type:** Design choice
-- **Choice:** D: final: HTTP code stays in inventory.web (package-private); web/ holds HttpConstants only
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** E: final: HTTP code stays in inventory.web (package-private); web/ holds HttpConstants only; classes as built
+- **My reasoning:** Class names follow the code.
 - **Rejected:**
   - A: App-wide HTTP in web; feature endpoints in inventory.web, all package-private. Superseded: the code keeps the advice, the valve and the container settings in inventory.web; moving them buys nothing, and the rules follow the real layout.
   - B: Keep app-wide HTTP code in inventory.web. Drawback noted in research: Code that serves every path lives in one feature's package, and a second feature would import from it.
   - C: Split TextErrors into generic and feature halves. Drawback noted in research: Two helpers, where S5 requires one.
+  - D: final: HTTP code stays in inventory.web (package-private); web/ holds HttpConstants only. Superseded: the class is OpenApiGroups, and RouteKind and RoutedPath exist.
 - **Matched recommendation:** Yes
 
 ## A38: What does each write return, and how does the controller render it?
 
 - **Type:** Design choice
-- **Choice:** D: final: per-operation typed results after create is removed; one Page<T>
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** E: final: sealed non-generic WriteResult; typed WriteResult<O> and one Page<T> were designed, not built
+- **My reasoning:** Follow-ups 6 and 11: the card follows the code.
 - **Rejected:**
   - A: Per-operation results; the controller keeps its own switch for unkeyed outcomes. Drawback noted in research: Two mappings of the same outcomes (C-36) that must stay byte-identical by hand.
   - B: Per-operation results; every outcome rendered through OutcomeResponses. Superseded: this text now matches the removal PR that deletes create and merges the page types.
   - C: One wide WriteResult (main). Drawback noted in research: Each controller switch carries branches for another operation's outcomes that can't happen.
+  - D: final: per-operation typed results after create is removed; one Page<T>. Superseded by follow-ups 6 and 11: the removal PR kept the sealed non-generic WriteResult, and the typed results and single Page<T> were not built.
 - **Matched recommendation:** Yes
 
 ## A39: How is the package layout checked on the compiled classes?
@@ -1027,9 +1036,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## H1: How are the spec and the extensions versioned?
 
 - **Type:** Spec gap
-- **Choice:** A: Path prefix: spec at /inventory, extensions under /v2
-- **My reasoning:** Owner OD-2
+- **Choice:** E: final: path prefix; the spec's URLs stay byte for byte; "compatible" defined; removal only by an owner decision
+- **My reasoning:** Owner OD-2. Rationale (critique M-08): the spec's URLs stay byte for byte what the assessment fixes, and every extension is additive under /v2. Comparison (critique area 8; vendor wording is close, not letter-exact): Google AIP-185 puts the major version first in the URI path (https://google.aip.dev/185); Shopify puts it in the URL, quarterly, with 12 months' support (https://shopify.dev/docs/api/usage/versioning); GitHub uses the X-GitHub-Api-Version header, date-based, default 2022-11-28 when absent, prior version supported 24 months (https://docs.github.com/en/rest/about-the-rest-api/api-versions); Stripe uses the Stripe-Version header, monthly non-breaking releases and twice-yearly breaking majors (https://docs.stripe.com/api/versioning). This build matches AIP-185 and Shopify on the mechanism and differs from GitHub and Stripe on purpose, because the spec's paths cannot change. Deprecation: no schedule; a /v2 operation goes only by an owner decision. "Compatible" means additive response fields and new optional inputs only.
 - **Rejected:**
+  - A: Path prefix: spec at /inventory, extensions under /v2. Superseded by critique M-08: same decision, now with the definition of "compatible" and the deprecation line.
   - B: Version in a header (dated versions). A header is invisible in a URL, a curl line and the Swagger UI, and needs a default for callers that send none.
   - C: Version in a query parameter. Same visibility problem as a header, and caches key on the URL.
   - D: Extend the unversioned API in place (build v2's shape). The spec's four operations would carry behaviour the spec does not list (idempotency keys, limit, details).
@@ -1049,9 +1059,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** A: Reject any present header with 400 and change nothing
-- **My reasoning:** Owner OD-4
+- **My reasoning:** Owner OD-4. RFC 9110 §6.3: "Other recipients SHOULD ignore unrecognized header and trailer fields." Counter-argument (critique M-28, decision challenge for OD-4, described not changed): fail loudly rather than silently double-write, since a caller who sends a key believes the write is retry-safe. A generic client that adds the key to every POST gets 400 on a spec endpoint. A client without UUID support gets a key by generating any random UUID v4. The front end's key lives only as long as the tab, so its replay safety lasts while the tab does (FE33, FE34).
 - **Rejected:**
-  - B: Ignore the header. A caller who sends a key believes the write is retry-safe, and it is not.
+  - B: Ignore the header. RFC 9110 §6.3 says recipients SHOULD ignore unrecognized header fields, but ignoring the key lets a caller believe the write is retry-safe when it is not; failing loudly is the choice (critique M-28).
   - C: Honour the header (build v2, G8 choice A). The spec never had the key.
 - **Matched recommendation:** Yes
 
@@ -1059,7 +1069,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** A: Fixed 250, only after; the Link carries only after
-- **My reasoning:** Owner OD-5
+- **My reasoning:** Owner OD-5. Accepted risk (critique M-09): a client that ignores Link sees 250 of N SKUs with no truncation signal.
 - **Rejected:**
   - B: Keep limit (build v2). Page-size control is an extension, and extensions live under /v2.
   - C: Unbounded (the spec). An unbounded list failed with OutOfMemoryError at 1M SKUs (C-02).
@@ -1086,9 +1096,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## H7: How does the details PUT create and replace?
 
 - **Type:** Spec gap
-- **Choice:** A: PUT creates a missing SKU at quantity 0 (201) and replaces an existing SKU's details (200); optional If-Match and If-None-Match: *; 412 when one fails
-- **My reasoning:** Owner OD-11
+- **Choice:** D: final: PUT creates (201) or replaces (200); If-Match and If-None-Match: *; 412; costs recorded
+- **My reasoning:** Owner OD-11. Accepted costs (critique M-06, decision challenge: prescribed by the Target API, OD-6 and OD-11): an unconditional PUT to an unknown id creates a permanent phantom SKU (a typo such as ABC-l for ABC-1 lists as {"skuId":"ABC-l","quantity":0}, and a purchase of it answers 400 "Insufficient inventory", not 404) and no API deletes it (G5); the Create page always sends If-None-Match: * so the front end never does this by accident. /v2 lock-in: the leniencies (a bad limit is ignored, no precondition is required to create) cannot be tightened later without /v3. 428 (RFC 6585 §3) was rejected: the approved contract creates unconditionally.
 - **Rejected:**
+  - A: PUT creates a missing SKU at quantity 0 (201) and replaces an existing SKU's details (200); optional If-Match and If-None-Match: *; 412 when one fails. Superseded by follow-up 2: same decision; the "first test decides" sentence moves from the rule to the assumption.
   - B: 404 on a missing SKU (build v2). Creating then needs a second route, and the create form could not be idempotent by method.
   - C: 409 on an existing SKU. 409 needs a create-only route.
 - **Matched recommendation:** Yes
@@ -1097,16 +1108,16 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** A: One fixed text for every 412
-- **My reasoning:** Owner (Target API fixes the text)
+- **My reasoning:** Owner (Target API fixes the text) Critique M-12 (service text fixed by the Target API): the 412 text is misleading for If-None-Match: * on an existing SKU, because nothing was read or changed. The service keeps it; the Create page compensates and shows only its own "SKU already exists" sentence for that 412 (FE33, FE34).
 - **Rejected:**
-  - B: A second text for If-None-Match on an existing SKU. The Target API fixes one text.
+  - B: A second text for If-None-Match on an existing SKU. A second text would depart from the Target API's fixed text; the Create page compensates instead (critique M-12).
 - **Matched recommendation:** Yes
 
 ## H9: What does V4 do to the idempotency CHECKs for 'create' and 201/409?
 
 - **Type:** Design choice
 - **Choice:** A: V4 narrows both CHECKs with NOT VALID
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **My reasoning:** Approved at the plan gate (2026-09-29) Premise (critique M-29, decision challenge): defensive. No build v2 database is claimed to exist, and E3 says there is no in-place upgrade; the NOT VALID narrowing protects databases nobody is said to have. It stays because migrations V1-V3 are frozen and dropping V4 would leave the schema wider than the API.
 - **Rejected:**
   - B: No DDL: remove Operation.CREATE in Java, leave the CHECKs wide. It leaves the schema saying the API can store what it cannot.
   - C: V4 narrows with validation. It fails on a database that holds an old row.
@@ -1116,7 +1127,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 
 - **Type:** Spec gap
 - **Choice:** A: Yes: hash input "v2" + operation + skuId + quantity
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **My reasoning:** Approved at the plan gate (2026-09-29) Premise (critique M-29, decision challenge): defensive. No build v2 database is claimed to exist, and E3 says there is no in-place upgrade; the "v2" prefix keeps a key stored by an unversioned request from replaying on /v2. Removing it would change behaviour for a migrated database, so it stays.
 - **Rejected:**
   - B: No: Y3's bytes. A key stored by build v2's unversioned POST would replay an InventoryItem body on /v2.
 - **Matched recommendation:** Yes
@@ -1124,9 +1135,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## H11: What drives the guard filter?
 
 - **Type:** Spec gap
-- **Choice:** A: Classify each request by route kind and apply every frozen check to every route
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** C: final: route-kind guard filter with the body cap counted while read on every write route
+- **My reasoning:** Critique M-01 lifts the unversioned chunked exemption: every write route counts a chunked body while it is read.
 - **Rejected:**
+  - A: Classify each request by route kind and apply every frozen check to every route. Superseded by critique M-01: unversioned chunked bodies are capped like every other write body.
   - B: Keep segment counts and add cases. The next new route can repeat L21.
 - **Matched recommendation:** Yes
 
@@ -1189,9 +1201,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## A19: How large may a write body be?
 
 - **Type:** Spec gap
-- **Choice:** A: 4 KB on both POSTs, 64 KB on PUT details; over the cap → 400 before parsing
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** C: final: 4096 bytes on both POSTs of both versions (chunked counted while read), 65536 on PUT details
+- **My reasoning:** Critique M-01 (MAJOR): the prompt's freeze of build v2's unversioned chunked behaviour is lifted for this one item, and the service PR that implements the cap merges first. Both POSTs of both versions: 4096 bytes; PUT details: 65536; chunked bodies counted while read. The app service in compose.override.yaml has mem_limit 768m (MaxRAMPercentage 75 follows it; a plain docker run has no cap).
 - **Rejected:**
+  - A: 4 KB on both POSTs, 64 KB on PUT details; over the cap → 400 before parsing. Superseded by critique M-01 (MAJOR, confirmed): an unversioned chunked POST had no cap, and 30 concurrent 19 MB chunked bodies took the app from 367 MiB to 3.16 GiB. The prompt froze that behaviour unless the critique rates it MAJOR or worse; it did.
   - B: No cap. A huge body would be parsed.
 - **Matched recommendation:** Yes
 
@@ -1225,9 +1238,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## A27: How is a /v2 read served?
 
 - **Type:** Design choice
-- **Choice:** A: One sku LEFT JOIN sku_details query, no transaction; ETag and no-store; conditional GET ignored
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** C: final: one join, no transaction; ETag is the details version only; no-store; conditional GET ignored
+- **My reasoning:** Critique M-05: the /v2 strong ETag is the details version only (Target API). Recorded as a known RFC 9110 deviation; no code change.
 - **Rejected:**
+  - A: One sku LEFT JOIN sku_details query, no transaction; ETag and no-store; conditional GET ignored. Superseded by critique M-05 (decision challenge, not fixable by us): the ETag deviation is now recorded on the card.
   - B: Serve reads from a cache. It adds a second store with no measured need (A30).
 - **Matched recommendation:** Yes
 
@@ -1256,4 +1270,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **My reasoning:** Approved at the plan gate (2026-09-29)
 - **Rejected:**
   - B: Publish stock events to a broker. A second system, and no consumer exists.
+- **Matched recommendation:** Yes
+
+## H17: Which server-side time bounds does the service set?
+
+- **Type:** Design choice
+- **Choice:** A: Hikari connection-timeout 3000 ms and Postgres lock_timeout 5 s
+- **My reasoning:** Critique M-14 (fix): configuration, one line each.
+- **Rejected:**
+  - B: No bound (Hikari's 30 s default). The 30 s default lets one stalled lock or a database outage hold requests and then the whole pool (critique M-14).
+  - C: A per-request statement_timeout. It does not bound the wait for a pooled connection, and one value must fit the slowest legitimate statement.
 - **Matched recommendation:** Yes
