@@ -206,15 +206,17 @@ async function putDetails(request: Request, skuId: string): Promise<Response> {
   const details = validDetails(body);
   if (details === null) return text(400, TEXT.invalid);
   if (!SKU.test(skuId)) return text(400, TEXT.invalid);
-  // An empty or malformed If-Match (not "*" and not a list of strong ETags) is 400, and so is any If-None-Match but "*".
+  // As the service: an If-Match that is not "*" must be a well-formed list of entity-tags (weak, non-numeric and
+  // zero-padded tags are well-formed but never match a strong comparison: 412); anything else, the empty value
+  // included, is 400. Only the exact value "*" is an If-None-Match, anything else is 400.
   const ifMatch = request.headers.get('If-Match');
   let tags: string[] | null = null;
   if (ifMatch !== null && ifMatch.trim() !== '*') {
-    tags = ifMatch.split(',').map((t) => t.trim());
-    if (tags.some((t) => !/^"[^"]*"$/.test(t))) return text(400, TEXT.invalid);
+    if (!/^(?:W\/)?"[^"]*"(?:[ \t]*,[ \t]*(?:W\/)?"[^"]*")*$/.test(ifMatch.trim())) return text(400, TEXT.invalid);
+    tags = [...ifMatch.matchAll(/(W\/)?("[^"]*")/g)].filter((m) => m[1] === undefined).map((m) => m[2]!);
   }
   const ifNoneMatch = request.headers.get('If-None-Match');
-  if (ifNoneMatch !== null && ifNoneMatch.trim() !== '*') return text(400, TEXT.invalid);
+  if (ifNoneMatch !== null && ifNoneMatch !== '*') return text(400, TEXT.invalid);
 
   const exists = store.items.has(skuId);
   if (ifMatch !== null && (!exists || (tags !== null && !tags.includes(store.etag(skuId))))) return text(412, TEXT.changed);

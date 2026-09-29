@@ -170,6 +170,96 @@ describe('CreateSkuPage (#/new)', () => {
     expect(field.name()).toHaveValue('Linen dress');
   });
 
+  /** The service applies the create, then the browser sees a failure instead of the 201 (a lost response). */
+  const appliedThen = (respond: () => Response) =>
+    http.put(
+      '*/v2/inventory/:skuId/details',
+      ({ params }) => {
+        store.items.set(String(params.skuId), 0);
+        store.details.set(String(params.skuId), { details: detailsBody, version: 1 });
+        return respond();
+      },
+      { once: true },
+    );
+  const LOST =
+    'This SKU already exists. It was most likely created by your previous attempt, whose response was lost. Open it to check its details and add the initial stock.';
+
+  it.each([
+    ['a network error', () => HttpResponse.error()],
+    ['a 502', () => text(502, 'Bad gateway')],
+  ] as const)('a create applied server-side but answered with %s: the next click gets 412 and the page says the earlier attempt most likely created it', async (_l, respond) => {
+    const user = userEvent.setup();
+    server.use(appliedThen(respond));
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.type(field.initial(), '7');
+    await user.click(submit());
+    await screen.findByRole('alert');
+    await user.click(submit());
+    await waitFor(() => expect(puts()).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(LOST));
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).not.toContain(TEXT.changed);
+    expect(alert).not.toHaveTextContent('Open it to edit its details or add stock.');
+    expect(alert.querySelector('a[href="#/sku/DRS-1"]')).not.toBeNull();
+    expect(alert.querySelector(`a[href="${editHref}"]`)).toBeNull();
+    expect(alert).toHaveFocus();
+    expect(adds()).toHaveLength(0);
+    expect(store.items.get('DRS-1')).toBe(0);
+    expect(window.location.hash).toBe('');
+  });
+
+  it.each([
+    ['a network error', () => HttpResponse.error(), /network/i],
+    ['a 502', () => text(502, 'Bad gateway'), /bad gateway/i],
+  ] as const)('a create PUT failing with %s says the SKU may or may not have been created, never that sending again is safe', async (_l, respond, shown) => {
+    const user = userEvent.setup();
+    server.use(http.put('*/v2/inventory/:skuId/details', respond, { once: true }));
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.click(submit());
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(shown);
+    expect(alert).toHaveTextContent(/may or may not have been created/i);
+    expect(alert.textContent).not.toContain(GUIDANCE.retrySafe);
+    expect(alert.textContent).not.toMatch(/sending again is safe/i);
+  });
+
+  it('a 412 with no earlier uncertain attempt keeps the server text, the exists line and the edit link', async () => {
+    const user = userEvent.setup();
+    store.seedDetails('DRS-1', 4, { name: 'Original', description: 'A', images: [] });
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.click(submit());
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent!.startsWith(TEXT.changed)).toBe(true);
+    expect(alert).not.toHaveTextContent(/most likely created/);
+    expect(alert.querySelector(`a[href="${editHref}"]`)).not.toBeNull();
+  });
+
+  it('focus stays in the form while the add is in flight and lands on the alert when it fails', async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    server.use(
+      http.post('*/inventory/:skuId', async () => {
+        await new Promise<void>((r) => (release = r));
+        return HttpResponse.error();
+      }, { once: true }),
+    );
+    render(<CreateSkuPage />);
+    await fillValid(user);
+    await user.type(field.initial(), '7');
+    await user.click(submit());
+    await waitFor(() => expect(adds()).toHaveLength(1));
+    const form = screen.getByRole('form', { name: 'New SKU' });
+    expect(document.activeElement).not.toBe(document.body);
+    expect(form).toContainElement(document.activeElement as HTMLElement);
+    release();
+    const alert = await screen.findByRole('alert');
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(document.activeElement).toBe(alert);
+  });
+
   it('400 on the PUT: the server text verbatim with the check-the-values line', async () => {
     const user = userEvent.setup();
     server.use(http.put('*/v2/inventory/:skuId/details', () => text(400, TEXT.invalid)));

@@ -174,6 +174,51 @@ test('an add retried after a network failure sends the same key, no second PUT, 
   expect((await read.json()).quantity).toBe(3);
 });
 
+test('a create whose response is lost: the next click says the earlier attempt most likely created it and sends no add', async ({ page }) => {
+  const skuId = sku('e2e-lostcreate');
+  const id = encodeURIComponent(skuId);
+  const detailsPath = `/v2/inventory/${id}/details`;
+  let putCount = 0;
+  const adds: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && new URL(r.url()).pathname === `/inventory/${id}`) adds.push(r.url());
+  });
+  // The service applies the first create, but the browser sees a network error instead of the 201.
+  await page.route((url) => url.pathname === detailsPath, async (route) => {
+    putCount += 1;
+    if (putCount === 1) {
+      await route.fetch();
+      await route.abort('connectionreset');
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto('/#/new');
+  await page.getByLabel('SKU ID').fill(skuId);
+  await fillDetails(page, 'Lost response');
+  await page.getByLabel(/^Initial stock/).fill('6');
+  await page.getByRole('button', { name: 'Create SKU' }).click();
+  const alert = page.getByRole('alert');
+  await expect(alert).toContainText('Network error');
+  await expect(alert).not.toContainText('Sending again is safe');
+  await page.getByRole('button', { name: 'Create SKU' }).click();
+  await expect(alert).toContainText(
+    'This SKU already exists. It was most likely created by your previous attempt, whose response was lost. Open it to check its details and add the initial stock.',
+  );
+  await expect(alert).not.toContainText('Details changed since you read them');
+  await expect(alert.locator(`a[href="#/sku/${id}"]`)).toBeVisible();
+  await expect(page).toHaveURL(/#\/new$/);
+  expect(putCount).toBe(2);
+  expect(adds).toEqual([]);
+
+  const read = await page.request.get(`/v2/inventory/${id}`);
+  expect(read.status()).toBe(200);
+  const now = await read.json();
+  expect(now.quantity).toBe(0);
+  expect(now.details.name).toBe('Lost response');
+  expect(now.details.description).toBe('A midi dress in sand.');
+});
+
 test('creating an existing SKU changes nothing: the 412 text and a link to its edit page', async ({ page }) => {
   const skuId = sku('e2e-412create');
   const id = encodeURIComponent(skuId);

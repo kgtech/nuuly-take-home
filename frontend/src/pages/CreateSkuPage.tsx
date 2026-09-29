@@ -5,13 +5,19 @@ import { SKU_PLACEHOLDER } from '../components/FindSku';
 import { ArrowLeft } from '../components/Icons';
 import { ErrorText, Hint, SubmitButton, writeGuidance } from '../components/Messages';
 import { editHref, navigate, skuHref } from '../hooks/useHashRoute';
-import { useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
+import { isRetryable, useIdempotentSubmit } from '../hooks/useIdempotentSubmit';
 import { initialStockReason, NOT_A_NUMBER, skuIdReason } from '../validation';
 
-type Failure = { status: number; errorText: string };
+type Failure = { status: number; errorText: string; kind?: 'uncertain' | 'lost' | undefined };
 
 /** Line under a 412 on the create PUT: the server text says details changed, which the user never read (FE33). */
 const EXISTS = 'A SKU with this ID already exists. Open it to edit its details or add stock.';
+
+/** A 412 after a PUT whose answer never arrived: most likely our own earlier create, so no edit link (FE34). */
+const LOST =
+  'This SKU already exists. It was most likely created by your previous attempt, whose response was lost. Open it to check its details and add the initial stock.';
+/** A PUT that may have been applied has no "sending again is safe" line: the next try can answer 412 (FE34). */
+const UNCERTAIN = 'The SKU may or may not have been created. Sending again is fine: the page handles either case.';
 
 /**
  * #/new: two steps (FE34). A create-only PUT .../details, then, for initial stock above 0, a keyed add.
@@ -33,6 +39,8 @@ export function CreateSkuPage() {
   const [putInFlight, setPutInFlight] = useState(false);
   const [putFailure, setPutFailure] = useState<Failure | null>(null);
   const putBusy = useRef(false);
+  /** The SKU ID of the last PUT that ended in a status where the server may have applied it. */
+  const uncertainFor = useRef<string | null>(null);
 
   const send = useCallback((key: string) => api.addStock(skuId, { quantity }, key), [skuId, quantity]);
   const add = useIdempotentSubmit(send);
@@ -57,6 +65,10 @@ export function CreateSkuPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (created) {
+      if (!inFlight) await runAdd();
+      return;
+    }
     if (blocked || inFlight || putBusy.current) return;
     putBusy.current = true;
     setPutFailure(null);
@@ -65,7 +77,12 @@ export function CreateSkuPage() {
     try {
       const r = await api.putDetails(skuId, details.body(), { ifNoneMatch: '*' });
       ok = r.ok;
-      if (!r.ok) setPutFailure({ status: r.status, errorText: r.errorText });
+      if (!r.ok) {
+        const maybeApplied = isRetryable(r.status);
+        const lost = r.status === 412 && uncertainFor.current === skuId;
+        if (maybeApplied) uncertainFor.current = skuId;
+        setPutFailure({ status: r.status, errorText: r.errorText, kind: lost ? 'lost' : maybeApplied ? 'uncertain' : undefined });
+      }
     } finally {
       putBusy.current = false;
       setPutInFlight(false);
@@ -123,16 +140,20 @@ export function CreateSkuPage() {
           />
           <Hint id={`${id}-initial-hint`}>{initialReason}</Hint>
         </div>
-        {created ? (
-          <button type="button" className="wide" aria-disabled={inFlight || undefined} onClick={() => !inFlight && void runAdd()}>
-            {inFlight ? 'Sending…' : 'Retry'}
-          </button>
-        ) : (
-          <SubmitButton label="Create SKU" className="wide" unavailable={blocked} inFlight={inFlight} describedBy={blockingIds} />
-        )}
+        <SubmitButton
+          label={created ? 'Retry' : 'Create SKU'}
+          className="wide"
+          unavailable={!created && blocked}
+          inFlight={inFlight}
+          describedBy={created ? [] : blockingIds}
+        />
         {failure !== null && (
-          <ErrorText text={failure.errorText} ref={alertRef}>
-            {failure.status === 412 && !created ? (
+          <ErrorText text={failure.kind === 'lost' ? LOST : failure.errorText} ref={alertRef}>
+            {failure.kind === 'lost' ? (
+              <a href={skuHref(skuId)}>Open {skuId}</a>
+            ) : failure.kind === 'uncertain' ? (
+              UNCERTAIN
+            ) : failure.status === 412 && !created ? (
               <>
                 {EXISTS} <a href={editHref(skuId)}>Open {skuId}</a>
               </>

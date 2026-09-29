@@ -105,6 +105,10 @@ describe('client v2 writes', () => {
     expect(await api.putDetails('E', details, { ifMatch: '"1"' })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
     expect(await api.putDetails('nope', details, { ifMatch: '"1"' })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
     expect(await api.putDetails('nope', details, { ifMatch: '*' })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
+    // Well-formed but never a strong match: weak, zero-padded and non-numeric tags are 412, not 400 (as the service).
+    for (const weak of ['W/"2"', '"02"', '"abc"', 'W/"2", "9"']) {
+      expect(await api.putDetails('E', details, { ifMatch: weak })).toEqual({ ok: false, status: 412, errorText: TEXT.changed });
+    }
     expect(store.items.has('nope')).toBe(false);
     const unconditional = await api.putDetails('E', details);
     expect(unconditional.ok && unconditional.etag).toBe('"3"');
@@ -116,10 +120,10 @@ describe('client v2 writes', () => {
     expect(await api.putDetails('bad id', details)).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
     expect(await api.putDetails('nope', { name: '' })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
     expect(await api.putDetails('E', details, { ifMatch: '' })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
-    for (const bad of ['1', 'W/"1"', '"1', '"1", x', '* , "1"']) {
+    for (const bad of ['1', '"1', '"1", x', '* , "1"', '"1" "1"', '"1", *']) {
       expect(await api.putDetails('E', details, { ifMatch: bad })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
     }
-    for (const bad of ['"1"', 'W/"1"', '']) {
+    for (const bad of ['"1"', 'W/"1"', '', '"1", *', '*, "1"', '**']) {
       expect(await api.putDetails('E', details, { ifNoneMatch: bad })).toEqual({ ok: false, status: 400, errorText: TEXT.invalid });
     }
     expect((await api.putDetails('E', details, { ifMatch: '"0", "1"' })).ok).toBe(true);
