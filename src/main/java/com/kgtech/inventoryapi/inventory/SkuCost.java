@@ -12,7 +12,7 @@ public record SkuCost(
         @Schema(description = "Three-letter uppercase currency code", pattern = SkuCost.CURRENCY_REGEX,
                 requiredMode = Schema.RequiredMode.REQUIRED) String currency) {
 
-    public static final String CURRENCY_REGEX = "^[A-Z]{3}$";
+    private static final String CURRENCY_REGEX = "^[A-Z]{3}$";
     private static final Pattern CURRENCY = Pattern.compile(CURRENCY_REGEX);
 
     public SkuCost {

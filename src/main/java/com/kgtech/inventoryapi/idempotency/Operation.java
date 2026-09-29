@@ -15,7 +15,7 @@ public enum Operation {
         this.dbValue = dbValue;
     }
 
-    public String dbValue() {
+    String dbValue() {
         return dbValue;
     }
 }
