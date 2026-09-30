@@ -182,7 +182,7 @@ In code: a second `DataSource` and `JdbcClient`, used by `StockRepository.find` 
 
 ## 12. Write-off endpoint (designed, not built)
 
-Today the only way to lower a balance is a purchase, so shrinkage (damaged, lost, expired, returned to the vendor) would be recorded as a sale. A write-off is a separate decrement with its own reason. No board card exists yet, so it has no decision ID; `DECISIONS.md` is generated from the board (S9), and a card must be added there before this is built.
+Tracked as [#124](https://github.com/kgtech/nuuly-take-home/issues/124). Today the only way to lower a balance is a purchase, so shrinkage (damaged, lost, expired, returned to the vendor) would be recorded as a sale. A write-off is a separate decrement with its own reason. No board card exists yet, so it has no decision ID; `DECISIONS.md` is generated from the board (S9), and a card must be added there before this is built.
 
 **Shape.** `POST /v2/inventory/{skuId}/write-off`, body `{"quantity": n, "reason": "damaged" | "lost" | "expired" | "vendor_return"}`, `Idempotency-Key` required like the other `/v2` writes. It answers 200 with the remaining quantity, 404 "SKU not found", 400 "Insufficient inventory", or 400 "Invalid request". There is no unversioned route (the spec's four operations don't change, G10). `quantity` stays a positive Integer (V2); a negative `quantity` is never accepted, and the balance never goes below 0 (E1's CHECK).
 
