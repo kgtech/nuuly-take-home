@@ -110,6 +110,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | A35 | Design | Does the idempotency row store a domain outcome instead of the HTTP response? | A: Keep the rendered response (deferred #83) | Yes |
 | A36 | Design | Does the service use a message broker? | A: No broker | Yes |
 | H17 | Design | Which server-side time bounds does the service set? | A: Hikari connection-timeout 3000 ms and Postgres lock_timeout 5 s | Yes |
+| H18 | Design | How would the service scale reads with read replicas, and what does a read promise then? | A: Primary only (today); replicas designed, not built | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -1286,4 +1287,15 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: No bound (Hikari's 30 s default). The 30 s default lets one stalled lock or a database outage hold requests and then the whole pool (critique M-14).
   - C: A per-request statement_timeout. It does not bound the wait for a pooled connection, and one value must fit the slowest legitimate statement.
+- **Matched recommendation:** Yes
+
+## H18: How would the service scale reads with read replicas, and what does a read promise then?
+
+- **Type:** Design choice
+- **Choice:** A: Primary only (today); replicas designed, not built
+- **My reasoning:** Drafted at the owner's request (2026-09-29) because it will come up in the interview: A records today's code; B is the designed path once reads outgrow the primary (DESIGN.md §11).
+- **Rejected:**
+  - B: Streaming replicas for display reads, lag-bounded. Designed, not built: no measurement shows reads outgrowing the primary, and it changes the README's read promise (DESIGN.md §11).
+  - C: B plus read-your-writes tokens on /v2. Designed, not built: it needs B first and only helps a /v2 client that must read its own writes.
+  - D: Synchronous remote_apply replicas. Every commit would wait for the slowest listed replica, and a down replica stalls writes.
 - **Matched recommendation:** Yes

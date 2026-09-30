@@ -131,4 +131,51 @@ Reused from build v1 and #87: the decision-board process, the text/plain error c
 
 ## 10. Designed, not built
 
-Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope). Nothing here is claimed as a performance property without a benchmark.
+Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope); read replicas (H18, §11). Nothing here is claimed as a performance property without a benchmark.
+
+## 11. Read replicas and scale (H18, designed, not built)
+
+The service runs on one Postgres primary. Card H18 records that, and the design for adding read replicas; nothing here is built. No load test shows reads outgrowing the primary, and the README makes no performance claim.
+
+**Short answer.** Replicas scale reads, not writes. Every decision stays on the primary: the conditional UPDATE (E1), the ledger trigger (A14), the idempotency claim and replay (R2), and the `If-Match`/`If-None-Match` checks. Replicas serve only reads that decide nothing. So write correctness doesn't change; what changes is how fresh a read is.
+
+**What stays on the primary.**
+
+- Both versions' add and purchase, `PUT …/details`, everything in `IdempotencyStore`, and the purchase's 404-versus-400 `EXISTS` read, which runs inside the write's transaction.
+- The rule: no write is decided from a replica read. Checking stock on a replica and then writing would bring back oversell; the conditional UPDATE on the primary is the check.
+
+**What a replica shows.**
+
+- Streaming (physical) replicas replay whole transactions. The balance, its ledger row and the idempotency row commit together, so a replica can lag the primary but never shows a balance without its ledger row. Triggers don't run on a standby and don't need to.
+- Logical replication and change-data capture apply rows with triggers off. Publish `sku` and `inventory_ledger` together and keep A14's triggers at their default (origin only); enabling them on a subscriber would write duplicate ledger rows.
+- Since V5, each balance change has exactly one ledger row in the same commit, so the ledger is a dependable change feed for a later outbox or ERP sync (A36, #85).
+
+**Routing (option B).**
+
+| Request | Goes to | Why |
+|---|---|---|
+| `POST` add and purchase (both versions), `PUT …/details` | Primary | Decides the outcome |
+| Idempotency claim, replay and the purchase's `EXISTS` read | Primary | Part of the write's transaction |
+| `GET /inventory/{skuId}`, `GET /v2/inventory/{skuId}` | Replica | Display only; a stale `ETag` makes a later `If-Match` fail with 412 on the primary, never a wrong write |
+| `GET /inventory`, `GET /v2/inventory` | Replica | Keyset pages stay correct, but the pages of one walk can come from different moments |
+| Balance-versus-ledger reconciliation | Replica | A full scan, kept off the primary |
+
+In code: a second `DataSource` and `JdbcClient`, used by `StockRepository.find` and `page` and the `/v2` reads that join `sku_details`. Routing on a read-only transaction flag won't work here, because the reads run with no transaction at all (E1).
+
+**How fresh a read is.** The README's "a read is always the last committed count" becomes "the last committed count, up to the lag limit". In layers:
+
+1. **Lag limit.** A replica leaves the read pool when its replay lag passes the limit, read on the primary from `pg_stat_replication.replay_lag` (`now() - pg_last_xact_replay_timestamp()` on the replica also grows while the primary is idle, so it overstates lag). With no replica left, reads go to the primary.
+2. **The write's own response.** Every write already returns the new quantity (`InventoryItem`, `SkuItem`), so a client never needs to re-read its own write.
+3. **Option C, only for a `/v2` client that must read its own writes.** A write returns its commit LSN in a response header; a read that sends it back is served by a replica whose `pg_last_wal_replay_lsn()` has reached it, otherwise by the primary. The unversioned API can't carry the header (H1).
+4. **Option D, `synchronous_commit = remote_apply`**, makes the listed replicas current before each write is acknowledged. Every commit then waits for the slowest of them, so it isn't recommended beyond one or two.
+
+**Failover.** This is separate from read routing. With asynchronous replicas, promoting one after the primary fails can lose writes that were already acknowledged. They are lost consistently, because the balance, ledger row and key row are one transaction, so a retry with the same key applies once on the new primary; but the client was told 200 for a write that no longer exists. To keep every acknowledged write, commit synchronously to at least one standby (`synchronous_standby_names = 'ANY 1 (…)'`), at the cost of a network round trip per commit.
+
+**Beyond replicas.**
+
+- **Write capacity.** Writers to one SKU queue on its row lock. A local pgbench run (SQL only, 8 clients) gave about 1,100–1,600 writes per second on one SKU; that is a laptop figure, not a capacity claim. Past one primary, shard by `sku_id`: every write touches one SKU, so its row lock, trigger and ledger row stay on one shard and no transaction spans shards. The price is that key rows follow their SKU's shard, so a key reused on a SKU in another shard is no longer caught (S8).
+- **Connection poolers.** PgBouncer in transaction mode drops per-connection settings, so `lock_timeout` (H17, set today by Hikari's init SQL) would move to `ALTER ROLE … SET lock_timeout = '5s'` or to `SET LOCAL` in each transaction.
+
+**Checking the invariant in production.** Today `BalancesRecordedExtension` checks `quantity = SUM(quantity_delta)` in tests, and V5 enforces it against everyone but the table owner (§3). A scheduled reconciliation on a replica (the `Invariants.balanceMismatches` query) would catch an owner-level bypass and alert on any row.
+
+**What building B takes** (H18 estimates about a day): the second `DataSource` and `JdbcClient`, the lag check, a Testcontainers primary with a streaming replica for the tests (a replica read may return the older quantity; a purchase decided while the replica lags never oversells; a replica past the limit is skipped), and the README's read promise changed through H18.
