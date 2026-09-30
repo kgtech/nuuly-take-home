@@ -1,0 +1,38 @@
+info:
+  name: "List inventory"
+  type: http
+  seq: 3
+
+http:
+  method: GET
+  url: "{{baseUrl}}/inventory?after={{listAfter}}"
+  params:
+    - name: "after"
+      value: "{{listAfter}}"
+      type: query
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("this run's SKU is in the page with quantity 5", function () {
+          const mine = res.getBody().find(i => i.skuId === bru.getVar('skuId'));
+          expect(mine).to.deep.equal({ skuId: bru.getVar('skuId'), quantity: 5 });
+        });
+        test("array of items", function () {
+          const b = res.getBody();
+          expect(b).to.be.an('array');
+          b.forEach(i => { expect(i).to.have.property('skuId'); expect(i.quantity).to.be.a('number'); });
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Spec API list: a JSON array sorted by skuId, at most 250 per page (OD-5). Anchored: the cursor is this run's SKU ID minus its last character, so this run's SKU is in the first 250 rows however many SKUs the database holds.

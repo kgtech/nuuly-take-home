@@ -32,14 +32,15 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
+import com.kgtech.inventoryapi.inventory.InventoryPage;
+import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
-import com.kgtech.inventoryapi.inventory.Page;
-import com.kgtech.inventoryapi.inventory.Page.Next;
 
 /**
- * G9, R4, C2: GET /inventory passes limit and after to the service as raw strings, answers a bare JSON array and,
- * when the service returns a next cursor, one absolute {@code Link: <…>; rel="next"} built from the request's scheme,
- * host, port and context path plus the routed path /inventory.
+ * G9, C2, H4: GET /inventory passes only after to the service as a raw string (limit and every other parameter are
+ * ignored), answers a bare JSON array and, when the service returns a next cursor, one absolute
+ * {@code Link: <…>; rel="next"} built from the request's scheme, host, port and context path plus the routed path
+ * /inventory and carrying only after. The limit-based /v2 list is V2ListPagingTest's.
  */
 @WebMvcTest(InventoryController.class)
 @Import(OutcomeResponses.class)
@@ -55,8 +56,8 @@ class InventoryListPagingTest {
     @MockitoBean
     InventoryService service;
 
-    private void stub(String limit, String after, Optional<Next> next) {
-        when(service.list(limit, after)).thenReturn(new Page<>(ITEMS, next));
+    private void stub(String after, Optional<Next> next) {
+        when(service.list(after)).thenReturn(new InventoryPage(ITEMS, next));
     }
 
     private static URI linkTarget(String link) {
@@ -67,118 +68,108 @@ class InventoryListPagingTest {
 
     @Test
     void passesNoParamsAsNull() throws Exception {
-        stub(null, null, Optional.empty());
+        stub(null, Optional.empty());
 
         mvc.perform(get("/inventory")).andExpect(status().isOk());
 
-        verify(service).list(null, null);
+        verify(service).list(null);
     }
 
-    /** R4: limit is bound as a String, so a non-numeric value never fails type conversion; after is not validated. */
+    /** H4: after is passed raw and never validated; limit, in any form, and other parameters never reach the service. */
     @Test
-    void passesRawLimitAndAfterToService() throws Exception {
-        stub("abc", "x+y &z", Optional.empty());
+    void passesOnlyAfterToTheService() throws Exception {
+        stub("x+y &z", Optional.empty());
 
-        mvc.perform(get(URI.create("/inventory?limit=abc&after=x%2By%20%26z")))
+        mvc.perform(get(URI.create("/inventory?limit=abc&limit=3&foo=bar&after=x%2By%20%26z")))
                 .andExpect(status().isOk())
                 .andExpect(content().json(ITEMS_JSON, JsonCompareMode.STRICT));
 
-        verify(service).list("abc", "x+y &z");
+        verify(service).list("x+y &z");
     }
 
     @Test
     void passesEmptyAndNulValuesUnchanged() throws Exception {
-        stub("", "a\0b", Optional.empty());
+        stub("a\0b", Optional.empty());
 
-        mvc.perform(get(URI.create("/inventory?limit=&after=a%00b"))).andExpect(status().isOk());
+        mvc.perform(get(URI.create("/inventory?after=a%00b"))).andExpect(status().isOk());
 
-        verify(service).list("", "a\0b");
+        verify(service).list("a\0b");
     }
 
     @Test
     void linkHeaderFormat() throws Exception {
-        stub("2", null, Optional.of(new Next(2, "B")));
+        stub(null, Optional.of(new Next(250, "B")));
 
-        mvc.perform(get("/inventory?limit=2").accept(MediaType.APPLICATION_JSON))
+        mvc.perform(get("/inventory").accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().json(ITEMS_JSON, JsonCompareMode.STRICT))
-                .andExpect(header().stringValues(LINK, "<http://localhost/inventory?limit=2&after=B>; rel=\"next\""));
+                .andExpect(header().stringValues(LINK, "<http://localhost/inventory?after=B>; rel=\"next\""));
     }
 
     /** G9: the Link URL is absolute and reflects the request's scheme, host and port. */
     @Test
     void linkReflectsRequestHost() throws Exception {
-        stub("2", "A", Optional.of(new Next(2, "B")));
+        stub("A", Optional.of(new Next(250, "B")));
 
-        mvc.perform(get(URI.create("https://api.example.com:8443/inventory?limit=2&after=A")))
+        mvc.perform(get(URI.create("https://api.example.com:8443/inventory?after=A")))
                 .andExpect(status().isOk())
-                .andExpect(header().string(LINK,
-                        "<https://api.example.com:8443/inventory?limit=2&after=B>; rel=\"next\""));
+                .andExpect(header().string(LINK, "<https://api.example.com:8443/inventory?after=B>; rel=\"next\""));
     }
 
     /** The cursor is encoded strictly, so reserved and non-ASCII characters survive the round trip. */
     @Test
     void linkEncodesAfter() throws Exception {
         String after = "a+b&c=d é/%#?";
-        stub("2", null, Optional.of(new Next(2, after)));
+        stub(null, Optional.of(new Next(250, after)));
 
-        String link = mvc.perform(get("/inventory?limit=2"))
+        String link = mvc.perform(get("/inventory"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getHeader(LINK);
 
         assertThat(link).isEqualTo(
-                "<http://localhost/inventory?limit=2&after=a%2Bb%26c%3Dd%20%C3%A9%2F%25%23%3F>; rel=\"next\"");
+                "<http://localhost/inventory?after=a%2Bb%26c%3Dd%20%C3%A9%2F%25%23%3F>; rel=\"next\"");
         URI target = linkTarget(link);
         MultiValueMap<String, String> params = UriComponentsBuilder.fromUri(target).build(true).getQueryParams();
-        assertThat(params.keySet()).containsExactly("limit", "after");
+        assertThat(params.keySet()).containsExactly("after");
         assertThat(UriUtils.decode(params.getFirst("after"), StandardCharsets.UTF_8)).isEqualTo(after);
-    }
-
-    /** R8: the Link carries the service's normalized limit, not the raw request value. */
-    @Test
-    void linkUsesNormalizedLimit() throws Exception {
-        stub("+9999", null, Optional.of(new Next(250, "B")));
-
-        mvc.perform(get(URI.create("/inventory?limit=%2B9999")))
-                .andExpect(status().isOk())
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=250&after=B>; rel=\"next\""));
     }
 
     /** C2: path parameters on the request path are not echoed into the Link. */
     @Test
     void linkDropsPathParameters() throws Exception {
-        stub("2", null, Optional.of(new Next(2, "B")));
+        stub(null, Optional.of(new Next(250, "B")));
 
-        mvc.perform(get(URI.create("/inventory;x=1?limit=2")))
+        mvc.perform(get(URI.create("/inventory;x=1")))
                 .andExpect(status().isOk())
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=2&after=B>; rel=\"next\""));
+                .andExpect(header().string(LINK, "<http://localhost/inventory?after=B>; rel=\"next\""));
     }
 
     /** C2: the Link keeps the request's context path. */
     @Test
     void linkKeepsContextPath() throws Exception {
-        stub("2", null, Optional.of(new Next(2, "B")));
+        stub(null, Optional.of(new Next(250, "B")));
 
-        mvc.perform(get("/app/inventory?limit=2").contextPath("/app"))
+        mvc.perform(get("/app/inventory").contextPath("/app"))
                 .andExpect(status().isOk())
-                .andExpect(header().string(LINK, "<http://localhost/app/inventory?limit=2&after=B>; rel=\"next\""));
+                .andExpect(header().string(LINK, "<http://localhost/app/inventory?after=B>; rel=\"next\""));
     }
 
+    /** OD-5, H4: the Link carries only after: not the request's limit, not the service's page size, not other params. */
     @Test
-    void linkDropsOtherQueryParams() throws Exception {
-        stub("2", "A", Optional.of(new Next(2, "B")));
+    void linkCarriesOnlyAfter() throws Exception {
+        stub("A", Optional.of(new Next(250, "B")));
 
         mvc.perform(get("/inventory?foo=bar&limit=2&after=A&baz"))
                 .andExpect(status().isOk())
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=2&after=B>; rel=\"next\""));
+                .andExpect(header().string(LINK, "<http://localhost/inventory?after=B>; rel=\"next\""));
     }
 
     @Test
     void noNextMeansNoLinkHeader() throws Exception {
-        stub("2", "A", Optional.empty());
+        stub("A", Optional.empty());
 
-        mvc.perform(get("/inventory?limit=2&after=A"))
+        mvc.perform(get("/inventory?after=A"))
                 .andExpect(status().isOk())
                 .andExpect(content().json(ITEMS_JSON, JsonCompareMode.STRICT))
                 .andExpect(header().doesNotExist(LINK));
@@ -187,9 +178,9 @@ class InventoryListPagingTest {
     /** G9: the body stays the spec's bare array whether or not there is a next page. */
     @Test
     void emptyPageIsBareEmptyArray() throws Exception {
-        when(service.list("2", "zzz")).thenReturn(new Page<>(List.of(), Optional.empty()));
+        when(service.list("zzz")).thenReturn(new InventoryPage(List.of(), Optional.empty()));
 
-        mvc.perform(get("/inventory?limit=2&after=zzz"))
+        mvc.perform(get("/inventory?after=zzz"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().string("[]"))
@@ -213,24 +204,24 @@ class InventoryListPagingTest {
     @ParameterizedTest(name = "?{0}")
     @ValueSource(strings = {"after=A-1%2CB-2", "after=A-1,B-2"})
     void singleAfterWithCommaIsPassedWhole(String query) throws Exception {
-        stub(null, "A-1,B-2", Optional.empty());
+        stub("A-1,B-2", Optional.empty());
 
         mvc.perform(get(URI.create("/inventory?" + query)))
                 .andExpect(status().isOk())
                 .andExpect(content().json(ITEMS_JSON, JsonCompareMode.STRICT));
 
-        verify(service).list(null, "A-1,B-2");
+        verify(service).list("A-1,B-2");
     }
 
     /** U2: a paged GET ignores Accept and still carries the Link. */
     @Test
     void responseIsJsonEvenWithXmlAccept() throws Exception {
-        stub("2", null, Optional.of(new Next(2, "B")));
+        stub(null, Optional.of(new Next(250, "B")));
 
-        mvc.perform(get("/inventory?limit=2").accept(MediaType.APPLICATION_XML))
+        mvc.perform(get("/inventory").accept(MediaType.APPLICATION_XML))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(content().json(ITEMS_JSON, JsonCompareMode.STRICT))
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=2&after=B>; rel=\"next\""));
+                .andExpect(header().string(LINK, "<http://localhost/inventory?after=B>; rel=\"next\""));
     }
 }

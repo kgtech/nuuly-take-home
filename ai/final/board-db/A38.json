@@ -1,0 +1,9 @@
+{
+  "choice": "E",
+  "notes": "Follow-ups 6 and 11: the card follows the code.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "B": "Superseded: this text now matches the removal PR that deletes create and merges the page types.",
+    "D": "Superseded by follow-ups 6 and 11: the removal PR kept the sealed non-generic WriteResult, and the typed results and single Page<T> were not built."
+  }
+}

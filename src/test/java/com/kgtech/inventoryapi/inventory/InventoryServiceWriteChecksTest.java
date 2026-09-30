@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.util.Arrays;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -26,84 +25,95 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
+import com.kgtech.inventoryapi.idempotency.ApiVersion;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
 import com.kgtech.inventoryapi.idempotency.Operation;
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 
 /**
- * G8, S3, G11, S2, U3, A33, A34: the checks InventoryService runs on a write before any I/O, and how it hands a keyed
- * write to IdempotencyStore. The repository, the store, the renderer and the transaction manager are mocks, so no
- * Docker and no Boot. The store's claim, replay, mismatch, expiry, rollback and transaction are IdempotencyStoreTest's;
- * the same chain over HTTP and Postgres is IdempotencyApiIntegrationTest's.
+ * H2, H3, S3, G11, S2, U3, A34: the checks InventoryService runs on a write before any I/O. The unversioned add and
+ * purchase take no key and never touch the IdempotencyStore (L31); addV2 and purchaseV2 require one and hand the write
+ * to the store. The repositories, the store and the transaction manager are mocks, so no Docker and no Boot. The
+ * store's claim, replay, mismatch, expiry, rollback and transaction are IdempotencyStoreTest's; the same chain over
+ * HTTP and Postgres is V2WritesApiIntegrationTest's.
  */
 class InventoryServiceWriteChecksTest {
 
     private static final String KEY = "3f2b8c1e-9a4d-4e7f-b6a0-1c2d3e4f5a6b";
     private static final StoredResponse STORED = new StoredResponse(200, "application/json", "{\"stored\":true}");
 
-    /**
-     * The two keyed writes, each with the answer a malformed skuId gets (G11: only purchase is 404) and its unkeyed
-     * result from the stubs in setUp.
-     */
+    /** The two writes, each with the answer a malformed skuId gets (G11: only purchase is 404) and its result. */
     enum Write {
-        ADD(Operation.ADD, new WriteResult.InvalidRequest<>(), new WriteResult.Done<>(new StockOutcome.Ok(12))),
-        PURCHASE(Operation.PURCHASE, new WriteResult.Done<>(new StockOutcome.NotFound()),
-                new WriteResult.Done<>(new StockOutcome.Ok(3)));
+        ADD(Operation.ADD, new WriteResult.InvalidRequest(), "7", new StockOutcome.Ok(12)),
+        PURCHASE(Operation.PURCHASE, new StockOutcome.NotFound(), "7", new StockOutcome.Ok(3));
 
         final Operation operation;
-        final WriteResult<?> malformedSkuId;
-        final WriteResult<?> unkeyed;
+        final WriteResult malformedSkuId;
+        final String canonicalRequest;
+        final WriteResult result;
 
-        Write(Operation operation, WriteResult<?> malformedSkuId, WriteResult<?> unkeyed) {
+        Write(Operation operation, WriteResult malformedSkuId, String canonicalRequest, WriteResult result) {
             this.operation = operation;
             this.malformedSkuId = malformedSkuId;
-            this.unkeyed = unkeyed;
+            this.canonicalRequest = canonicalRequest;
+            this.result = result;
         }
 
-        WriteResult<?> call(InventoryService service, String skuId, String key) {
+        /** The unversioned write: no key. */
+        WriteResult call(InventoryService service, String skuId) {
             return switch (this) {
-                case ADD -> service.add(skuId, 7, key);
-                case PURCHASE -> service.purchase(skuId, 7, key);
+                case ADD -> service.add(skuId, 7);
+                case PURCHASE -> service.purchase(skuId, 7);
+            };
+        }
+
+        /** The /v2 write: the key as the controller passes it, null when the header is absent. */
+        WriteResult callV2(InventoryService service, String skuId, String key) {
+            return switch (this) {
+                case ADD -> service.addV2(skuId, 7, key);
+                case PURCHASE -> service.purchaseV2(skuId, 7, key);
             };
         }
     }
 
     private final StockRepository stock = mock(StockRepository.class);
+    private final DetailsRepository details = mock(DetailsRepository.class);
     private final IdempotencyStore idempotency = mock(IdempotencyStore.class);
     private final KeyedResponses responses = mock(KeyedResponses.class);
     private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
-    private final InventoryService service = new InventoryService(stock, idempotency, responses, transactions);
+    private final InventoryService service =
+            new InventoryService(stock, details, idempotency, responses, transactions);
 
     @BeforeEach
     void setUp() {
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(stock.add("widget", 7)).thenReturn(Optional.of(new Balance(12, 2)));
-        when(stock.purchase("widget", 7)).thenReturn(new StockOutcome.Ok(3));
-        when(responses.toStored(any(), any(StockOutcome.class))).thenReturn(STORED);
+        when(stock.purchase("widget", 7)).thenReturn(Optional.of(new Balance(3, 2)));
+        when(responses.toStored(any(), any())).thenReturn(STORED);
     }
 
     /** The store claims and runs the write once, as for a first keyed request. */
     private void storeRunsTheWrite() {
-        when(idempotency.run(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
-            Supplier<StoredResponse> write = invocation.getArgument(4);
+        when(idempotency.run(any(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            Supplier<StoredResponse> write = invocation.getArgument(5);
             return new Keyed.Response(write.get());
         });
     }
 
     private void assertNothingTouched() {
-        verifyNoInteractions(stock, idempotency, responses, transactions);
+        verifyNoInteractions(stock, details, idempotency, responses, transactions);
     }
 
-    // ---- G8: no key ----
+    // ---- unversioned: no key, no store ----
 
-    /** No key: the service runs the write in its own READ COMMITTED transaction and never touches the store. */
+    /** The service runs the write in its own READ COMMITTED transaction and never touches the store (L31). */
     @ParameterizedTest
     @EnumSource(Write.class)
-    void absentKeyRunsTheWriteInTheServicesTransaction(Write write) {
-        WriteResult<?> result = write.call(service, "widget", null);
+    void theUnversionedWriteRunsInTheServicesTransactionAndNeverTouchesTheStore(Write write) {
+        WriteResult result = write.call(service, "widget");
 
-        assertThat(result).isEqualTo(write.unkeyed);
+        assertThat(result).isEqualTo(write.result);
         ArgumentCaptor<TransactionDefinition> definition = ArgumentCaptor.forClass(TransactionDefinition.class);
         verify(transactions).getTransaction(definition.capture());
         assertThat(definition.getValue().getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -112,104 +122,109 @@ class InventoryServiceWriteChecksTest {
         verifyNoInteractions(idempotency, responses);
     }
 
-    // ---- S3: malformed key, never stored ----
+    /** G11, S2, C3: a malformed skuId gets its operation's answer before any I/O; a few forms, SkuIdTest has all. */
+    @ParameterizedTest(name = "{0} skuId={1}")
+    @MethodSource("malformedSkuIds")
+    void aMalformedSkuIdGetsItsOperationsAnswerBeforeAnyIo(Write write, String skuId) {
+        assertThat(write.call(service, skuId)).isEqualTo(write.malformedSkuId);
 
-    /** A present empty key and one non-UUID per write; the full format matrix is IdempotencyKeyTest's. */
-    static Stream<Arguments> malformedKeys() {
-        return Stream.of(Write.values()).flatMap(write -> Stream.of("", "nope").map(key -> Arguments.of(write, key)));
+        assertNothingTouched();
     }
 
-    @ParameterizedTest(name = "{0} {1}")
-    @MethodSource("malformedKeys")
-    void malformedKeyIsInvalidRequestBeforeAnything(Write write, String key) {
-        assertThat(write.call(service, "widget", key)).isEqualTo(new WriteResult.InvalidRequest<>());
+    static Stream<Arguments> malformedSkuIds() {
+        return Stream.of(Write.values()).flatMap(write -> Stream.of(null, "-a", "ABC-1;lot=7")
+                .map(skuId -> Arguments.of(write, skuId)));
+    }
+
+    // ---- /v2: the key is required (H2) ----
+
+    /** An absent key, an empty one and one non-UUID per write; the full format matrix is IdempotencyKeyTest's. */
+    static Stream<Arguments> badKeys() {
+        return Stream.of(Write.values()).flatMap(write -> Stream.of(null, "", "nope")
+                .map(key -> Arguments.of(write, key)));
+    }
+
+    @ParameterizedTest(name = "{0} key={1}")
+    @MethodSource("badKeys")
+    void aMissingOrMalformedKeyIsInvalidRequestBeforeAnything(Write write, String key) {
+        assertThat(write.callV2(service, "widget", key)).isEqualTo(new WriteResult.InvalidRequest());
 
         assertNothingTouched();
     }
 
     /** U3, A34: the key is checked before the skuId, so a bad key wins with 400 over purchase's 404. */
     @Test
-    void badKeyWinsOverBadSkuId() {
-        assertThat(service.purchase("-bad", 7, "nope")).isEqualTo(new WriteResult.InvalidRequest<>());
+    void aBadKeyWinsOverABadSkuId() {
+        assertThat(service.purchaseV2("-bad", 7, "nope")).isEqualTo(new WriteResult.InvalidRequest());
+        assertThat(service.purchaseV2("-bad", 7, null)).isEqualTo(new WriteResult.InvalidRequest());
 
         assertNothingTouched();
     }
 
-    // ---- G11, S2, C3: malformed skuId, with or without a key, never stored ----
-
-    /**
-     * Per write and key state: null, pattern failures (leading '-', 65 characters, a space, a trailing newline) and the
-     * raw segment with ";" content (C3); the full pattern matrix is SkuIdTest's.
-     */
-    static Stream<Arguments> malformedSkuIds() {
-        return Stream.of(Write.values()).flatMap(write -> Stream.of(null, KEY)
-                .flatMap(key -> Arrays.asList(null, "-a", "a".repeat(65), "a b", "abc\n", "ABC-1;lot=7", "ABC-1;")
-                        .stream()
-                        .map(skuId -> Arguments.of(write, key, skuId))));
-    }
-
-    @ParameterizedTest(name = "{0} key={1} skuId={2}")
+    /** G11, S2, C3: with a valid key a malformed skuId gets its operation's answer before the claim; never stored. */
+    @ParameterizedTest(name = "{0} skuId={1}")
     @MethodSource("malformedSkuIds")
-    void malformedSkuIdGetsItsOperationsAnswerBeforeAnyIo(Write write, String key, String skuId) {
-        assertThat(write.call(service, skuId, key)).isEqualTo(write.malformedSkuId);
+    void aMalformedSkuIdIsAnsweredBeforeTheClaim(Write write, String skuId) {
+        assertThat(write.callV2(service, skuId, KEY)).isEqualTo(write.malformedSkuId);
 
         assertNothingTouched();
     }
 
-    // ---- A33: a valid key hands the write to the store ----
+    // ---- A34: a valid key hands the write to the store ----
 
-    /** The store gets the parsed key, the operation, the raw skuId and the canonical request (Y3). */
+    /** The store gets the parsed key, the version, the operation, the raw skuId and the canonical request (Y3). */
     @ParameterizedTest
     @EnumSource(Write.class)
-    void validKeyPassesTheRequestToTheStore(Write write) {
+    void aValidKeyPassesTheRequestToTheStore(Write write) {
         storeRunsTheWrite();
 
-        write.call(service, "widget", KEY.toUpperCase());
+        write.callV2(service, "widget", KEY.toUpperCase());
 
-        verify(idempotency).run(eq(UUID.fromString(KEY)), eq(write.operation), eq("widget"), eq("7"), any());
+        verify(idempotency).run(eq(UUID.fromString(KEY)), eq(ApiVersion.V2), eq(write.operation), eq("widget"),
+                eq(write.canonicalRequest), any());
         verifyNoInteractions(transactions);
     }
 
     /** Y4: a first run renders the outcome with the raw skuId inside the store's transaction; it comes back Stored. */
     @Test
-    void firstRunStoresTheRenderedOutcome() {
+    void aFirstRunStoresTheRenderedOutcome() {
         storeRunsTheWrite();
 
-        assertThat(service.add("widget", 7, KEY)).isEqualTo(new WriteResult.Stored<>(STORED));
+        assertThat(service.addV2("widget", 7, KEY)).isEqualTo(new WriteResult.Stored(STORED));
 
         verify(stock).add("widget", 7);
-        verify(responses).toStored("widget", new StockOutcome.Ok(12));
+        verify(responses).toStored("widget", new StockOutcome.Ok(12, Optional.empty()));
     }
 
     /** A replay answers the stored response without running the write. */
     @Test
-    void replayReturnsTheStoredResponseWithoutWriting() {
+    void aReplayReturnsTheStoredResponseWithoutWriting() {
         StoredResponse notFound = new StoredResponse(404, "text/plain", "SKU not found");
-        when(idempotency.run(any(), any(), any(), any(), any())).thenReturn(new Keyed.Response(notFound));
+        when(idempotency.run(any(), any(), any(), any(), any(), any())).thenReturn(new Keyed.Response(notFound));
 
-        assertThat(service.purchase("widget", 7, KEY)).isEqualTo(new WriteResult.Stored<>(notFound));
+        assertThat(service.purchaseV2("widget", 7, KEY)).isEqualTo(new WriteResult.Stored(notFound));
 
-        verifyNoInteractions(stock, responses, transactions);
+        verifyNoInteractions(stock, details, responses, transactions);
     }
 
-    /** S8, T1, A18: a reused key with another request, an expired key or a row with no response is 400. */
+    /** S8, T1, A18: a reused key with another request, an expired key or a cleared row is 400 "Invalid request". */
     @Test
-    void invalidReuseIsInvalidRequest() {
-        when(idempotency.run(any(), any(), any(), any(), any())).thenReturn(new Keyed.Invalid());
+    void anInvalidReuseIsInvalidRequest() {
+        when(idempotency.run(any(), any(), any(), any(), any(), any())).thenReturn(new Keyed.Invalid());
 
-        assertThat(service.add("widget", 7, KEY)).isEqualTo(new WriteResult.InvalidRequest<>());
+        assertThat(service.addV2("widget", 7, KEY)).isEqualTo(new WriteResult.InvalidRequest());
 
-        verifyNoInteractions(stock, responses, transactions);
+        verifyNoInteractions(stock, details, responses, transactions);
     }
 
     /** A failure inside the write escapes unchanged, so the store's transaction rolls the claim back (a 500). */
     @Test
-    void writeFailurePropagatesUnchanged() {
+    void aWriteFailurePropagatesUnchanged() {
         storeRunsTheWrite();
         IllegalStateException failure = new IllegalStateException("boom");
         when(stock.purchase("widget", 7)).thenThrow(failure);
 
-        assertThatThrownBy(() -> service.purchase("widget", 7, KEY)).isSameAs(failure);
+        assertThatThrownBy(() -> service.purchaseV2("widget", 7, KEY)).isSameAs(failure);
 
         verifyNoInteractions(responses);
     }

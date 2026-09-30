@@ -1,0 +1,9 @@
+{
+  "choice": "D",
+  "notes": "Follow-up 1: the 400 rule names the 412 of a failed precondition as its only exception.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "A": "Superseded: the rule now names /v2 and the details PUT beside the spec POSTs.",
+    "C": "Superseded by follow-up 1: \"every client error is 400\" contradicted H7 and H8 (412)."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "choice": "A",
+  "notes": "Owner OD-4. RFC 9110 §6.3: \"Other recipients SHOULD ignore unrecognized header and trailer fields.\" Counter-argument (critique M-28, decision challenge for OD-4, described not changed): fail loudly rather than silently double-write, since a caller who sends a key believes the write is retry-safe. A generic client that adds the key to every POST gets 400 on a spec endpoint. A client without UUID support gets a key by generating any random UUID v4. The front end's key lives only as long as the tab, so its replay safety lasts while the tab does (FE33, FE34).",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "B": "RFC 9110 §6.3 says recipients SHOULD ignore unrecognized header fields, but ignoring the key lets a caller believe the write is retry-safe when it is not; failing loudly is the choice (critique M-28).",
+    "C": "The spec never had the key."
+  }
+}

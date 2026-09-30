@@ -15,7 +15,7 @@ repositories { mavenCentral() }
 dependencies {
     implementation(platform(SpringBootPlugin.BOM_COORDINATES)) // BOM without a second plugin or version
     implementation(libs.spring.boot.starter.webmvc)
-    implementation(libs.spring.boot.starter.jdbc) // JdbcClient and the JDBC transaction manager (E2)
+    implementation(libs.spring.boot.starter.jdbc)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.spring.boot.starter.actuator)
@@ -28,7 +28,8 @@ dependencies {
     testImplementation(libs.spring.boot.starter.webmvc.test)
     testImplementation(libs.spring.boot.testcontainers)
     testImplementation(libs.testcontainers.postgresql)
-    testImplementation(libs.archunit) // ArchitectureTest (A39); not in the Spring Boot BOM, so versioned in the catalog (S10)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.archunit)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
@@ -39,7 +40,7 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.test {
     useJUnitPlatform()
     systemProperty("inventory.test.postgres-image", "postgres:${libs.versions.postgres.get()}")
-    // ApiDocsTest compares the committed export with the code: an edit to it, or its removal, must re-run the test (D7).
-    // inputs.files, not inputs.file, so a missing openapi.yaml reaches the test instead of failing Gradle validation.
-    inputs.files("openapi.yaml").withPropertyName("openapiExport").withPathSensitivity(PathSensitivity.RELATIVE)
+    // The export tests compare the two committed exports (one per springdoc group) with the code: an edit to it, or its removal, must re-run the test (D7).
+    // inputs.files, not inputs.file, so a missing export reaches the test instead of failing Gradle validation.
+    inputs.files("openapi.yaml", "openapi-v2.yaml").withPropertyName("openapiExport").withPathSensitivity(PathSensitivity.RELATIVE)
 }

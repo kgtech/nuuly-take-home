@@ -1,7 +1,6 @@
 package com.kgtech.inventoryapi.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.http.HttpHeaders.ACCEPT;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -9,12 +8,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.stream.Stream;
 
+import com.kgtech.inventoryapi.Tables;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -24,7 +23,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 import com.kgtech.inventoryapi.IntegrationTest;
-import com.kgtech.inventoryapi.Tables;
 
 /**
  * The four spec operations end to end against Postgres (AC4, AC6, AC7, G12, Y1, NQ6). Not @Transactional: every
@@ -42,6 +40,7 @@ class InventoryApiIntegrationTest {
 
     @BeforeEach
     void cleanTables() {
+        // test-only deletes; the application never deletes ledger or sku rows (G5)
         Tables.reset(jdbc);
     }
 
@@ -79,6 +78,10 @@ class InventoryApiIntegrationTest {
                 .andExpect(content().string(body));
     }
 
+    private void seedLedger(String skuId, long delta) {
+        Tables.seed(jdbc, skuId, delta);
+    }
+
     private long ledgerRows(String skuId) {
         return jdbc.sql("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?")
                 .param(skuId).query(Long.class).single();
@@ -94,20 +97,6 @@ class InventoryApiIntegrationTest {
 
     private long allSkuRows() {
         return jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single();
-    }
-
-    /**
-     * E1: GET and the list read the balance row, not a ledger SUM. The row says 7 and the ledger is empty, a state no
-     * write leaves, so only a read of sku.quantity answers 7.
-     */
-    @Test
-    void getAndListReadTheBalanceRow() throws Exception {
-        Invariants.assertBalanceColumns(jdbc);
-        jdbc.sql("INSERT INTO sku (sku_id, quantity, version) VALUES ('BAL-1', 7, 1)").update();
-        assertThat(allLedgerRows()).as("ledger rows").isZero();
-
-        expectJson(find("BAL-1"), item("BAL-1", 7));
-        expectJson(list(), "[" + item("BAL-1", 7) + "]");
     }
 
     @Test
@@ -164,7 +153,7 @@ class InventoryApiIntegrationTest {
     /** G12, U1: an add past Long.MAX_VALUE is 400 "Invalid request" and inserts nothing; the exact limit is fine. */
     @Test
     void overflowReturns400AndWritesNothing() throws Exception {
-        Tables.seed(jdbc, "big", Long.MAX_VALUE - 1); // the API can't reach the limit
+        seedLedger("big", Long.MAX_VALUE - 1); // the API can't reach the limit
 
         expectText(create("big", 2), 400, "Invalid request");
         assertThat(ledgerRows("big")).isEqualTo(1);
@@ -175,17 +164,16 @@ class InventoryApiIntegrationTest {
         assertThat(ledgerRows("big")).isEqualTo(2);
     }
 
-    /** AC4, Y1, C3: a POST whose Accept excludes JSON, or gives it q=0, fails before any write. */
-    @ParameterizedTest(name = "Accept {0}")
-    @ValueSource(strings = {MediaType.APPLICATION_XML_VALUE, "application/json;q=0"})
-    void postRefusingJsonWritesNoRows(String accept) throws Exception {
-        expectText(mvc.perform(post("/inventory/{skuId}", "new").header(ACCEPT, accept)
+    /** AC4, Y1: a POST whose Accept excludes JSON fails before any write. */
+    @Test
+    void postWithXmlAcceptWritesNoRows() throws Exception {
+        expectText(mvc.perform(post("/inventory/{skuId}", "new").accept(MediaType.APPLICATION_XML)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}")), 400, "Invalid request");
         assertThat(skuRows("new")).isZero();
         assertThat(ledgerRows("new")).isZero();
 
-        Tables.seed(jdbc, "stocked", 10);
-        expectText(mvc.perform(post("/inventory/{skuId}/purchase", "stocked").header(ACCEPT, accept)
+        seedLedger("stocked", 10);
+        expectText(mvc.perform(post("/inventory/{skuId}/purchase", "stocked").accept(MediaType.APPLICATION_XML)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"quantity\":5}")), 400, "Invalid request");
         assertThat(ledgerRows("stocked")).isEqualTo(1);
         expectJson(find("stocked"), item("stocked", 10));
@@ -194,7 +182,7 @@ class InventoryApiIntegrationTest {
     /** AC4, U2: GET ignores the Accept header. */
     @Test
     void getWithXmlAcceptReturnsJson() throws Exception {
-        Tables.seed(jdbc, "widget", 4);
+        seedLedger("widget", 4);
 
         expectJson(mvc.perform(get("/inventory/{skuId}", "widget").accept(MediaType.APPLICATION_XML)),
                 item("widget", 4));

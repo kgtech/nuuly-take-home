@@ -2,7 +2,7 @@ package com.kgtech.inventoryapi.inventory;
 
 import java.util.regex.Pattern;
 
-/** The skuId pattern (G11, R7, S2). Each service method names its own answer for a malformed skuId (A34). */
+/** The skuId pattern (G11, R7, S2). */
 public final class SkuId {
 
     /** G11: the one source of the pattern, also documented on the skuId path parameters (C2). */

@@ -6,13 +6,23 @@ spring:
       allow-coercion-of-scalars: false
     deserialization:
       accept-float-as-int: false
+      fail-on-trailing-tokens: true       # {"quantity":1}{"quantity":100} is malformed JSON, not quantity 1
       fail-on-unknown-properties: false   # explicit G13 (already the default)
+    read:
+      strict-duplicate-detection: true    # {"quantity":1,"quantity":2} is malformed, not quantity 2 (M-11)
+  datasource:
+    hikari:
+      connection-timeout: 3000            # a starved pool answers 500 in 3 s, not after Hikari's 30 s (M-14)
+      connection-init-sql: SET lock_timeout = 5000   # a write waiting on a locked row gives up after 5 s (M-14)
   mvc:
     problemdetails:
       enabled: false                      # explicit "ProblemDetail stays off"
+    formcontent:
+      filter:
+        enabled: false                    # no form endpoints; a bad form escape must not reach Boot's /error (C1)
 springdoc:
   override-with-generic-response: false
-  writer-with-order-by-keys: true         # OQ2 (#8): byte-stable openapi.yaml export
+  writer-with-order-by-keys: true         # byte-stable openapi.yaml export
 management:
   endpoints:
     web:
@@ -22,3 +32,7 @@ management:
     health:
       probes:
         enabled: true                     # D10: /actuator/health/liveness and /readiness
+      show-components: always             # an operator sees which component (db) is DOWN; no details
+      group:
+        readiness:
+          include: readinessState,db      # DESIGN-V2 §4

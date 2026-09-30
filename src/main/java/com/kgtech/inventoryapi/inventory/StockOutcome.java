@@ -1,26 +1,27 @@
 package com.kgtech.inventoryapi.inventory;
 
-/**
- * Business results of a stock write; never thrown (R1, U1). Not a WriteResult: a write returns WriteResult<Add> or
- * WriteResult<Purchase>, which wraps one (A38).
- */
-public sealed interface StockOutcome {
+import java.util.Optional;
 
-    sealed interface Add extends StockOutcome permits Ok, Overflow {
+/** Business results of a stock write; never thrown (R1, U1). */
+public sealed interface StockOutcome extends WriteResult {
+
+    /**
+     * The write went through: the new quantity, and, on /v2, the SKU's details read in the same transaction (empty on
+     * the spec path and for a SKU without details).
+     */
+    record Ok(long quantity, Optional<SkuDetails> details) implements StockOutcome {
+
+        public Ok(long quantity) {
+            this(quantity, Optional.empty());
+        }
     }
 
-    sealed interface Purchase extends StockOutcome permits Ok, NotFound, Insufficient {
+    record NotFound() implements StockOutcome {
     }
 
-    record Ok(long quantity) implements Add, Purchase {
+    record Insufficient() implements StockOutcome {
     }
 
-    record NotFound() implements Purchase {
-    }
-
-    record Insufficient() implements Purchase {
-    }
-
-    record Overflow() implements Add {
+    record Overflow() implements StockOutcome {
     }
 }

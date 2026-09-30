@@ -17,7 +17,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * S6: health keeps library behaviour when a contributor is DOWN (503 with actuator JSON, not the G10 500 text).
- * Liveness and readiness don't include ordinary contributors, so they stay UP (planner Q6: readiness excludes db).
+ * Liveness and readiness don't include ordinary contributors, so they stay UP (readiness = readinessState and db, A4).
  */
 @IntegrationTest
 @AutoConfigureMockMvc

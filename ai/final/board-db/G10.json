@@ -1,0 +1,9 @@
+{
+  "choice": "F",
+  "notes": "Follow-up 13 and critique M-02.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "D": "Superseded: /v2/inventory/** is named next to /inventory/**, with its own listed codes.",
+    "E": "Superseded by follow-up 13 and critique M-02: the library-path list and the two 404s follow the code."
+  }
+}

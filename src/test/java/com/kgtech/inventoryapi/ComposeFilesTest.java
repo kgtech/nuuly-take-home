@@ -17,7 +17,7 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 /**
- * D8, S4, S10: compose.yaml runs only Postgres (read by bootRun), compose.override.yaml adds the app (read by
+ * D8, S4, S10: compose.yaml runs Postgres (read by bootRun), compose.override.yaml adds the app (read by
  * `docker compose up --build`). Structural checks only; the running stack is verified by the manual smoke.
  */
 class ComposeFilesTest {
@@ -73,18 +73,19 @@ class ComposeFilesTest {
     }
 
     @Test
-    void composeYamlDefinesOnlyPostgres() throws IOException {
+    void composeYamlDefinesPostgresOnly() throws IOException {
         Map<String, Object> root = map(load(COMPOSE), "compose.yaml root");
 
-        assertThat(map(root.get("services"), "compose.yaml services").keySet()).containsExactly("postgres");
+        assertThat(map(root.get("services"), "compose.yaml services").keySet())
+                .containsExactly("postgres"); // DESIGN-V2 §9: no Redis
         assertThat(root).as("no named volume: every run starts from an empty database").doesNotContainKey("volumes");
     }
 
     /** S10: the compose tag repeats the catalog's postgres version, which the tests also run against. */
     @Test
     void postgresImageMatchesTestImage() throws IOException {
-        String expected = System.getProperty(TestcontainersConfiguration.IMAGE_PROPERTY);
-        assertThat(expected).as(TestcontainersConfiguration.IMAGE_PROPERTY + " (set by Gradle)").isNotBlank();
+        String expected = System.getProperty(TestcontainersConfiguration.POSTGRES_IMAGE_PROPERTY);
+        assertThat(expected).as(TestcontainersConfiguration.POSTGRES_IMAGE_PROPERTY + " (set by Gradle)").isNotBlank();
 
         assertThat(service(COMPOSE, "postgres").get("image")).isEqualTo(expected);
     }
@@ -104,7 +105,7 @@ class ComposeFilesTest {
     /** A random host port, so a local Postgres on 5432 doesn't block the reviewer run. */
     @Test
     void postgresPublishesContainerPort5432() throws IOException {
-        assertThat(strings(service(COMPOSE, "postgres").get("ports"), "postgres ports")).containsExactly("5432");
+        assertThat(strings(service(COMPOSE, "postgres").get("ports"), "postgres ports")).containsExactly("127.0.0.1::5432"); // C-12: loopback only
     }
 
     @Test
@@ -121,8 +122,19 @@ class ComposeFilesTest {
     }
 
     @Test
-    void appPublishes8080() throws IOException {
-        assertThat(strings(service(OVERRIDE, "app").get("ports"), "app ports")).containsExactly("8080:8080");
+    void appPublishesHostPort8080ByDefault() throws IOException {
+        assertThat(strings(service(OVERRIDE, "app").get("ports"), "app ports")).containsExactly("${APP_PORT:-8080}:8080"); // H13
+    }
+
+    /** H13: Vite defaults to 5173 (VITE_PORT) and proxies to the API on 8080; Playwright uses the same defaults. */
+    @Test
+    void frontendDefaultsToVite5173AndApi8080() throws IOException {
+        String vite = Files.readString(Path.of("frontend/vite.config.ts"));
+        String playwright = Files.readString(Path.of("frontend/playwright.config.ts"));
+
+        assertThat(vite).contains("process.env.VITE_PORT ?? 5173")
+                .contains("process.env.API_URL ?? 'http://localhost:8080'");
+        assertThat(playwright).contains("process.env.VITE_PORT ?? 5173");
     }
 
     @Test
@@ -132,6 +144,18 @@ class ComposeFilesTest {
         Map<String, Object> postgres = map(dependsOn.get("postgres"), "app depends_on postgres");
 
         assertThat(postgres.get("condition")).isEqualTo("service_healthy");
+        assertThat(dependsOn.keySet()).as("the app depends on Postgres alone (§9)").containsExactly("postgres");
+    }
+
+    /** C-39: the app container has a readiness healthcheck (bash /dev/tcp; the JRE image has no curl) and a heap policy. */
+    @Test
+    void appHasHealthcheckAndHeapPolicy() throws IOException {
+        Map<String, Object> app = service(OVERRIDE, "app");
+        List<String> test = strings(map(app.get("healthcheck"), "app healthcheck").get("test"), "app healthcheck test");
+        assertThat(test).first().isEqualTo("CMD");
+        assertThat(String.join(" ", test)).contains("/dev/tcp/127.0.0.1/8080").contains("/actuator/health/readiness");
+        assertThat(String.valueOf(map(app.get("environment"), "app environment").get("JAVA_TOOL_OPTIONS")))
+                .contains("-XX:MaxRAMPercentage=");
     }
 
     @Test

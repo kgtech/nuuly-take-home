@@ -1,6 +1,4 @@
 /**
- * Idempotency-Key support for the inventory feature's writes, the spec POSTs (D10, A33, A37): claim, replay and reject
- * in the write's transaction. Not a generic facility: the operations, the skuId and the request hash it stores are
- * the inventory feature's (S8, Y3), though it imports no inventory type.
+ * Idempotency feature: Idempotency-Key claim and replay for the POST operations, spec and v2 create (D10, DESIGN-V2 §8).
  */
 package com.kgtech.inventoryapi.idempotency;

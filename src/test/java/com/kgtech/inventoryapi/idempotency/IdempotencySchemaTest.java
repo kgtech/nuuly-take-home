@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import com.kgtech.inventoryapi.Tables;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,7 +21,6 @@ import org.springframework.core.NestedExceptionUtils;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.kgtech.inventoryapi.IntegrationTest;
-import com.kgtech.inventoryapi.Tables;
 
 /** The V2 idempotency_keys shape and constraints, executed against Postgres (S3, S8, S11, Y4). */
 @IntegrationTest
@@ -96,8 +96,8 @@ class IdempotencySchemaTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"201", "409", "500", "0"})
-    void status201ViolatesCheck(int status) {
+    @CsvSource({"202", "412", "500", "0"})
+    void unstorableStatusViolatesCheck(int status) {
         assertSqlState(() -> insert(UUID.randomUUID(), "add", "widget", hash(32), status, "text/plain", "x"),
                 CHECK_VIOLATION, "idempotency_keys_status_check");
     }

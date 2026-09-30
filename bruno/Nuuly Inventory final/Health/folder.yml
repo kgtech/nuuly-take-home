@@ -1,0 +1,6 @@
+info:
+  name: "Health"
+  type: folder
+  seq: 1
+docs: |-
+  Actuator probes and the two generated OpenAPI documents (one per springdoc group).

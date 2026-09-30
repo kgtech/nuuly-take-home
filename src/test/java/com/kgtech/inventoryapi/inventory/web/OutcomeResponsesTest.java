@@ -12,13 +12,12 @@ import org.springframework.http.ResponseEntity;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
-import com.kgtech.inventoryapi.web.TextErrors;
 
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * R1, U1, Y4, A33, A38: OutcomeResponses is the KeyedResponses the service stores against a key, and the controller
- * renders every unkeyed outcome through it too, so toStored pins exactly what either path sends. Plain unit test.
+ * R1, U1, Y4, A33: OutcomeResponses is the KeyedResponses the service stores against a key; toStored renders exactly
+ * what the unkeyed path sends. Plain unit test.
  */
 class OutcomeResponsesTest {
 
@@ -42,7 +41,7 @@ class OutcomeResponsesTest {
         assertThat(responses.toStored("widget", outcome)).isEqualTo(new StoredResponse(status, contentType, body));
     }
 
-    /** The stored text errors are the TextErrors responses the controller sends for other 400s (S5). */
+    /** The stored text errors are the TextErrors responses the controller sends without a key (S5). */
     @Test
     void storedTextErrorsMatchTextErrors() {
         assertStoredEquals(responses.toStored("widget", new StockOutcome.NotFound()), TextErrors.skuNotFound());

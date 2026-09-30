@@ -1,0 +1,8 @@
+{
+  "choice": "A",
+  "notes": "Owner (Target API fixes the text) Critique M-12 (service text fixed by the Target API): the 412 text is misleading for If-None-Match: * on an existing SKU, because nothing was read or changed. The service keeps it; the Create page compensates and shows only its own \"SKU already exists\" sentence for that 412 (FE33, FE34).",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "B": "A second text would depart from the Target API's fixed text; the Create page compensates instead (critique M-12)."
+  }
+}

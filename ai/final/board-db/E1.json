@@ -1,0 +1,10 @@
+{
+  "choice": "G",
+  "notes": "A14 (V5): the ledger row comes from the trigger.",
+  "updatedAt": "2026-09-29T23:30:00Z",
+  "why": {
+    "A": "Superseded: the code runs the purchase as an UPDATE plus a second SELECT, not one statement.",
+    "E": "Superseded by follow-up 8: DESIGN-V2 is now cited with its path.",
+    "F": "Superseded by A14: the ledger row now comes from the V5 trigger, not StockRepository."
+  }
+}

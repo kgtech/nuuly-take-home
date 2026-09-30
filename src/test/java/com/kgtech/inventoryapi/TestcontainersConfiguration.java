@@ -7,16 +7,17 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * One Postgres container per test JVM, shared by every Spring context (D9, #24). The bean has no destroy method, so a
- * closing context never stops the container another context still uses; Ryuk removes it when the JVM exits.
+ * One Postgres container per JVM, shared by every Spring context (DESIGN-V2 tests, C-20). The bean has no destroy
+ * method, so a closing context never stops the container another context still uses; Ryuk removes it when the JVM
+ * exits.
  */
 @TestConfiguration(proxyBeanMethods = false)
 public class TestcontainersConfiguration {
 
-    public static final String IMAGE_PROPERTY = "inventory.test.postgres-image";
+    public static final String POSTGRES_IMAGE_PROPERTY = "inventory.test.postgres-image";
 
-    private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(DockerImageName.parse(image()));
-
+    private static final PostgreSQLContainer POSTGRES =
+            new PostgreSQLContainer(DockerImageName.parse(image(POSTGRES_IMAGE_PROPERTY)));
     static {
         POSTGRES.start();
     }
@@ -27,24 +28,23 @@ public class TestcontainersConfiguration {
         return POSTGRES;
     }
 
-    /** A JDBC URL for another database in the shared container, e.g. one a migration test creates and drops. */
-    public static String jdbcUrl(String database) {
-        int port = POSTGRES.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT);
-        return "jdbc:postgresql://" + POSTGRES.getHost() + ":" + port + "/" + database;
+    /**
+     * Connection properties for a second application instance started outside the test context (a plain
+     * SpringApplication must not import this configuration: Boot's Testcontainers lifecycle would stop the shared
+     * containers when that instance closes).
+     */
+    public static String[] connectionProperties() {
+        return new String[] {
+            "spring.datasource.url=" + POSTGRES.getJdbcUrl(),
+            "spring.datasource.username=" + POSTGRES.getUsername(),
+            "spring.datasource.password=" + POSTGRES.getPassword(),
+        };
     }
 
-    public static String username() {
-        return POSTGRES.getUsername();
-    }
-
-    public static String password() {
-        return POSTGRES.getPassword();
-    }
-
-    private static String image() {
-        String image = System.getProperty(IMAGE_PROPERTY);
+    private static String image(String property) {
+        String image = System.getProperty(property);
         if (image == null || image.isBlank()) {
-            throw new IllegalStateException(IMAGE_PROPERTY + " is not set; run tests through Gradle");
+            throw new IllegalStateException(property + " is not set; run tests through Gradle");
         }
         return image;
     }
