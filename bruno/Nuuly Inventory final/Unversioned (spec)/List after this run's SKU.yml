@@ -1,0 +1,44 @@
+info:
+  name: "List after this run's SKU"
+  type: http
+  seq: 11
+
+http:
+  method: GET
+  url: "{{baseUrl}}/inventory?after={{skuId}}"
+  params:
+    - name: "after"
+      value: "{{skuId}}"
+      type: query
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("this run's second SKU is in the page with quantity 1", function () {
+          const mine = res.getBody().find(i => i.skuId === bru.getVar('skuId2'));
+          expect(mine).to.deep.equal({ skuId: bru.getVar('skuId2'), quantity: 1 });
+        });
+        test("every row sorts after the cursor", function () {
+          const after = bru.getVar('skuId');
+          res.getBody().forEach(i => expect(i.skuId > after).to.equal(true));
+        });
+        test("any Link carries after and not limit=1", function () {
+          const link = res.getHeader('link');
+          if (link) {
+            expect(link).to.match(/after=/);
+            expect(link).to.not.match(/limit=1(&|>|$)/);
+          }
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  OD-5, C2: after alone is a valid cursor; only SKUs sorting after it come back, and a Link (when more than 250 follow) has after and no limit=1.

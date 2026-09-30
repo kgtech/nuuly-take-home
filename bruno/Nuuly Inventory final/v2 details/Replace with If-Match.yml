@@ -1,0 +1,47 @@
+info:
+  name: "Replace with If-Match"
+  type: http
+  seq: 3
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/v2/inventory/{{detailSku}}/details"
+  headers:
+    - name: "If-Match"
+      value: "{{etag}}"
+  body:
+    type: json
+    data: |-
+      {
+        "name": "Linen shirt, navy",
+        "images": []
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        bru.setVar('staleEtag', bru.getVar('etag'));
+        bru.setVar('etag', res.getHeader('etag'));
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("ETag \"2\", new name, quantity unchanged", function () {
+          const b = res.getBody();
+          expect(res.getHeader('etag')).to.equal('"2"');
+          expect(b.details.name).to.equal('Linen shirt, navy');
+          expect(b.details.description).to.equal('');
+          expect(b.details).to.not.have.property('cost');
+          expect(b.quantity).to.equal(0);
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  If-Match with the tag from the create replaces the details: 200 with ETag "2"; stock untouched; fields left out reset (description, cost).

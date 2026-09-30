@@ -1,0 +1,6 @@
+info:
+  name: "v2 details"
+  type: folder
+  seq: 4
+docs: |-
+  PUT /v2/inventory/{skuId}/details with If-None-Match and If-Match (README 'Try it' > 'The `/v2` API', paragraph Details). The first request picks a fresh SKU for this run.

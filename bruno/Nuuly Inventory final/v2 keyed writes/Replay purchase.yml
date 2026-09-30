@@ -1,0 +1,37 @@
+info:
+  name: "Replay purchase"
+  type: http
+  seq: 8
+
+http:
+  method: POST
+  url: "{{baseUrl}}/v2/inventory/{{skuId}}/purchase"
+  headers:
+    - name: "Idempotency-Key"
+      value: "{{purchaseKey}}"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 2
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("replayed body, stock not decremented again", function () {
+          expect(JSON.stringify(res.getBody())).to.equal(bru.getVar('purchaseBody'));
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  The purchase key replays too: same body, stock still 3 (not 1).
