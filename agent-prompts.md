@@ -1287,7 +1287,11 @@ Tool: Claude Code (desktop app). One orchestrator; four parallel research subage
 
 - Recorded the write-off endpoint as future design: DESIGN §12 and the README's "Designed, not built" list. Not built; no board card yet (DECISIONS.md is generated from the board, S9).
 
+- Answered the last-unit race (one winner, the other 400) and recorded stock reservations as future design: DESIGN §13, the README list and issue #125. Not built; no board card yet.
+
 **My response**
 - "Yes and save this to the notes."
 - "Tests to investigate concurrent mixed purchases, purchases racing restocks, and racing a negative adjustment."
 - "The write off endpoint should be added as future design."
+- "Write it as an issue in github" (#124).
+- Asked what happens when two people buy the last unit and whether the ledger could hold temporary reservations: "Yes please" (issue #125).

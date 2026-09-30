@@ -131,7 +131,7 @@ Reused from build v1 and #87: the decision-board process, the text/plain error c
 
 ## 10. Designed, not built
 
-Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope); read replicas (H18, §11); a write-off endpoint (§12). Nothing here is claimed as a performance property without a benchmark.
+Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope); read replicas (H18, §11); a write-off endpoint (§12); temporary stock reservations (§13). Nothing here is claimed as a performance property without a benchmark.
 
 ## 11. Read replicas and scale (H18, designed, not built)
 
@@ -193,3 +193,13 @@ Today the only way to lower a balance is a purchase, so shrinkage (damaged, lost
 **Not the same as a stock-take.** "Set the count to n" is a different operation: an absolute write loses updates to a concurrent purchase, so it needs an `If-Match` on the SKU's version (the mechanism `PUT …/details` already uses) or must be expressed as a signed delta computed against a read the caller holds. It is out of scope here.
 
 **Tests it would need.** Write-offs racing purchases of the same SKU (sold plus written off never exceeds stock, the leftover is smaller than every refused amount); a write-off racing a restock; the same key from many threads writes off once; the ledger row carries the `write_off` reason and the balance still equals the ledger sum.
+
+## 13. Temporary stock reservations (designed, not built)
+
+Tracked as [#125](https://github.com/kgtech/nuuly-take-home/issues/125). No board card exists yet, so it has no decision ID (S9).
+
+**Today.** A purchase is one step and final when it commits (E1). With one unit left, two simultaneous 1-unit purchases both run the conditional UPDATE; the first takes the row lock and gets 200 with remaining 0, and the second re-checks the committed balance and gets 400 "Insufficient inventory". Stock never goes negative or sells twice. There is no held-but-not-bought state.
+
+**Proposal.** Reserve runs the same conditional decrement and writes a −q ledger row (reason `reserve`); confirm marks the reservation sold and changes no stock; release or expiry adds q back with a +q ledger row (reason `release`). The ledger stays append-only, so the give-back is a new row. Two shoppers still can't both hold the last unit: the second is rejected at reserve. What changes is when stock is committed, not who wins the race.
+
+**What it needs.** A `reservations` table (the ledger can't hold an open hold, and `quantity_delta <> 0` forbids a zero-change confirm row). Guarded one-way transitions (`… SET status = … WHERE id = :id AND status = 'held'`) so a racing confirm and expiry have exactly one winner and stock is never returned and sold. A TTL with a sweeper or lazy expiry. The same ledger-reason migration as §12. New `/v2` endpoints with `Idempotency-Key`; the spec's purchase stays a one-step sale (G10). `GET` would show available, not on-hand, stock. Caps and short TTLs against hoarding.
