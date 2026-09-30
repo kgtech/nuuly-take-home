@@ -1,0 +1,6 @@
+{
+  "choice": "B",
+  "notes": "Concurrency design history (critique M-10): the ledger-SUM design with SERIALIZABLE transactions and retries was built first (V1-C, W1-B, D4-D); #26 showed 40001 serialization failures on writes to different SKUs; it was replaced by a balance row plus the append-only ledger at READ COMMITTED (E1, which supersedes W1, W2, X1, Y2 and Z1).",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {}
+}

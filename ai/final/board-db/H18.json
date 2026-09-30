@@ -1,0 +1,10 @@
+{
+  "choice": "A",
+  "notes": "Drafted at the owner's request (2026-09-29) because it will come up in the interview: A records today's code; B is the designed path once reads outgrow the primary (DESIGN.md §11).",
+  "updatedAt": "2026-09-29T23:45:00Z",
+  "why": {
+    "B": "Designed, not built: no measurement shows reads outgrowing the primary, and it changes the README's read promise (DESIGN.md §11).",
+    "C": "Designed, not built: it needs B first and only helps a /v2 client that must read its own writes.",
+    "D": "Every commit would wait for the slowest listed replica, and a down replica stalls writes."
+  }
+}

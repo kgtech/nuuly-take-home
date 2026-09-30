@@ -1,0 +1,8 @@
+{
+  "choice": "A",
+  "notes": "Owner (Target API)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "B": "The spec's document cannot stay the spec's while it also carries the extensions."
+  }
+}

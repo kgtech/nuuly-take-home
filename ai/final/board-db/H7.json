@@ -1,0 +1,10 @@
+{
+  "choice": "D",
+  "notes": "Owner OD-11. Accepted costs (critique M-06, decision challenge: prescribed by the Target API, OD-6 and OD-11): an unconditional PUT to an unknown id creates a permanent phantom SKU (a typo such as ABC-l for ABC-1 lists as {\"skuId\":\"ABC-l\",\"quantity\":0}, and a purchase of it answers 400 \"Insufficient inventory\", not 404) and no API deletes it (G5); the Create page always sends If-None-Match: * so the front end never does this by accident. /v2 lock-in: the leniencies (a bad limit is ignored, no precondition is required to create) cannot be tightened later without /v3. 428 (RFC 6585 §3) was rejected: the approved contract creates unconditionally.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "A": "Superseded by follow-up 2: same decision; the \"first test decides\" sentence moves from the rule to the assumption.",
+    "B": "Creating then needs a second route, and the create form could not be idempotent by method.",
+    "C": "409 needs a create-only route."
+  }
+}

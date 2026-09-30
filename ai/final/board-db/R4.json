@@ -1,0 +1,8 @@
+{
+  "choice": "D",
+  "notes": "Owner OD-5",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded by OD-5: limit leniency moves to /v2; the unversioned list ignores limit entirely."
+  }
+}

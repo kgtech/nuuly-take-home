@@ -6,20 +6,22 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
-import com.kgtech.inventoryapi.inventory.InventoryItem;
 import com.kgtech.inventoryapi.inventory.KeyedResponses;
-import com.kgtech.inventoryapi.inventory.StockOutcome;
+import com.kgtech.inventoryapi.inventory.SkuItem;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
 import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
-import com.kgtech.inventoryapi.web.TextErrors;
+import com.kgtech.inventoryapi.inventory.WriteResult;
+import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
+import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
 
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * How stock-write outcomes become responses: the one rendering an unkeyed answer gets and a keyed one stores against
- * its Idempotency-Key (R1, U1, Y4, A33, A38).
+ * How write outcomes become responses: the one rendering an unkeyed answer gets and a keyed one stores against its
+ * Idempotency-Key (R1, U1, Y4, A33). An Ok is rendered as a SkuItem: without details (every spec response, and a /v2
+ * SKU that has none) that is exactly the spec's {skuId, quantity}; a /v2 response adds the details (H6).
  */
 @Component
 final class OutcomeResponses implements KeyedResponses {
@@ -30,15 +32,17 @@ final class OutcomeResponses implements KeyedResponses {
         this.json = json;
     }
 
-    /** Y4, R1, U1: exactly the status, Content-Type and body the unkeyed stock write sends. */
+    /** Y4, R1, U1: exactly the status, Content-Type and body the unkeyed path sends. */
     @Override
-    public StoredResponse toStored(String skuId, StockOutcome outcome) {
-        return switch (outcome) {
+    public StoredResponse toStored(String skuId, WriteResult result) {
+        return switch (result) {
             case Ok ok -> new StoredResponse(200, APPLICATION_JSON_VALUE,
-                    json.writeValueAsString(new InventoryItem(skuId, ok.quantity())));
+                    json.writeValueAsString(new SkuItem(skuId, ok.quantity(), ok.details(), 0)));
             case NotFound _ -> text(TextErrors.skuNotFound());
             case Insufficient _ -> text(TextErrors.insufficientInventory());
             case Overflow _ -> text(TextErrors.invalidRequest());
+            case Stored _, InvalidRequest _ ->
+                    throw new IllegalStateException("not a stock outcome: " + result);
         };
     }
 

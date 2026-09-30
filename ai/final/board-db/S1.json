@@ -1,0 +1,9 @@
+{
+  "choice": "F",
+  "notes": "A14 (V5): the ledger row is no longer a JdbcClient write.",
+  "updatedAt": "2026-09-29T23:30:00Z",
+  "why": {
+    "B": "Superseded by E2, now with three SQL places.",
+    "E": "Superseded by A14: StockRepository no longer inserts ledger rows."
+  }
+}

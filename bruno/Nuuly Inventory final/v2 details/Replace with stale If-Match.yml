@@ -1,0 +1,35 @@
+info:
+  name: "Replace with stale If-Match"
+  type: http
+  seq: 4
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/v2/inventory/{{detailSku}}/details"
+  headers:
+    - name: "If-Match"
+      value: "{{staleEtag}}"
+  body:
+    type: json
+    data: |-
+      {
+        "name": "Stale edit"
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("412 text/plain \"Details changed since you read them. Reload the SKU and retry with its new ETag.\"", function () {
+          expect(res.getStatus()).to.equal(412);
+          expect(res.getHeader('content-type')).to.match(/^text\/plain/);
+          expect(res.getBody()).to.equal("Details changed since you read them. Reload the SKU and retry with its new ETag.");
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  The tag is now "2", so the old "1" is stale: 412 with the fixed text.

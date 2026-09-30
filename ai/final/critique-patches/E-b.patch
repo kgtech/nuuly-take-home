@@ -1,0 +1,317 @@
+diff --git a/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java b/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java
+index b516a4f..d9e39cc 100644
+--- a/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java
++++ b/src/main/java/com/kgtech/inventoryapi/inventory/InventoryService.java
+@@ -4,6 +4,7 @@ import java.math.BigInteger;
+ import java.util.List;
+ import java.util.Optional;
+ import java.util.UUID;
++import java.util.function.Function;
+ import java.util.function.Supplier;
+ import java.util.regex.Pattern;
+ 
+@@ -63,9 +64,7 @@ public class InventoryService {
+         if (!SkuId.isValid(skuId)) {
+             return new WriteResult.InvalidRequest();
+         }
+-        return transaction.execute(status -> stock.add(skuId, quantity)
+-                .<WriteResult>map(InventoryService::ok)
+-                .orElseGet(StockOutcome.Overflow::new));
++        return transaction.execute(status -> addStock(skuId, quantity, InventoryService::ok));
+     }
+ 
+     /** A malformed skuId is 404 "SKU not found": GET and purchase have no 400 for it in the spec (G11). */
+@@ -74,9 +73,7 @@ public class InventoryService {
+         if (!SkuId.isValid(skuId)) {
+             return new StockOutcome.NotFound();
+         }
+-        return transaction.execute(status -> stock.purchase(skuId, quantity)
+-                .<WriteResult>map(InventoryService::ok)
+-                .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient() : new StockOutcome.NotFound()));
++        return transaction.execute(status -> purchaseStock(skuId, quantity, InventoryService::ok));
+     }
+ 
+     /**
+@@ -87,9 +84,7 @@ public class InventoryService {
+         requirePositive(quantity);
+         return keyed(ApiVersion.V2, Operation.ADD, skuId, idempotencyKey, Integer.toString(quantity),
+                 new WriteResult.InvalidRequest(),
+-                () -> stock.add(skuId, quantity)
+-                        .<WriteResult>map(balance -> okWithDetails(skuId, balance))
+-                        .orElseGet(StockOutcome.Overflow::new));
++                () -> addStock(skuId, quantity, balance -> okWithDetails(skuId, balance)));
+     }
+ 
+     /** POST /v2/inventory/{skuId}/purchase: {@link #purchase} with a required key and the details in the Ok. */
+@@ -97,10 +92,7 @@ public class InventoryService {
+         requirePositive(quantity);
+         return keyed(ApiVersion.V2, Operation.PURCHASE, skuId, idempotencyKey, Integer.toString(quantity),
+                 new StockOutcome.NotFound(),
+-                () -> stock.purchase(skuId, quantity)
+-                        .<WriteResult>map(balance -> okWithDetails(skuId, balance))
+-                        .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient()
+-                                : new StockOutcome.NotFound()));
++                () -> purchaseStock(skuId, quantity, balance -> okWithDetails(skuId, balance)));
+     }
+ 
+     /**
+@@ -181,19 +173,26 @@ public class InventoryService {
+         if (!SkuId.isValid(skuId)) {
+             return Optional.empty();
+         }
+-        return stock.find(skuId).map(balance -> new InventoryItem(skuId, balance.quantity()));
++        return details.find(skuId).map(InventoryService::item);
+     }
+ 
+     /** OD-5: one page of SKUs in sku_id (COLLATE "C") order, always {@value #MAX_LIMIT}; after is never validated. */
+     public InventoryPage list(String after) {
+-        String cursor = truncateAtNul(after);
+-        List<InventoryItem> items = stock.page(cursor == null ? FIRST : cursor, MAX_LIMIT + 1L);
+-        if (items.size() <= MAX_LIMIT) {
+-            return new InventoryPage(items, Optional.empty());
+-        }
+-        List<InventoryItem> page = items.subList(0, MAX_LIMIT);
+-        return new InventoryPage(List.copyOf(page),
+-                Optional.of(new InventoryPage.Next(MAX_LIMIT, page.getLast().skuId())));
++        SkuPage page = listSkus(null, after);
++        return new InventoryPage(page.items().stream().map(InventoryService::item).toList(), page.next());
++    }
++
++    private static InventoryItem item(SkuItem sku) {
++        return new InventoryItem(sku.skuId(), sku.quantity());
++    }
++
++    private WriteResult addStock(String skuId, int quantity, Function<Balance, WriteResult> ok) {
++        return stock.add(skuId, quantity).map(ok).orElseGet(StockOutcome.Overflow::new);
++    }
++
++    private WriteResult purchaseStock(String skuId, int quantity, Function<Balance, WriteResult> ok) {
++        return stock.purchase(skuId, quantity).map(ok)
++                .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient() : new StockOutcome.NotFound());
+     }
+ 
+     private static WriteResult ok(Balance balance) {
+diff --git a/src/main/java/com/kgtech/inventoryapi/inventory/StockRepository.java b/src/main/java/com/kgtech/inventoryapi/inventory/StockRepository.java
+index 69a67dc..82991a1 100644
+--- a/src/main/java/com/kgtech/inventoryapi/inventory/StockRepository.java
++++ b/src/main/java/com/kgtech/inventoryapi/inventory/StockRepository.java
+@@ -1,6 +1,5 @@
+ package com.kgtech.inventoryapi.inventory;
+ 
+-import java.util.List;
+ import java.util.Optional;
+ 
+ import org.springframework.jdbc.core.simple.JdbcClient;
+@@ -32,13 +31,6 @@ class StockRepository {
+ 
+     static final String EXISTS = "SELECT EXISTS (SELECT 1 FROM sku WHERE sku_id = :id)";
+ 
+-    static final String FIND = "SELECT quantity, version FROM sku WHERE sku_id = :id";
+-
+-    /** G9: keyset page in COLLATE "C" order, straight from the balance column. */
+-    static final String PAGE = """
+-            SELECT sku_id, quantity FROM sku WHERE sku_id > :after ORDER BY sku_id LIMIT :limit
+-            """;
+-
+     private final JdbcClient jdbc;
+ 
+     StockRepository(JdbcClient jdbc) {
+@@ -66,16 +58,6 @@ class StockRepository {
+         return jdbc.sql(EXISTS).param("id", skuId).query(Boolean.class).single();
+     }
+ 
+-    /** Autocommit read at READ COMMITTED: never waits on a writer (DESIGN-V2 §9). */
+-    Optional<Balance> find(String skuId) {
+-        return jdbc.sql(FIND).param("id", skuId).query(Balance.class).optional();
+-    }
+-
+-    List<InventoryItem> page(String after, long limit) {
+-        return jdbc.sql(PAGE).param("after", after).param("limit", limit)
+-                .query((rs, n) -> new InventoryItem(rs.getString("sku_id"), rs.getLong("quantity"))).list();
+-    }
+-
+     private void record(String skuId, long delta, String reason) {
+         jdbc.sql(LEDGER).param("id", skuId).param("d", delta).param("r", reason).update();
+     }
+diff --git a/src/main/java/com/kgtech/inventoryapi/inventory/web/InventoryController.java b/src/main/java/com/kgtech/inventoryapi/inventory/web/InventoryController.java
+index 1d2b593..8f3ced6 100644
+--- a/src/main/java/com/kgtech/inventoryapi/inventory/web/InventoryController.java
++++ b/src/main/java/com/kgtech/inventoryapi/inventory/web/InventoryController.java
+@@ -54,13 +54,6 @@ import org.springframework.web.bind.annotation.RestController;
+ import com.kgtech.inventoryapi.inventory.InventoryItem;
+ import com.kgtech.inventoryapi.inventory.InventoryPage;
+ import com.kgtech.inventoryapi.inventory.InventoryService;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
+-import com.kgtech.inventoryapi.inventory.WriteResult;
+-import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
+-import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+ 
+ /** The four spec operations (hand-written, D7), with the spec's info, operationIds and summaries. */
+ @Tag(name = TAG)
+@@ -104,7 +97,7 @@ class InventoryController {
+         if (hasIdempotencyKey(request)) {
+             return TextErrors.invalidRequest();
+         }
+-        return toResponse(skuId, service.add(skuId, body.quantity()));
++        return outcomes.toResponse(skuId, service.add(skuId, body.quantity()));
+     }
+ 
+     @PostMapping(path = PURCHASE_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+@@ -123,7 +116,7 @@ class InventoryController {
+         if (hasIdempotencyKey(request)) {
+             return TextErrors.invalidRequest();
+         }
+-        return toResponse(skuId, service.purchase(skuId, body.quantity()));
++        return outcomes.toResponse(skuId, service.purchase(skuId, body.quantity()));
+     }
+ 
+     @GetMapping
+@@ -153,17 +146,4 @@ class InventoryController {
+     private static boolean hasIdempotencyKey(HttpServletRequest request) {
+         return request.getHeaders(IDEMPOTENCY_KEY).hasMoreElements();
+     }
+-
+-    /**
+-     * One mapping for every write result (C-17, issue #28): a stock outcome is rendered through the same
+-     * OutcomeResponses.toStored that a keyed request stores, so unkeyed and replayed responses are byte-identical (Y4).
+-     */
+-    private ResponseEntity<?> toResponse(String skuId, WriteResult result) {
+-        return switch (result) {
+-            case Stored stored -> StoredResponses.toResponseEntity(stored.response());
+-            case InvalidRequest _ -> TextErrors.invalidRequest();
+-            case Ok _, NotFound _, Insufficient _, Overflow _ ->
+-                    StoredResponses.toResponseEntity(outcomes.toStored(skuId, result));
+-        };
+-    }
+ }
+diff --git a/src/main/java/com/kgtech/inventoryapi/inventory/web/OutcomeResponses.java b/src/main/java/com/kgtech/inventoryapi/inventory/web/OutcomeResponses.java
+index 215990a..0a0f023 100644
+--- a/src/main/java/com/kgtech/inventoryapi/inventory/web/OutcomeResponses.java
++++ b/src/main/java/com/kgtech/inventoryapi/inventory/web/OutcomeResponses.java
+@@ -51,4 +51,14 @@ final class OutcomeResponses implements KeyedResponses {
+         return new StoredResponse(error.getStatusCode().value(), String.valueOf(error.getHeaders().getContentType()),
+                 error.getBody());
+     }
++
++    /** One mapping for every write result on both versions: a stored keyed response is sent unchanged (Y4). */
++    ResponseEntity<?> toResponse(String skuId, WriteResult result) {
++        return switch (result) {
++            case Stored stored -> StoredResponses.toResponseEntity(stored.response());
++            case InvalidRequest _ -> TextErrors.invalidRequest();
++            case Ok _, NotFound _, Insufficient _, Overflow _ ->
++                    StoredResponses.toResponseEntity(toStored(skuId, result));
++        };
++    }
+ }
+diff --git a/src/main/java/com/kgtech/inventoryapi/inventory/web/SkuDetailsController.java b/src/main/java/com/kgtech/inventoryapi/inventory/web/SkuDetailsController.java
+index 5cf470f..0cabea3 100644
+--- a/src/main/java/com/kgtech/inventoryapi/inventory/web/SkuDetailsController.java
++++ b/src/main/java/com/kgtech/inventoryapi/inventory/web/SkuDetailsController.java
+@@ -83,13 +83,6 @@ import com.kgtech.inventoryapi.inventory.PutResult;
+ import com.kgtech.inventoryapi.inventory.SkuDetails;
+ import com.kgtech.inventoryapi.inventory.SkuItem;
+ import com.kgtech.inventoryapi.inventory.SkuPage;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
+-import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
+-import com.kgtech.inventoryapi.inventory.WriteResult;
+-import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
+-import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+ 
+ /** The /v2 operations (OD-6): add stock, purchase, put details, read one, read a page. */
+ @Tag(name = TAG_V2)
+@@ -136,7 +129,7 @@ class SkuDetailsController {
+                     description = V2_IDEMPOTENCY_KEY_DESCRIPTION,
+                     schema = @Schema(type = "string", format = "uuid"))
+             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
+-        return toResponse(skuId, service.addV2(skuId, body.quantity(), idempotencyKey));
++        return outcomes.toResponse(skuId, service.addV2(skuId, body.quantity(), idempotencyKey));
+     }
+ 
+     @PostMapping(path = PURCHASE_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+@@ -156,7 +149,7 @@ class SkuDetailsController {
+                     description = V2_IDEMPOTENCY_KEY_DESCRIPTION,
+                     schema = @Schema(type = "string", format = "uuid"))
+             @RequestHeader(name = IDEMPOTENCY_KEY, required = false) String idempotencyKey) {
+-        return toResponse(skuId, service.purchaseV2(skuId, body.quantity(), idempotencyKey));
++        return outcomes.toResponse(skuId, service.purchaseV2(skuId, body.quantity(), idempotencyKey));
+     }
+ 
+     @PutMapping(path = DETAILS_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
+@@ -228,17 +221,4 @@ class SkuDetailsController {
+     private static ResponseEntity<SkuItem> withEtag(ResponseEntity.BodyBuilder builder, SkuItem item) {
+         return builder.header(ETAG, IfMatch.etag(item.detailsVersion())).header(CACHE_CONTROL, NO_STORE).body(item);
+     }
+-
+-    /**
+-     * One mapping for every write result, as on the spec routes: a stock outcome is rendered through the same
+-     * OutcomeResponses.toStored that a keyed request stores, so first and replayed responses are byte-identical (Y4).
+-     */
+-    private ResponseEntity<?> toResponse(String skuId, WriteResult result) {
+-        return switch (result) {
+-            case Stored stored -> StoredResponses.toResponseEntity(stored.response());
+-            case InvalidRequest _ -> TextErrors.invalidRequest();
+-            case Ok _, NotFound _, Insufficient _, Overflow _ ->
+-                    StoredResponses.toResponseEntity(outcomes.toStored(skuId, result));
+-        };
+-    }
+ }
+diff --git a/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceReadTest.java b/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceReadTest.java
+index 00f4ae0..68fc206 100644
+--- a/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceReadTest.java
++++ b/src/test/java/com/kgtech/inventoryapi/inventory/InventoryServiceReadTest.java
+@@ -47,46 +47,13 @@ class InventoryServiceReadTest {
+         verifyNoInteractions(details, transactions);
+     }
+ 
+-    // ---- unversioned: list(after), a fixed page of 250 (H4) ----
+-
+-    private InventoryPage list(String after) {
+-        when(stock.page(anyString(), anyLong())).thenReturn(List.of());
+-        return service.list(after);
+-    }
+-
+-    /** R4: after is cut at the first NUL and otherwise passed as a plain string; absent means from the start. */
+-    @ParameterizedTest(name = "after \"{0}\" → \"{1}\"")
+-    @CsvSource(delimiter = '|', value = {"abc\0x | abc", "\0 | ''", "A-1,B-2 | A-1,B-2", "'' | ''"})
+-    void listTruncatesAfterAtNul(String after, String expected) {
+-        list(after);
+-
+-        verify(stock).page(expected, FIXED_PAGE_PLUS_ONE);
+-    }
++    // ---- unversioned: list(after) is listSkus(null, after) without the details (H4) ----
+ 
+     @Test
+-    void listWithoutAfterAsksForTheFixedPageFromTheStart() {
+-        assertThat(list(null).next()).isEmpty();
+-
+-        verify(stock).page("", FIXED_PAGE_PLUS_ONE);
+-    }
+-
+-    /** H4, G9: the extra row only signals the next page; the cursor is the last skuId of the 250. */
+-    @Test
+-    void listReturnsNextCursorOnlyWhenAnExtraRowExists() {
+-        List<InventoryItem> rows = IntStream.rangeClosed(1, 251).mapToObj(i -> new InventoryItem("p%03d".formatted(i), i))
+-                .toList();
+-        when(stock.page("", FIXED_PAGE_PLUS_ONE)).thenReturn(rows);
+-        InventoryPage page = service.list(null);
+-        assertThat(page.items()).hasSize(250).extracting(InventoryItem::skuId).endsWith("p249", "p250");
+-        assertThat(page.next().map(InventoryPage.Next::after)).contains("p250");
+-
+-        when(stock.page("p250", FIXED_PAGE_PLUS_ONE)).thenReturn(rows.subList(250, 251));
+-        InventoryPage last = service.list("p250");
+-        assertThat(last.items()).extracting(InventoryItem::skuId).containsExactly("p251");
+-        assertThat(last.next()).isEmpty();
++    void listIsTheFixedPageOfTheV2ListWithoutDetails() {
++        when(details.page("", FIXED_PAGE_PLUS_ONE)).thenReturn(List.of(sku("a")));
+ 
+-        when(stock.page("q", FIXED_PAGE_PLUS_ONE)).thenReturn(rows.subList(0, 250));
+-        assertThat(service.list("q").next()).as("exactly 250 rows: no next page").isEmpty();
++        assertThat(service.list(null)).isEqualTo(new InventoryPage(List.of(new InventoryItem("a", 1)), Optional.empty()));
+     }
+ 
+     // ---- /v2: listSkus(limit, after) (H5) ----

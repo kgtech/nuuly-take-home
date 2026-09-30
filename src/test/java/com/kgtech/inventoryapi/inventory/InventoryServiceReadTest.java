@@ -6,289 +6,143 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Consumer;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
 
+
 /**
- * E1, G11, C3, G9, R4, R8, C2: the service's reads. find checks the skuId before any repository access and reads one
- * row; list parses limit leniently, cuts after at NUL and asks for one row more than the page. Neither opens a
- * transaction. Plain unit test: StockRepository and the transaction manager are mocks, and StockRepository is the
- * only path from the service to Postgres, so no interaction with it means no query.
+ * R4, R8, C2, H4, H5: the unversioned list has a fixed page of 250 and reads only after (cut at NUL); the /v2 list
+ * (listSkus) parses limit as well. Plain unit tests with mocked repositories; InventoryPagingIntegrationTest and
+ * V2ListPagingIntegrationTest run a few of these forms through Postgres.
  */
 class InventoryServiceReadTest {
 
-    /** The reads, with the one repository call each makes. */
-    enum Read {
-        FIND(service -> service.find("widget"), stock -> stock.find("widget")),
-        LIST(service -> service.list(null, null), stock -> stock.page("", 251)),
-        LIST_PAGE(service -> service.list("2", "B"), stock -> stock.page("B", 3));
-
-        final Consumer<InventoryService> call;
-        final Consumer<StockRepository> repositoryCall;
-
-        Read(Consumer<InventoryService> call, Consumer<StockRepository> repositoryCall) {
-            this.call = call;
-            this.repositoryCall = repositoryCall;
-        }
-    }
+    private static final long FIXED_PAGE_PLUS_ONE = InventoryService.MAX_LIMIT + 1L;
 
     private final StockRepository stock = mock(StockRepository.class);
+    private final DetailsRepository details = mock(DetailsRepository.class);
     private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
-    private final InventoryService service = new InventoryService(stock, mock(IdempotencyStore.class),
+    private final InventoryService service = new InventoryService(stock, details, mock(IdempotencyStore.class),
             mock(KeyedResponses.class), transactions);
 
-    static Stream<String> findWithInvalidSkuIdReturnsEmptyWithoutRepositoryAccess() {
-        return Stream.of("-bad", "a".repeat(65), "a b", "abc\n", "ABC-1;lot=7", "ABC-1;");
-    }
-
-    /** G11, S2, C3: the check runs before any database access, so no connection is borrowed. */
-    @ParameterizedTest
-    @NullSource
-    @MethodSource
-    void findWithInvalidSkuIdReturnsEmptyWithoutRepositoryAccess(String skuId) {
-        assertThat(service.find(skuId)).isEmpty();
-        verifyNoInteractions(stock, transactions);
-    }
-
+    /** C3 for v2 (review R-06e): a malformed skuId is answered before any repository or transaction access. */
     @Test
-    void findWithValidSkuIdQueriesRepository() {
-        when(stock.find("widget")).thenReturn(Optional.of(new Balance(5, 3)));
-
-        assertThat(service.find("widget")).isEqualTo(Optional.of(new InventoryItem("widget", 5)));
-        verify(stock).find("widget");
+    void v2ReadAndPutWithAMalformedSkuIdTouchNothing() {
+        assertThat(service.findSku("bad id")).isEmpty();
+        assertThat(service.putDetails("bad id", new SkuDetails("n", "", Optional.empty(), List.of()),
+                new DetailsPrecondition.Any())).isInstanceOf(PutResult.InvalidRequest.class);
+        verifyNoInteractions(details, transactions);
     }
 
-    /** E1, C3: each read is one autocommit repository query; no transaction is opened. */
-    @ParameterizedTest
-    @EnumSource(Read.class)
-    void readsRunWithoutATransaction(Read read) {
-        when(stock.find("widget")).thenReturn(Optional.of(new Balance(5, 1)));
+    // ---- unversioned: list(after), a fixed page of 250 (H4) ----
+
+    private InventoryPage list(String after) {
         when(stock.page(anyString(), anyLong())).thenReturn(List.of());
-
-        read.call.accept(service);
-
-        read.repositoryCall.accept(verify(stock));
-        verifyNoMoreInteractions(stock);
-        verifyNoInteractions(transactions);
+        return service.list(after);
     }
 
-    private static InventoryItem item(String skuId, long quantity) {
-        return new InventoryItem(skuId, quantity);
-    }
+    /** R4: after is cut at the first NUL and otherwise passed as a plain string; absent means from the start. */
+    @ParameterizedTest(name = "after \"{0}\" → \"{1}\"")
+    @CsvSource(delimiter = '|', value = {"abc\0x | abc", "\0 | ''", "A-1,B-2 | A-1,B-2", "'' | ''"})
+    void listTruncatesAfterAtNul(String after, String expected) {
+        list(after);
 
-    private static List<InventoryItem> rows(int count) {
-        List<InventoryItem> rows = new ArrayList<>();
-        for (int i = 1; i <= count; i++) {
-            rows.add(item(String.format("S%03d", i), i));
-        }
-        return rows;
-    }
-
-    /** G9, C2: no limit and no after asks for the default page of 250 plus one; items keep the row order. */
-    @Test
-    void listWithoutParamsQueriesDefaultPagePlusOne() {
-        when(stock.page("", 251)).thenReturn(List.of(item("A", 1), item("b", Long.MAX_VALUE)));
-
-        Page<InventoryItem> page = service.list(null, null);
-
-        assertThat(page.items()).containsExactly(item("A", 1), item("b", Long.MAX_VALUE));
-        assertThat(page.next()).isEmpty();
-        verify(stock).page("", 251);
-        verifyNoMoreInteractions(stock);
-    }
-
-    /**
-     * G9, R4, C2: without limit, with or without after, a 251st row means a next page at the default size; the cursor
-     * is the 250th row. No after queries from "".
-     */
-    @ParameterizedTest(name = "after={0} → query after {1}")
-    @CsvSource(delimiter = '|', nullValues = "NULL", value = {
-        "NULL | ''",
-        "A    | A"
-    })
-    void listWithoutLimitSetsNextAtDefault(String after, String queried) {
-        when(stock.page(queried, 251)).thenReturn(rows(251));
-
-        Page<InventoryItem> page = service.list(null, after);
-
-        assertThat(page.items()).isEqualTo(rows(250));
-        assertThat(page.next()).contains(new Page.Next(250, "S250"));
-    }
-
-    /** C2: exactly 250 rows without limit is the last page. */
-    @Test
-    void listWithoutLimitExactly250HasNoNext() {
-        when(stock.page("", 251)).thenReturn(rows(250));
-
-        Page<InventoryItem> page = service.list(null, null);
-
-        assertThat(page.items()).isEqualTo(rows(250));
-        assertThat(page.next()).isEmpty();
-    }
-
-    /** G9: a limit of n asks for n + 1 rows after the cursor; no cursor starts before every sku_id. */
-    @Test
-    void listWithLimitQueriesLimitPlusOne() {
-        service.list("2", null);
-
-        verify(stock).page("", 3);
-        verifyNoMoreInteractions(stock);
+        verify(stock).page(expected, FIXED_PAGE_PLUS_ONE);
     }
 
     @Test
-    void listWithLimitAndAfterQueriesAfterCursor() {
-        service.list("2", "B-2");
+    void listWithoutAfterAsksForTheFixedPageFromTheStart() {
+        assertThat(list(null).next()).isEmpty();
 
-        verify(stock).page("B-2", 3);
-        verifyNoMoreInteractions(stock);
+        verify(stock).page("", FIXED_PAGE_PLUS_ONE);
     }
 
-    /**
-     * R4: limit is ASCII digits with an optional sign. Non-positive, non-numeric, blank, padded, decimal, repeated and
-     * non-ASCII-digit values are ignored, so the default page of 250 (plus the extra row) is asked for (C2).
-     */
+    /** H4, G9: the extra row only signals the next page; the cursor is the last skuId of the 250. */
+    @Test
+    void listReturnsNextCursorOnlyWhenAnExtraRowExists() {
+        List<InventoryItem> rows = IntStream.rangeClosed(1, 251).mapToObj(i -> new InventoryItem("p%03d".formatted(i), i))
+                .toList();
+        when(stock.page("", FIXED_PAGE_PLUS_ONE)).thenReturn(rows);
+        InventoryPage page = service.list(null);
+        assertThat(page.items()).hasSize(250).extracting(InventoryItem::skuId).endsWith("p249", "p250");
+        assertThat(page.next().map(InventoryPage.Next::after)).contains("p250");
+
+        when(stock.page("p250", FIXED_PAGE_PLUS_ONE)).thenReturn(rows.subList(250, 251));
+        InventoryPage last = service.list("p250");
+        assertThat(last.items()).extracting(InventoryItem::skuId).containsExactly("p251");
+        assertThat(last.next()).isEmpty();
+
+        when(stock.page("q", FIXED_PAGE_PLUS_ONE)).thenReturn(rows.subList(0, 250));
+        assertThat(service.list("q").next()).as("exactly 250 rows: no next page").isEmpty();
+    }
+
+    // ---- /v2: listSkus(limit, after) (H5) ----
+
+    private SkuPage listSkus(String limit, String after) {
+        when(details.page(anyString(), anyLong())).thenReturn(List.of());
+        return service.listSkus(limit, after);
+    }
+
+    static Stream<String> unusableLimits() {
+        return Stream.of("0", "-1", "-0", "abc", "", " ", "1.5", " 5", "5 ", "1e3", "٣", "2,3");
+    }
+
+    /** R4, C2: a missing or unusable limit is ignored and the default page of 250 (plus the extra row) is asked for. */
     @ParameterizedTest(name = "limit \"{0}\"")
     @NullSource
-    @ValueSource(strings = {"", " ", "abc", "0", "-1", "-0", "+0", "00", "+", "-", "1.5", "1e3", "0x10", " 5", "5 ",
-        "2,3", "٣", "５", "٥٠", "-99999999999999999999"})
-    void listIgnoresUnusableLimit(String limit) {
-        when(stock.page("", 251)).thenReturn(List.of(item("A", 1)));
+    @MethodSource("unusableLimits")
+    void listSkusIgnoresUnusableLimit(String limit) {
+        assertThat(listSkus(limit, null).next()).isEmpty();
 
-        Page<InventoryItem> page = service.list(limit, null);
-
-        assertThat(page.items()).containsExactly(item("A", 1));
-        assertThat(page.next()).isEmpty();
-        verify(stock).page("", InventoryService.DEFAULT_LIMIT + 1L);
-        verifyNoMoreInteractions(stock);
+        verify(details).page("", FIXED_PAGE_PLUS_ONE);
     }
 
-    /** R4, R8: usable limits query limit + 1; an explicit plus sign is allowed; above 250, even past long, is 250. */
-    @ParameterizedTest(name = "limit={0} → query {1}")
-    @CsvSource(delimiter = '|', value = {
-        "1                     | 2",
-        "+5                    | 6",
-        "007                   | 8",
-        "249                   | 250",
-        "250                   | 251",
-        "251                   | 251",
-        "9999                  | 251",
-        "2147483647            | 251",
-        "2147483648            | 251",
-        "99999999999           | 251",
-        "9223372036854775808   | 251",
-        "99999999999999999999  | 251"
-    })
-    void listUsesOrClampsLimit(String limit, long queried) {
-        service.list(limit, null);
+    /** R4, R8: a usable limit is used as is, an explicit plus sign is allowed, and anything above 250 is 250. */
+    @ParameterizedTest(name = "limit \"{0}\" → {1}")
+    @CsvSource({"1, 1", "+5, 5", "250, 250", "251, 250", "99999999999999999999, 250"})
+    void listSkusUsesOrClampsLimit(String limit, int expected) {
+        listSkus(limit, null);
 
-        verify(stock).page("", queried);
-        verifyNoMoreInteractions(stock);
+        verify(details).page("", expected + 1L);
     }
 
-    /** R4, C2: after alone (never validated) returns up to the default page of 250 after it. */
-    @ParameterizedTest
-    @ValueSource(strings = {"B-2", "", "zzz", "not a sku id!", "a+b&c=d", "A-1,B-2"})
-    void listWithAfterOnlyUsesDefaultLimit(String after) {
-        when(stock.page(after, 251)).thenReturn(rows(3));
+    /** R4: after is cut at the first NUL on /v2 too. */
+    @ParameterizedTest(name = "after \"{0}\" → \"{1}\"")
+    @CsvSource(delimiter = '|', value = {"abc\0x | abc", "\0 | ''", "'' | ''"})
+    void listSkusTruncatesAfterAtNul(String after, String expected) {
+        listSkus(null, after);
 
-        Page<InventoryItem> page = service.list(null, after);
-
-        assertThat(page.items()).isEqualTo(rows(3));
-        assertThat(page.next()).isEmpty();
-        verify(stock).page(after, 251);
-        verifyNoMoreInteractions(stock);
+        verify(details).page(expected, FIXED_PAGE_PLUS_ONE);
     }
 
-    /** R4, C2: an ignored limit with after behaves as after alone. */
-    @ParameterizedTest
-    @ValueSource(strings = {"0", "abc", ""})
-    void listWithIgnoredLimitAndAfterUsesDefaultLimit(String limit) {
-        when(stock.page("B-2", 251)).thenReturn(List.of());
-
-        Page<InventoryItem> page = service.list(limit, "B-2");
-
-        assertThat(page.next()).isEmpty();
-        verify(stock).page("B-2", 251);
-        verifyNoMoreInteractions(stock);
-    }
-
-    /** G9: the extra row only signals a next page; it is dropped and the cursor is the last row returned. */
+    /** G9: the extra row only signals the next page; the cursor carries the page size used and the last skuId. */
     @Test
-    void listSetsNextWhenExtraRowReturned() {
-        when(stock.page("", 3)).thenReturn(rows(3));
+    void listSkusReturnsNextCursorOnlyWhenAnExtraRowExists() {
+        when(details.page("", 3L)).thenReturn(List.of(sku("a"), sku("b"), sku("c")));
+        SkuPage page = service.listSkus("2", null);
+        assertThat(page.items()).extracting(SkuItem::skuId).containsExactly("a", "b");
+        assertThat(page.next()).isEqualTo(Optional.of(new InventoryPage.Next(2, "b")));
 
-        Page<InventoryItem> page = service.list("2", null);
-
-        assertThat(page.items()).isEqualTo(rows(2));
-        assertThat(page.next()).contains(new Page.Next(2, "S002"));
+        when(details.page("b", 3L)).thenReturn(List.of(sku("c")));
+        SkuPage last = service.listSkus("2", "b");
+        assertThat(last.items()).extracting(SkuItem::skuId).containsExactly("c");
+        assertThat(last.next()).isEmpty();
     }
 
-    /** G9: exactly n rows left, or fewer, is the last page. */
-    @ParameterizedTest
-    @ValueSource(ints = {0, 1, 2})
-    void listHasNoNextWithoutExtraRow(int returned) {
-        when(stock.page("A", 3)).thenReturn(rows(returned));
-
-        Page<InventoryItem> page = service.list("2", "A");
-
-        assertThat(page.items()).isEqualTo(rows(returned));
-        assertThat(page.next()).isEmpty();
-    }
-
-    /** R8: the next cursor carries the normalized limit, not the raw one. */
-    @Test
-    void listNextCarriesClampedLimit() {
-        when(stock.page("", 251)).thenReturn(rows(251));
-
-        Page<InventoryItem> page = service.list("9999", null);
-
-        assertThat(page.items()).isEqualTo(rows(250));
-        assertThat(page.next()).contains(new Page.Next(250, "S250"));
-    }
-
-    @Test
-    void listNextCarriesSignFreeLimit() {
-        when(stock.page("", 6)).thenReturn(rows(6));
-
-        assertThat(service.list("+5", null).next()).contains(new Page.Next(5, "S005"));
-    }
-
-    static Stream<Arguments> listTruncatesAfterAtNul() {
-        return Stream.of(
-                Arguments.of("abc\0x", "abc"),
-                Arguments.of("\0", ""),
-                Arguments.of("a\0\0", "a"));
-    }
-
-    /** R4: after is cut at the first NUL (Postgres rejects NUL in text); every sku_id sorts above the cut. */
-    @ParameterizedTest
-    @MethodSource
-    void listTruncatesAfterAtNul(String after, String truncated) {
-        when(stock.page(anyString(), anyLong())).thenReturn(List.of());
-
-        service.list("2", after);
-        service.list(null, after);
-
-        verify(stock).page(truncated, 3);
-        verify(stock).page(truncated, 251);
-        verifyNoMoreInteractions(stock);
+    private static SkuItem sku(String skuId) {
+        return new SkuItem(skuId, 1, Optional.empty(), 0);
     }
 }

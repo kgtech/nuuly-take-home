@@ -12,15 +12,17 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.kgtech.inventoryapi.idempotency.ApiVersion;
 import com.kgtech.inventoryapi.idempotency.IdempotencyKey;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
 import com.kgtech.inventoryapi.idempotency.Operation;
+import com.kgtech.inventoryapi.idempotency.StoredResponse;
 
 /**
- * Stock writes: one READ COMMITTED transaction each, a conditional update of the balance row plus a ledger row (E1);
- * with an Idempotency-Key the write runs through IdempotencyStore (A33). Reads are single autocommit queries with no
- * transaction, and find checks the skuId first, so an invalid ID borrows no connection (G11, C3, E1).
+ * Stock writes: one READ COMMITTED transaction each, a conditional row update plus a ledger row (DESIGN-V2 §2). The
+ * unversioned writes know nothing of idempotency (OD-4); the /v2 writes run through IdempotencyStore (A33). Reads are
+ * one row lookup (§9: no cache). The v2 details operations (§8) share the transaction template.
  */
 @Service
 public class InventoryService {
@@ -30,19 +32,21 @@ public class InventoryService {
     private static final BigInteger MAX_LIMIT_BIG = BigInteger.valueOf(MAX_LIMIT);
     /** R4: ASCII digits with an optional sign; anything else is ignored. */
     private static final Pattern LIMIT = Pattern.compile("[+-]?[0-9]+");
-    /** G9, C2: an absent or ignored limit means the largest page. */
+    /** G9, C2: an absent or ignored limit means the largest page; the unversioned list always uses it (OD-5). */
     public static final int DEFAULT_LIMIT = MAX_LIMIT;
     /** Every sku_id is non-empty, so the empty cursor starts before all of them. */
     private static final String FIRST = "";
 
     private final StockRepository stock;
+    private final DetailsRepository details;
     private final IdempotencyStore idempotency;
     private final KeyedResponses responses;
     private final TransactionTemplate transaction;
 
-    InventoryService(StockRepository stock, IdempotencyStore idempotency, KeyedResponses responses,
-            PlatformTransactionManager transactionManager) {
+    InventoryService(StockRepository stock, DetailsRepository details, IdempotencyStore idempotency,
+            KeyedResponses responses, PlatformTransactionManager transactionManager) {
         this.stock = stock;
+        this.details = details;
         this.idempotency = idempotency;
         this.responses = responses;
         this.transaction = new TransactionTemplate(transactionManager);
@@ -50,53 +54,129 @@ public class InventoryService {
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
-    /** Ok or Overflow (U1, A38). A malformed skuId is 400 "Invalid request" (G11). */
-    public WriteResult<StockOutcome.Add> add(String skuId, int quantity, String idempotencyKey) {
+    /**
+     * POST /inventory/{skuId} (the spec): no key, no idempotency work (OD-4). A malformed skuId is 400 "Invalid
+     * request" (G11).
+     */
+    public WriteResult add(String skuId, int quantity) {
         requirePositive(quantity);
-        return write(Operation.ADD, skuId, quantity, idempotencyKey, new WriteResult.InvalidRequest<>(),
+        if (!SkuId.isValid(skuId)) {
+            return new WriteResult.InvalidRequest();
+        }
+        return transaction.execute(status -> stock.add(skuId, quantity)
+                .<WriteResult>map(InventoryService::ok)
+                .orElseGet(StockOutcome.Overflow::new));
+    }
+
+    /** A malformed skuId is 404 "SKU not found": GET and purchase have no 400 for it in the spec (G11). */
+    public WriteResult purchase(String skuId, int quantity) {
+        requirePositive(quantity);
+        if (!SkuId.isValid(skuId)) {
+            return new StockOutcome.NotFound();
+        }
+        return transaction.execute(status -> stock.purchase(skuId, quantity)
+                .<WriteResult>map(InventoryService::ok)
+                .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient() : new StockOutcome.NotFound()));
+    }
+
+    /**
+     * OD-3, H2: POST /v2/inventory/{skuId}. Like {@link #add}, but the Idempotency-Key is required (a missing one is
+     * 400) and the Ok carries the SKU's details, read in the same transaction as the write.
+     */
+    public WriteResult addV2(String skuId, int quantity, String idempotencyKey) {
+        requirePositive(quantity);
+        return keyed(ApiVersion.V2, Operation.ADD, skuId, idempotencyKey, Integer.toString(quantity),
+                new WriteResult.InvalidRequest(),
                 () -> stock.add(skuId, quantity)
-                        .<StockOutcome.Add>map(balance -> new StockOutcome.Ok(balance.quantity()))
+                        .<WriteResult>map(balance -> okWithDetails(skuId, balance))
                         .orElseGet(StockOutcome.Overflow::new));
     }
 
-    /**
-     * Ok, NotFound or Insufficient (A38). A malformed skuId is 404 "SKU not found": GET and purchase have no 400 for it
-     * in the spec (G11).
-     */
-    public WriteResult<StockOutcome.Purchase> purchase(String skuId, int quantity, String idempotencyKey) {
+    /** POST /v2/inventory/{skuId}/purchase: {@link #purchase} with a required key and the details in the Ok. */
+    public WriteResult purchaseV2(String skuId, int quantity, String idempotencyKey) {
         requirePositive(quantity);
-        return write(Operation.PURCHASE, skuId, quantity, idempotencyKey,
-                new WriteResult.Done<>(new StockOutcome.NotFound()), () -> stock.purchase(skuId, quantity));
+        return keyed(ApiVersion.V2, Operation.PURCHASE, skuId, idempotencyKey, Integer.toString(quantity),
+                new StockOutcome.NotFound(),
+                () -> stock.purchase(skuId, quantity)
+                        .<WriteResult>map(balance -> okWithDetails(skuId, balance))
+                        .orElseGet(() -> stock.exists(skuId) ? new StockOutcome.Insufficient()
+                                : new StockOutcome.NotFound()));
     }
 
     /**
-     * U3, A34, after the controller's body validation: the Idempotency-Key format (S3), then the skuId (G11, S2), each
-     * once, before any I/O and never stored. Without a key (G8) the write runs in the service's own READ COMMITTED
-     * transaction. With one, IdempotencyStore.run claims the key, runs the write, renders its outcome through
-     * KeyedResponses and stores it in one transaction, or replays or rejects (A33). The canonical request is the
-     * quantity's decimal digits (Y3).
+     * The key (S3), then the skuId, then the claim and write. A null key is 400: only /v2 gets here without one.
      */
-    private <O extends StockOutcome> WriteResult<O> write(Operation operation, String skuId, int quantity,
-            String idempotencyKey, WriteResult<O> malformedSkuId, Supplier<O> action) {
-        if (idempotencyKey == null) {
-            return SkuId.isValid(skuId) ? new WriteResult.Done<>(transaction.execute(status -> action.get()))
-                    : malformedSkuId;
-        }
-        Optional<UUID> key = IdempotencyKey.parse(idempotencyKey);
+    private WriteResult keyed(ApiVersion version, Operation operation, String skuId, String idempotencyKey,
+            String canonicalRequest, WriteResult malformedSkuId, Supplier<WriteResult> action) {
+        Optional<UUID> key = idempotencyKey == null ? Optional.empty() : IdempotencyKey.parse(idempotencyKey);
         if (key.isEmpty()) {
-            return new WriteResult.InvalidRequest<>();
+            return new WriteResult.InvalidRequest();
         }
         if (!SkuId.isValid(skuId)) {
             return malformedSkuId;
         }
-        return switch (idempotency.run(key.get(), operation, skuId, Integer.toString(quantity),
-                () -> responses.toStored(skuId, action.get()))) {
-            case Keyed.Response response -> new WriteResult.Stored<>(response.response());
-            case Keyed.Invalid _ -> new WriteResult.InvalidRequest<>();
+        Supplier<StoredResponse> stored = () -> responses.toStored(skuId, action.get());
+        return switch (idempotency.run(key.get(), version, operation, skuId, canonicalRequest, stored)) {
+            case Keyed.Response response -> new WriteResult.Stored(response.response());
+            case Keyed.Invalid _ -> new WriteResult.InvalidRequest();
         };
     }
 
-    /** G11, S2, C3, E1: the skuId first, then one autocommit row lookup, which never waits on a writer. */
+    /**
+     * OD-6, OD-11: PUT /v2/inventory/{skuId}/details in one READ COMMITTED transaction; it never touches stock or the
+     * sku row's quantity. Without a condition it creates an absent SKU at quantity 0 (claim the sku row, then insert
+     * the details) or replaces the details of an existing one. Versions and Exists never create: on an absent SKU
+     * they fail (RFC 9110 §13.1.1). Absent creates only, and fails on an existing SKU (§13.1.2). A malformed skuId
+     * is 400 before any I/O.
+     */
+    public PutResult putDetails(String skuId, SkuDetails replacement, DetailsPrecondition precondition) {
+        if (!SkuId.isValid(skuId)) {
+            return new PutResult.InvalidRequest();
+        }
+        return transaction.execute(status -> switch (precondition) {
+            case DetailsPrecondition.Any _ -> details.claimSku(skuId) ? created(skuId, replacement)
+                    : replaced(skuId, details.replace(skuId, replacement, precondition));
+            case DetailsPrecondition.Absent _ -> details.claimSku(skuId) ? created(skuId, replacement)
+                    : new PutResult.PreconditionFailed();
+            case DetailsPrecondition.Exists _, DetailsPrecondition.Versions _ ->
+                    replaced(skuId, details.replace(skuId, replacement, precondition));
+        });
+    }
+
+    private PutResult created(String skuId, SkuDetails replacement) {
+        return new PutResult.Created(new SkuItem(skuId, 0, Optional.of(replacement), details.insert(skuId, replacement)));
+    }
+
+    private PutResult replaced(String skuId, Optional<Long> version) {
+        return version.<PutResult>map(v -> new PutResult.Replaced(details.find(skuId)
+                        .orElseThrow(() -> new IllegalStateException("replaced details vanished: " + skuId))))
+                .orElseGet(PutResult.PreconditionFailed::new);
+    }
+
+    /** DESIGN-V2 §8 "Reads": G11 first, then one join. */
+    public Optional<SkuItem> findSku(String skuId) {
+        if (!SkuId.isValid(skuId)) {
+            return Optional.empty();
+        }
+        return details.find(skuId);
+    }
+
+    /** The v2 list: {@link #list}'s page rules plus a lenient limit, with the details joined (§8 "Reads"). */
+    public SkuPage listSkus(String limit, String after) {
+        int n = parseLimit(limit);
+        String cursor = truncateAtNul(after);
+        List<SkuItem> items = details.page(cursor == null ? FIRST : cursor, n + 1L);
+        if (items.size() <= n) {
+            return new SkuPage(items, Optional.empty());
+        }
+        List<SkuItem> page = items.subList(0, n);
+        return new SkuPage(List.copyOf(page), Optional.of(new InventoryPage.Next(n, page.getLast().skuId())));
+    }
+
+    /**
+     * G11 first (no I/O for a malformed id, C-05), then one primary-key lookup at READ COMMITTED autocommit, which
+     * never waits on a writer (DESIGN-V2 §9).
+     */
     public Optional<InventoryItem> find(String skuId) {
         if (!SkuId.isValid(skuId)) {
             return Optional.empty();
@@ -104,19 +184,25 @@ public class InventoryService {
         return stock.find(skuId).map(balance -> new InventoryItem(skuId, balance.quantity()));
     }
 
-    /**
-     * One page of SKUs in sku_id (COLLATE "C") order, at most 250 (G9, R4, C2), from one autocommit keyset query: it
-     * asks for one row more than the page, and that row's presence means a next page.
-     */
-    public Page<InventoryItem> list(String limit, String after) {
-        int n = parseLimit(limit);
+    /** OD-5: one page of SKUs in sku_id (COLLATE "C") order, always {@value #MAX_LIMIT}; after is never validated. */
+    public InventoryPage list(String after) {
         String cursor = truncateAtNul(after);
-        List<InventoryItem> items = stock.page(cursor == null ? FIRST : cursor, n + 1L);
-        if (items.size() <= n) {
-            return new Page<>(items, Optional.empty());
+        List<InventoryItem> items = stock.page(cursor == null ? FIRST : cursor, MAX_LIMIT + 1L);
+        if (items.size() <= MAX_LIMIT) {
+            return new InventoryPage(items, Optional.empty());
         }
-        List<InventoryItem> page = items.subList(0, n);
-        return new Page<>(List.copyOf(page), Optional.of(new Page.Next(n, page.getLast().skuId())));
+        List<InventoryItem> page = items.subList(0, MAX_LIMIT);
+        return new InventoryPage(List.copyOf(page),
+                Optional.of(new InventoryPage.Next(MAX_LIMIT, page.getLast().skuId())));
+    }
+
+    private static WriteResult ok(Balance balance) {
+        return new StockOutcome.Ok(balance.quantity());
+    }
+
+    /** Inside the write's transaction, after the row update: the details the response carries (H6). */
+    private WriteResult okWithDetails(String skuId, Balance balance) {
+        return new StockOutcome.Ok(balance.quantity(), details.find(skuId).flatMap(SkuItem::details));
     }
 
     /** R4, R8, C2: a positive ASCII integer, clamped to 250; blank, non-numeric, zero or negative → 250. */
@@ -131,10 +217,7 @@ public class InventoryService {
         return value.min(MAX_LIMIT_BIG).intValueExact();
     }
 
-    /**
-     * R4: after is never validated. Postgres text cannot hold NUL, and every sku_id sorts above the part before the
-     * first NUL, so the cursor is cut there.
-     */
+    /** R4: after is never validated. Postgres text cannot hold NUL, so the cursor is cut there. */
     private static String truncateAtNul(String after) {
         if (after == null) {
             return null;

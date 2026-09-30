@@ -1,31 +1,20 @@
 package com.kgtech.inventoryapi.idempotency;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.fail;
 
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.junit.jupiter.api.AfterEach;
+import com.kgtech.inventoryapi.Tables;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -36,23 +25,18 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.kgtech.inventoryapi.IntegrationTest;
-import com.kgtech.inventoryapi.Tables;
 import com.kgtech.inventoryapi.idempotency.IdempotencyStore.Keyed;
 
 /**
- * R2, G14, S8, T1, Y4, A18, A33: claim, replay, mismatch and expiry against Postgres through {@code run}, which opens
- * its own READ COMMITTED transaction or joins a READ COMMITTED or DEFAULT caller's, and refuses a stricter one. A
- * concurrent claim of the same key waits for the first and replays it, or claims the key after a rollback (E1). Not
- * @Transactional: each call commits.
+ * R2, G14, S8, T1, Y4, A33: claim, replay, mismatch and expiry against Postgres through {@code run}, which opens its
+ * own READ COMMITTED transaction or joins a READ COMMITTED or DEFAULT caller's, and refuses a stricter one (DESIGN-V2
+ * §2, §10). Not @Transactional: each call commits.
  */
 @IntegrationTest
 class IdempotencyStoreTest {
 
     private static final StoredResponse OK = new StoredResponse(200, "application/json",
             "{\"skuId\":\"widget\",\"quantity\":5}");
-    /** How long the second of two concurrent runs must still be waiting (E1). */
-    private static final long WAITING_MILLIS = 500;
-    private static final long TIMEOUT_SECONDS = 10;
 
     @Autowired
     IdempotencyStore store;
@@ -65,20 +49,14 @@ class IdempotencyStoreTest {
 
     private TransactionTemplate transaction;
     private final AtomicInteger actionRuns = new AtomicInteger();
-    private final ExecutorService pool = Executors.newFixedThreadPool(2);
 
     @BeforeEach
     void setUp() {
+        // test-only delete; the application never purges keys (R9)
         Tables.reset(jdbc);
         transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         actionRuns.set(0);
-    }
-
-    @AfterEach
-    void stopPool() throws InterruptedException {
-        pool.shutdownNow();
-        assertThat(pool.awaitTermination(TIMEOUT_SECONDS, SECONDS)).as("runs finished").isTrue();
     }
 
     /** A keyed write as InventoryService passes it: the spec POSTs' canonical request is the quantity's digits. */
@@ -185,41 +163,52 @@ class IdempotencyStoreTest {
         assertThat(rows()).isEqualTo(1);
     }
 
-    /** How a reused key's request differs from the first one (S8, G1), or that the key has expired (T1). */
-    enum Reuse {
-        DIFFERENT_HASH(key -> add(key, "widget", 6), null),
-        DIFFERENT_SKU(key -> add(key, "gadget", 5), null),
-        /** G1: skuId comparison is case-sensitive. */
-        DIFFERENT_SKU_CASE(key -> add(key, "WIDGET", 5), null),
-        DIFFERENT_OPERATION(key -> purchase(key, "widget", 5), null),
-        /** T1: a key older than 24h is rejected even with the same request, and is never reused. */
-        OLDER_THAN_24H(key -> add(key, "widget", 5), "24 hours 1 second");
-
-        final Function<UUID, Request> request;
-        final String age;
-
-        Reuse(Function<UUID, Request> request, String age) {
-            this.request = request;
-            this.age = age;
-        }
-    }
-
-    /** S8, T1, G1 (#24 C-33): each rejected reuse answers Invalid, runs no action and leaves the stored row as is. */
-    @ParameterizedTest
-    @EnumSource(Reuse.class)
-    void reuseIsRejectedAndLeavesTheRowUnchanged(Reuse reuse) {
+    @Test
+    void differentHashRejected() {
         UUID key = UUID.randomUUID();
         execute(add(key, "widget", 5), OK);
-        if (reuse.age != null) {
-            backdate(key, reuse.age);
-        }
 
-        assertRejectedAndUnchanged(key, reuse.request.apply(key));
+        assertRejectedAndUnchanged(key, add(key, "widget", 6));
+    }
+
+    @Test
+    void differentSkuRejected() {
+        UUID key = UUID.randomUUID();
+        execute(add(key, "widget", 5), OK);
+
+        assertRejectedAndUnchanged(key, add(key, "gadget", 5));
+    }
+
+    /** G1: skuId comparison is case-sensitive. */
+    @Test
+    void differentSkuCaseRejected() {
+        UUID key = UUID.randomUUID();
+        execute(add(key, "widget", 5), OK);
+
+        assertRejectedAndUnchanged(key, add(key, "WIDGET", 5));
+    }
+
+    @Test
+    void differentOperationRejected() {
+        UUID key = UUID.randomUUID();
+        execute(add(key, "widget", 5), OK);
+
+        assertRejectedAndUnchanged(key, purchase(key, "widget", 5));
+    }
+
+    /** T1: a key older than 24h is rejected even with the same request, and is never reused. */
+    @Test
+    void olderThan24hRejected() {
+        UUID key = UUID.randomUUID();
+        execute(add(key, "widget", 5), OK);
+        backdate(key, "24 hours 1 second");
+
+        assertRejectedAndUnchanged(key, add(key, "widget", 5));
     }
 
     /**
      * T1's boundary: a key exactly 24h old (by the transaction's now()) still replays, so the lookup's comparison is
-     * strict (mutating {@code <} to {@code <=} fails here; a longer interval fails OLDER_THAN_24H).
+     * strict (mutating {@code <} to {@code <=} fails here; a longer interval fails olderThan24hRejected).
      */
     @Test
     void exactly24hStillReplays() {
@@ -364,8 +353,8 @@ class IdempotencyStoreTest {
     }
 
     /**
-     * A18: a committed row without a stored response is never replayed and never a 500: the key stays used up
-     * (Invalid, 400), whether or not the row is older than 24h, and the action never runs.
+     * A committed row without a response is a tombstone: the README's retention clean-up cleared it (#56, C-16, A18).
+     * The key stays used up (400), whether or not the row is older than 24h, and the action never runs.
      */
     @Test
     void tombstonedRowIsRejectedNotReplayed() {
@@ -379,99 +368,5 @@ class IdempotencyStoreTest {
         backdate(key, "25 hours");
         assertThat(execute(request, OK)).isEqualTo(new Keyed.Invalid());
         assertThat(actionRuns).hasValue(1);
-    }
-
-    // ---- two runs with one fresh key, concurrently (R2, E1) ----
-
-    /**
-     * Waits until {@code run}'s write has started, so its claim row exists uncommitted. If run returns first, its result
-     * (or exception) is the failure.
-     */
-    private static void awaitWriteStarted(CountDownLatch started, Future<Keyed> run) throws Exception {
-        long deadline = System.nanoTime() + SECONDS.toNanos(TIMEOUT_SECONDS);
-        while (!started.await(10, MILLISECONDS)) {
-            if (run.isDone()) {
-                fail("run returned before its write started: " + run.get());
-            }
-            if (System.nanoTime() > deadline) {
-                fail("the write did not start within " + TIMEOUT_SECONDS + " s");
-            }
-        }
-    }
-
-    private static void awaitRelease(CountDownLatch release) {
-        try {
-            if (!release.await(TIMEOUT_SECONDS, SECONDS)) {
-                throw new IllegalStateException("not released");
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
-        }
-    }
-
-    /**
-     * R2, E1: at READ COMMITTED a second claim of a fresh key blocks on the first's uncommitted row, then finds the
-     * committed response and replays it: its own write never runs and nothing fails with 40001.
-     */
-    @Test
-    void concurrentClaimOfOneFreshKeyBlocksThenReplays() throws Exception {
-        Request request = add(UUID.randomUUID(), "widget", 5);
-        CountDownLatch firstWriting = new CountDownLatch(1);
-        CountDownLatch releaseFirst = new CountDownLatch(1);
-        AtomicInteger secondWrites = new AtomicInteger();
-
-        Future<Keyed> first = pool.submit(() -> execute(request, () -> {
-            firstWriting.countDown();
-            awaitRelease(releaseFirst);
-            return OK;
-        }));
-        awaitWriteStarted(firstWriting, first);
-        Future<Keyed> second = pool.submit(() -> execute(request, () -> {
-            secondWrites.incrementAndGet();
-            return new StoredResponse(400, "text/plain", "second");
-        }));
-
-        assertThatThrownBy(() -> second.get(WAITING_MILLIS, MILLISECONDS)).as("second run waits on the claim")
-                .isInstanceOf(TimeoutException.class);
-        releaseFirst.countDown();
-
-        assertResponse(first.get(TIMEOUT_SECONDS, SECONDS), OK);
-        assertResponse(second.get(TIMEOUT_SECONDS, SECONDS), OK);
-        assertThat(secondWrites).as("second write").hasValue(0);
-        assertThat(rows()).isEqualTo(1);
-        assertThat(row(request.key()).get("body")).isEqualTo(OK.body());
-    }
-
-    /** R2, E1: when the first run's write fails, its claim rolls back and the waiting run claims the key and writes. */
-    @Test
-    void concurrentClaimAfterARollbackClaimsAndWrites() throws Exception {
-        Request request = add(UUID.randomUUID(), "widget", 5);
-        StoredResponse secondResponse = new StoredResponse(200, "application/json", "{\"second\":true}");
-        CountDownLatch firstWriting = new CountDownLatch(1);
-        CountDownLatch releaseFirst = new CountDownLatch(1);
-        AtomicInteger secondWrites = new AtomicInteger();
-
-        Future<Keyed> first = pool.submit(() -> execute(request, () -> {
-            firstWriting.countDown();
-            awaitRelease(releaseFirst);
-            throw new IllegalStateException("boom");
-        }));
-        awaitWriteStarted(firstWriting, first);
-        Future<Keyed> second = pool.submit(() -> execute(request, () -> {
-            secondWrites.incrementAndGet();
-            return secondResponse;
-        }));
-
-        assertThatThrownBy(() -> second.get(WAITING_MILLIS, MILLISECONDS)).as("second run waits on the claim")
-                .isInstanceOf(TimeoutException.class);
-        releaseFirst.countDown();
-
-        assertThatThrownBy(() -> first.get(TIMEOUT_SECONDS, SECONDS)).isInstanceOf(ExecutionException.class)
-                .cause().isInstanceOf(IllegalStateException.class).hasMessage("boom");
-        assertResponse(second.get(TIMEOUT_SECONDS, SECONDS), secondResponse);
-        assertThat(secondWrites).as("second write").hasValue(1);
-        assertThat(rows()).isEqualTo(1);
-        assertThat(row(request.key()).get("body")).isEqualTo(secondResponse.body());
     }
 }

@@ -3,7 +3,10 @@ services:
   app:
     build: .
     ports:
-      - "8080:8080"
+      # Host port 8080 (main's port, H13); override with APP_PORT if it is taken. The container listens on 8080.
+      - "${APP_PORT:-8080}:8080"
+    # M-01: a bound for the JVM's MaxRAMPercentage, so a memory spike cannot take the host.
+    mem_limit: 768m
     depends_on:
       postgres:
         condition: service_healthy
@@ -11,3 +14,11 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory
       SPRING_DATASOURCE_USERNAME: inventory
       SPRING_DATASOURCE_PASSWORD: inventory
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75.0
+    healthcheck:
+      # The JRE image has no curl or wget; bash's /dev/tcp does the GET (C-39).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s

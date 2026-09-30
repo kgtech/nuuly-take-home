@@ -1,0 +1,9 @@
+{
+  "choice": "E",
+  "notes": "Critique M-42: reworded.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "B": "Superseded: the repeated-after 400 and its documentation now cover GET /v2/inventory too, and the class names follow the real layout (A37).",
+    "D": "Superseded by critique M-42: \"/nope?x=%ZZ\" is 404 and \"/v3/api-docs?x=%ZZ\" is 200, so \"every path\" was not literally true."
+  }
+}

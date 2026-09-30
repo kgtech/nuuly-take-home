@@ -1,5 +1,6 @@
-# Postgres only. `./gradlew bootRun` reads this file; `docker compose up --build` also reads
-# compose.override.yaml, which adds the app (D8, S4). The postgres tag repeats the catalog's version (S10).
+# Postgres. `./gradlew bootRun` reads this file; `docker compose up --build` also reads compose.override.yaml, which
+# adds the app (D8, S4 as superseded by DESIGN-V2). The image tag repeats the catalog's version (S10). The port is
+# published on loopback only (C-12). Redis was removed in DESIGN-V2 §9.
 services:
   postgres:
     image: postgres:18
@@ -8,7 +9,7 @@ services:
       POSTGRES_USER: inventory
       POSTGRES_PASSWORD: inventory
     ports:
-      - "5432"
+      - "127.0.0.1::5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s

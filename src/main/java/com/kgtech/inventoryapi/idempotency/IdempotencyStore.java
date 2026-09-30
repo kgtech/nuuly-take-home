@@ -13,13 +13,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Runs a keyed write once (R2, G14, A33): claims the Idempotency-Key, runs the write and stores its response in one
- * transaction. run opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's transaction and
- * refuses any other isolation (IllegalStateException); when joined, the caller's now() (T1) and rollback scope apply,
- * so a write failure marks the caller's transaction rollback-only. A concurrent claim of the same key blocks on the
- * primary key until the first transaction ends, then finds the committed row and replays it, or claims the key if the
- * first rolled back (E1). A {@code @Component}, not a {@code @Repository}: persistence exception translation would turn
- * the write's own exceptions into InvalidDataAccessApiUsageException.
+ * Runs a keyed write once (R2, G14, DESIGN-V2 §2, §10, A33): claims the Idempotency-Key, runs the write and stores its
+ * response in one transaction. run opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's
+ * transaction and refuses any other isolation (IllegalStateException); when joined, the caller's now() (T1) and
+ * rollback scope apply, so a write failure marks the caller's transaction rollback-only. A concurrent claim of the same
+ * key blocks on the primary key until the first transaction ends, then finds the committed row and replays it. A
+ * {@code @Component}, not a {@code @Repository}: persistence exception translation would turn the write's own
+ * exceptions into InvalidDataAccessApiUsageException.
  */
 @Component
 public class IdempotencyStore {
@@ -30,7 +30,7 @@ public class IdempotencyStore {
         record Response(StoredResponse response) implements Keyed {
         }
 
-        /** Different operation, skuId or request (S8), older than 24h (T1), or no stored response (A18). */
+        /** Different operation, skuId or request (S8), older than 24h (T1), or a cleared response (A18). */
         record Invalid() implements Keyed {
         }
     }
@@ -69,15 +69,21 @@ public class IdempotencyStore {
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
     }
 
+    /** {@link #run(UUID, ApiVersion, Operation, String, String, Supplier)} for an unversioned (spec) request. */
+    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+            Supplier<StoredResponse> write) {
+        return run(key, ApiVersion.UNVERSIONED, operation, skuId, canonicalRequest, write);
+    }
+
     /**
      * Claimed → write → store → Response. Not claimed → the stored Response, or Invalid (see
-     * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3). Opens a
-     * READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT caller's transaction and refuses any other
-     * isolation (IllegalStateException, before any I/O); when joined, the caller's now() (T1) and rollback scope apply.
-     * A runtime exception from the write escapes unchanged and rolls the claim back; when joined, it marks the caller's
-     * transaction rollback-only.
+     * {@link Keyed.Invalid}). The request hash is SHA-256 of the operation, skuId and canonical request (Y3), prefixed
+     * with the API version for /v2 (H10). Opens a READ COMMITTED transaction, or joins a READ COMMITTED or DEFAULT
+     * caller's transaction and refuses any other isolation (IllegalStateException, before any I/O); when joined, the
+     * caller's now() (T1) and rollback scope apply. A runtime exception from the write escapes unchanged and rolls the
+     * claim back; when joined, it marks the caller's transaction rollback-only.
      */
-    public Keyed run(UUID key, Operation operation, String skuId, String canonicalRequest,
+    public Keyed run(UUID key, ApiVersion version, Operation operation, String skuId, String canonicalRequest,
             Supplier<StoredResponse> write) {
         // null: no transaction, or a caller at ISOLATION_DEFAULT, which is Postgres's READ COMMITTED here.
         Integer joined = TransactionSynchronizationManager.isActualTransactionActive()
@@ -85,7 +91,8 @@ public class IdempotencyStore {
         if (joined != null && joined != TransactionDefinition.ISOLATION_READ_COMMITTED) {
             throw new IllegalStateException("IdempotencyStore.run joins only a READ COMMITTED transaction");
         }
-        byte[] hash = RequestHash.of(operation, skuId, canonicalRequest);
+        byte[] hash = version == ApiVersion.V2 ? RequestHash.ofV2(operation, skuId, canonicalRequest)
+                : RequestHash.of(operation, skuId, canonicalRequest);
         return transaction.execute(status -> {
             if (!claim(key, operation, skuId, hash)) {
                 return replay(key, operation, skuId, hash);
@@ -116,7 +123,7 @@ public class IdempotencyStore {
                             && rs.getString("sku_id").equals(skuId)
                             && MessageDigest.isEqual(rs.getBytes("request_hash"), hash);
                     Integer status = rs.getObject("status", Integer.class);
-                    // A committed row without a stored response is never replayed: the key is used up (A18).
+                    // A committed row without a response was cleared by the README's retention clean-up: used up (A18).
                     if (rs.getBoolean("expired") || !sameRequest || status == null) {
                         return new Keyed.Invalid();
                     }

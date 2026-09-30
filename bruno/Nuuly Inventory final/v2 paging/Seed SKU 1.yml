@@ -1,0 +1,50 @@
+info:
+  name: "Seed SKU 1"
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/v2/inventory/ZZ-BR-{{pageStamp}}-P1"
+  headers:
+    - name: "Idempotency-Key"
+      value: "{{seedKey}}"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 1
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        bru.setVar('pageStamp', Date.now().toString(36).toUpperCase());
+        bru.setVar('pageAfter', 'ZZ-BR-' + bru.getVar('pageStamp') + '-');
+        bru.setVar('seedIds', '[]');
+        const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
+        bru.setVar('seedKey', uuid());
+    - type: after-response
+      code: |-
+        const ids = JSON.parse(bru.getVar('seedIds'));
+        ids.push(res.getBody().skuId);
+        bru.setVar('seedIds', JSON.stringify(ids));
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("quantity 1 and the expected ID", function () {
+          expect(res.getBody().skuId).to.equal('ZZ-BR-' + bru.getVar('pageStamp') + '-P1');
+          expect(res.getBody().quantity).to.equal(1);
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Seeds SKU 1 of 4 with a keyed /v2 add (fresh UUID key). The IDs start with ZZ-BR-<time>, so they sort after this collection's earlier runs and the walk below ends on them. Picks the run's pageStamp and the walk's cursor.

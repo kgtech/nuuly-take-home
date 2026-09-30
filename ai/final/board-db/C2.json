@@ -1,0 +1,9 @@
+{
+  "choice": "F",
+  "notes": "Class name follows the code.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "A": "Superseded by OD-5: the unversioned Link no longer carries limit, and the documented skuId schema moves to /v2.",
+    "E": "Superseded: the class is OpenApiGroups."
+  }
+}

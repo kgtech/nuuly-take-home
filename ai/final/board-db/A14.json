@@ -1,0 +1,9 @@
+{
+  "choice": "E",
+  "notes": "Owner decision (2026-09-29): Postgres keeps the ledger in step with the balance (V5).",
+  "updatedAt": "2026-09-29T23:30:00Z",
+  "why": {
+    "A": "Superseded: there is no V3 backfill; the helper runs after every write test.",
+    "D": "Superseded by the owner's decision: Postgres now writes the ledger row from the balance change (V5); the tests still assert the invariant."
+  }
+}

@@ -1,8 +1,8 @@
 package com.kgtech.inventoryapi.idempotency;
 
 /**
- * The two keyed POST operations; dbValue is the idempotency row's operation and matches the ledger reason, so one
- * vocabulary names both (S8). dbValue is package-private: only the store and the request hash read it (A37).
+ * The keyed operations; dbValue is the idempotency row's operation. For the two spec POSTs it matches the ledger
+ * reason, so one vocabulary names both (S8).
  */
 public enum Operation {
     ADD("add"),
@@ -14,7 +14,7 @@ public enum Operation {
         this.dbValue = dbValue;
     }
 
-    String dbValue() {
+    public String dbValue() {
         return dbValue;
     }
 }

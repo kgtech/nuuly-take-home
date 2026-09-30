@@ -1159,3 +1159,99 @@ Tool: Claude Code (cloud session). One orchestrator plus four read-only subagent
 - Round 2: only `after` on /inventory; keep and retarget the front end to /v2; plan gate, then autonomous; board stays source of truth.
 - Round 3: new board artifact for final.
 - Round 4, after the review: support If-None-Match: *.
+
+
+## 31. The final build: harmonized API with path versioning (2026-09-29)
+
+**Prompt**
+> The whole of [`ai/final/PROMPT.md`](ai/final/PROMPT.md) (the run's prompt, written in session 30), then two owner messages during the run: "approve" at the plan gate, and "Use the ports that main is using." (mid-run, during preflight).
+
+Tool: Claude Code (desktop app). One orchestrator; per PR a test subagent (tests first, red for the right reason), an implementer subagent (never edits the test tree) and a fresh reviewer subagent, two rounds where round 1 found anything; one research spike (springdoc groups) before planning on it; a board subagent for the decision cards; a docs subagent; then the self-critique (see the report).
+
+**Output summary**
+- **Part 1 (to the plan gate):** `final` created from `origin/v2`; build v2's records moved to `ai/v2/`, main's board and prompts and #87's exports brought in; preflight (all tools, baseline green: 747 service and 227 front-end tests; blockers: no GitHub `workflow` scope, port 18080 taken); board dump reproduced #87's exports byte for byte; study of the tip by three reviewers; `DESIGN.md`, board cards, issues and plan.
+- **Part 2 (14 issues, #91 to #104):** board PR (#107: final's own artifact, 25 cards added, 50 changed, exports regenerated); CI workflow parked because the token lacks the `workflow` scope (#105, deviation D-1) with a local gate script; ports 8080 and 5173 plus ArchUnit (#106); guard filter driven by route kind (#108, fixes the `/v2` purchase gap of lesson L21); `PUT /v2/inventory/{skuId}/details` (#109); front end Create and Edit on the details PUT (#110); `/v2` add and purchase with required keys, versioned hash, removal of build v2's create and PUT-item, V4 (#111); stock forms on `/v2` (#112); unversioned POSTs reject the key and the list is a fixed page of 250 (#113); invariant guards with mutation proof (#114); two OpenAPI groups and the spec conformance test (#115); docs (#116).
+- **Order changed from the plan:** `POST /v2/inventory/{skuId}` was build v2's create and is now add-stock at the same path, so "add /v2 add first, remove create later" was impossible; the details PUT and the front end's move to it went first, then one combined PR replaced create with add and purchase.
+- **Self-critique (after the merged PRs):** nine independent reviewers on SHA 436cacae and one verifier (43 merged findings: 0 BLOCKER, 4 MAJOR, 30 MINOR, 8 NIT, 1 rejected); fixes in #117 (front end), #118 (service) and the records PR; outcomes per finding in [`ai/final/critique.md`](ai/final/critique.md), the run's account in [`ai/final/report.md`](ai/final/report.md), the interviewer questions in [`ai/final/interview-defense.md`](ai/final/interview-defense.md).
+- **What the reviewers found and the fixes:** a malformed `If-Match` beside `If-None-Match: *` created the SKU (fixed, PR 109); a lost create response made the retry's 412 say "already exists" and silently drop the initial stock (fixed with a distinct message, PR 110); a false `/v2` list description (fixed, PR 113); a route-enumeration check that could never fire and 20-of-620 parity sampling (fixed, PR 114); the critique's four MAJORs (unversioned chunked bodies uncapped, `/error` answering 500, long names overflowing at 375 px, a test gap) in `ai/final/critique.md`.
+
+**Accepted**
+- Reviewer findings that changed behaviour or tests (each in the PR threads and `ai/final/log.md`), the plan reorder above, the spike's facts (group YAML URL `/v3/api-docs.yaml/{group}`, `@OpenAPIDefinition` leaking into every group, unknown group 500 mapped back to 404).
+- Every owner recommendation at the gate (version in the request hash, V4 `NOT VALID`, unconditional PUT creates, `If-None-Match` values other than `*` are 400).
+
+**Rejected**
+- A reviewer MAJOR that asked for ports 18080 and 15173 (the owner had asked for main's ports).
+- Reviewer MINORs left recorded, not fixed: L31 ArchUnit rule bypassable by a helper, dead 5-argument `IdempotencyStore.run` (tests still call it), typed `WriteResult<O>` (card A38 follows the code); see `ai/final/board-followups.md`.
+- Working around the missing `workflow` scope with another credential (recorded as D-1); one force-push of a PR branch slipped through and is recorded as D-2.
+
+**My response**
+- "approve" (plan gate, 2026-09-29): treated as approval of every recommendation in `ai/final/board-cards.md`.
+- "Use the ports that main is using." (mid-run): app 8080, Vite 5173, card H13.
+
+## 32. Build v2 runs (2026-09-27 to 2026-09-28), pointer
+
+The prompts and outcomes of the two runs on branch `v2` are recorded there, not repeated here: the run prompt [`ai/v2/PROMPT.md`](ai/v2/PROMPT.md) and lessons [`ai/v2/lessons.md`](ai/v2/lessons.md); the run's log, plan, critique and interview defense in [`ai/v2/run-records/`](ai/v2/run-records/); the outcome in [`ai/v2/REPORT.md`](ai/v2/REPORT.md) (first V2 run 2026-09-27; the v2 details run and the Redis removal 2026-09-28); decisions in [`ai/v2/DECISIONS-ADDED.md`](ai/v2/DECISIONS-ADDED.md) and [`ai/v2/DEVIATIONS.md`](ai/v2/DEVIATIONS.md). Its hand-edited `CLAUDE.md` and `DECISIONS.md` are kept as `ai/v2/CLAUDE-v2.md` and `ai/v2/DECISIONS-v2.md`.
+
+## 33. Issue #87: align v1 with v2 (2026-09-29), pointer
+
+The run that aligned main's storage and layout with build v2 (balance row at READ COMMITTED, explicit Idempotency-Key call, JdbcClient, v2 layout) is pull request #90 on branch `feat/issue-87-align-with-v2` (commit "Align v1 with v2 … (#87)"). Its record is the pull request and issue threads; its decision-board update and exports are the files this build started from: [`ai/decision-board.html`](ai/decision-board.html), [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md) (copied at setup, then regenerated by this run's board PR).
+
+## 34. Review of final against main, and the ledger trigger (2026-09-29)
+
+**Prompt**
+> Another model worked on the branch named final. I want you to present a prompt for an orchaestrator who will issue agents to perform a code analysis on it and determine if there are any faults with it, indicate where it differs from main and v2 and where it excels. Then I want to know how much of an effort it will take to consolidate the final branch into main.
+>
+> Lets ignore merging the final branch. Lets get an explainer on the differences and how final excels and falls behind main.
+>
+> How can we ensure concurrency and ensure consistent storage?
+>
+> What are scenarios where the trigger could fail?
+>
+> Note the limitations and add the trigger
+>
+> How would this be accomplished in a scaled service with read replicas?
+>
+> Draft the card and documented as it will likely come up in the interview.
+
+Tool: Claude Code (desktop app). One orchestrator; four parallel research subagents (storage and idempotency; the HTTP API with a live 130-request comparison of both builds; code structure and both test suites; scope, operations and records); psql and pgbench probes on a throwaway PostgreSQL 18.6.
+
+**Output summary**
+- **Review prompt and estimate.** An orchestrator prompt for an independent review of `final` (eight agents and a verifier, plus a local dry run of the consolidation), and an estimate of 4–7 hours to consolidate `final` into `main` with a merge commit that takes `final`'s tree (the two share no history). The prompt was not run. It is committed on the `main`-based branch `agent/final-branch-analysis-consolidation-b63e62`, not on this branch.
+- **Explainer.** A private page, "Nuuly main vs final" (https://claude.ai/artifact/5iwPcT2bRUM3f2nx24ePpw):
+  - a scorecard: `final` ahead on 8 concerns, `main` on 5, 3 mixed or even;
+  - both purchase paths;
+  - the database probes: `main`'s SERIALIZABLE ledger failed 26–86% of writes to different SKUs, `final` none;
+  - the live request differences;
+  - where `final` falls behind: stock stored twice, keys rejected on the spec POSTs, `limit` ignored, answers that depend on order, and records that drift from the code.
+- **Consistency proposal.** Keep `final`'s row-lock concurrency and let Postgres write the ledger row from each balance change. The prototype's pgbench runs showed no measurable cost.
+- **Failure scenarios probed.**
+  - A temporary table named `inventory_ledger` captured the row. Fixed by pinning `search_path`.
+  - An `UPDATE OF quantity` trigger missed a change made by another BEFORE trigger. Fixed by dropping the column list.
+  - Existing drift would have been carried forward. Fixed by a check in V5.
+  - The table owner or a superuser can still bypass it: DISABLE TRIGGER, TRUNCATE the ledger, `session_replication_role = replica`, or a trigger of its own. Recorded as a limit.
+- **Built on branch `final-ledger-trigger` ([#122](https://github.com/kgtech/nuuly-take-home/pull/122)).**
+  - `V5__ledger_follows_balance.sql`. `StockRepository` no longer inserts ledger rows.
+  - Tests: `LedgerTriggerTest` (7 tests) and `LedgerTriggerMigrationTest` are new; `SchemaTest` and `Tables.seed` changed.
+  - Board round 16: A14 → E, E1 → G, E3 → G, D5 → F, S1 → F. The dump was updated and `DECISIONS.md` and `CLAUDE.md` regenerated; before the change, the unchanged board reproduced the committed exports byte for byte.
+  - Docs: DESIGN §3 gains "Limits of the ledger trigger"; the README is updated.
+  - Checks: `./gradlew build` passes all 1,007 tests. `docker compose up --build` applied V5 and recorded the adds and purchases sent over HTTP.
+  - The published board artifact and its database are not updated yet. That waits until the branch merges into `final`.
+- **Read replicas.** The answer: replicas scale reads, not writes; every decision stays on the primary; streaming replicas replay whole transactions, so they are never out of balance; reads become stale up to a lag limit; failover needs a synchronous standby to keep acknowledged writes; sharding by `sku_id` comes after replicas.
+- **Card H18 (branch `final-read-replicas`, stacked on #122).** Board round 17 adds H18, with its choice recording today's single primary (A) and the replica design as options B–D; the exports are regenerated. The design is in DESIGN §11, the README's "Designed, not built" list and interview-defense question 17. Questions 9 and 10 now mention V5.
+
+**Accepted**
+- The trigger design, hardened by the probes: pinned `search_path`, no column list, and the drift check.
+- Its limits, recorded on A14, in DESIGN and in the README.
+
+**Rejected**
+- `SECURITY DEFINER` on the trigger function. It is needed only with privilege separation, which E3 rejects, so it is recorded as the step that goes with it.
+- An AFTER INSERT trigger on the ledger that updates the balance (A14's option B). The trigger would decide the balance, and a refused purchase would need an exception inside the transaction.
+- Keeping `main`'s ledger-only storage behind a row lock. That fixes the cross-SKU conflicts, but every write still sums the SKU's whole history.
+- A deferred constraint trigger that sums the ledger at commit (A14's option C). It brings back the cost that E1 removed.
+
+**My response**
+- "Lets ignore merging the final branch."
+- "Note the limitations and add the trigger"
+- "Yes" (commit and open the PR: #122).
+- "commit it" (the review prompt).
+- "Draft the card and documented as it will likely come up in the interview."

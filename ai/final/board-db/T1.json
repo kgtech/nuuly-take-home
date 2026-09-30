@@ -1,0 +1,9 @@
+{
+  "choice": "E",
+  "notes": "Owner OD-3 and OD-4. Why an expired key is rejected, not treated as new (critique M-07): Stripe removes keys after 24 hours and treats a reused pruned key as a new request (https://docs.stripe.com/api/idempotent_requests); here a retry of a request whose first response was lost more than 24 hours ago would then run as a fresh write, the double write the key exists to prevent. Refusing is safe: the client gets 400 and decides. The IETF draft (-07, expired) only says the server SHOULD define and publish an expiry policy.",
+  "updatedAt": "2026-09-29T23:00:00Z",
+  "why": {
+    "A": "Treating an expired key as new (as Stripe does after pruning) would let a retry of a request answered more than 24 hours ago run again as a fresh write, the double write the key exists to prevent; refusing is safe and the client decides (critique M-07).",
+    "D": "Superseded by OD-3: scoped to /v2."
+  }
+}

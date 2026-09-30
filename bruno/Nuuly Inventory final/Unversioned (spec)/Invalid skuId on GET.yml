@@ -1,0 +1,26 @@
+info:
+  name: "Invalid skuId on GET"
+  type: http
+  seq: 14
+
+http:
+  method: GET
+  url: "{{baseUrl}}/inventory/-bad"
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("404 text/plain \"SKU not found\"", function () {
+          expect(res.getStatus()).to.equal(404);
+          expect(res.getHeader('content-type')).to.match(/^text\/plain/);
+          expect(res.getBody()).to.equal("SKU not found");
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  G11: an invalid SKU ID on a read is 404 'SKU not found' (the spec lists no 400 for GET).

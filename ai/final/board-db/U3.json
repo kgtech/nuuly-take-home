@@ -1,0 +1,8 @@
+{
+  "choice": "C",
+  "notes": "Owner OD-4",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded by OD-4: one order for both POSTs no longer fits, because the two versions treat the key differently."
+  }
+}

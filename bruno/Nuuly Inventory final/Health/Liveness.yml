@@ -1,0 +1,28 @@
+info:
+  name: "Liveness"
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/actuator/health/liveness"
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("status UP", function () {
+          expect(res.getBody().status).to.equal('UP');
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Liveness probe (README 'Run the service').

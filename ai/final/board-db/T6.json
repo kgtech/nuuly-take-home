@@ -1,0 +1,8 @@
+{
+  "choice": "E",
+  "notes": "Owner: prompt (5-hour budget)",
+  "updatedAt": "2026-09-29T21:00:00Z",
+  "why": {
+    "A": "Superseded by H14: the final build has a 5-hour budget and its own PR order."
+  }
+}
