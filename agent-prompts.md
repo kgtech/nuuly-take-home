@@ -1273,6 +1273,7 @@ Tool: Claude Code (desktop app). One orchestrator; four parallel research subage
 | Mixed | 19,200 requests over 500 SKUs, 64 threads | about 8,600 req/s, p99 21 ms; every balance matches its successful writes |
 | Idempotency | one key × 160 requests, 32 threads, `/v2` | all 200; stock moved once |
 
+- Added `MixedStockConcurrencyTest` (4 tests, 25 rounds each where the race is short): mixed-size purchases on 20 units (never oversold, and the leftover is smaller than every refused purchase); purchases racing restocks (balance = initial + restocks − sold, no restock lost); whole-stock purchases racing whole restocks; purchases on an empty SKU while one thread restocks. The API has no negative adjustment: add is positive and purchase is the one decrement. Checked that the tests bite: removing `AND quantity >= :q` from the purchase UPDATE fails 3 of the 4.
 - Added `scripts/loadtest.py` and `scripts/gate.sh --load`, which starts the app on compose, runs the script and tears it down.
 
 **Accepted**
