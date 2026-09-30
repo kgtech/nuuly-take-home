@@ -1,0 +1,30 @@
+info:
+  name: "OpenAPI document (v2)"
+  type: http
+  seq: 4
+
+http:
+  method: GET
+  url: "{{baseUrl}}/v3/api-docs.yaml/inventory-v2"
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with OpenAPI media type", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/vnd\.oai\.openapi/);
+        });
+        test("YAML document containing /v2/inventory/{skuId}/details", function () {
+          const body = String(res.getBody());
+          expect(body).to.match(/^openapi:/m);
+          expect(body).to.contain("/v2/inventory/{skuId}/details");
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  README 'API docs': the running service serves the inventory-v2 group as YAML; the committed openapi-v2.yaml is regenerated from it.

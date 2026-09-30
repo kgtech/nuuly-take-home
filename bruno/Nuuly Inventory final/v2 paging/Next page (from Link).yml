@@ -1,0 +1,42 @@
+info:
+  name: "Next page (from Link)"
+  type: http
+  seq: 6
+
+http:
+  method: GET
+  url: "{{nextUrl}}"
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const link = res.getHeader('link') || '';
+        const m = link.match(/<([^>]+)>;\s*rel="next"/);
+        bru.setVar('nextUrl', m ? m[1] : '');
+        const seen = JSON.parse(bru.getVar('seen') || '[]');
+        res.getBody().forEach(i => seen.push(i.skuId));
+        bru.setVar('seen', JSON.stringify(seen));
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("one row and a next Link", function () {
+          expect(res.getBody().length).to.equal(1);
+          expect(res.getHeader('link')).to.match(/<[^>]+>;\s*rel="next"/);
+        });
+        test("SKU IDs so far are strictly ascending, no repeats", function () {
+          const seen = JSON.parse(bru.getVar('seen'));
+          expect(seen).to.deep.equal([...seen].sort());
+          expect(new Set(seen).size).to.equal(seen.length);
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Follows the Link URL of the first page.

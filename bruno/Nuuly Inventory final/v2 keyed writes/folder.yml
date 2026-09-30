@@ -1,0 +1,6 @@
+info:
+  name: "v2 keyed writes"
+  type: folder
+  seq: 3
+docs: |-
+  POST /v2/inventory/{skuId} and .../purchase: a UUID Idempotency-Key is required (README '/v2 API'). The first request picks a fresh SKU and key for this run.

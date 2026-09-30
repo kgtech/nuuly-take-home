@@ -1,0 +1,46 @@
+info:
+  name: "Add with new key"
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/v2/inventory/{{skuId}}"
+  headers:
+    - name: "Idempotency-Key"
+      value: "{{idemKey}}"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 5
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
+        bru.setVar('skuId', 'BR-' + Date.now().toString(36).toUpperCase() + '-K');
+        bru.setVar('idemKey', uuid());
+    - type: after-response
+      code: |-
+        bru.setVar('firstBody', JSON.stringify(res.getBody()));
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("skuId and quantity 5", function () {
+          expect(res.getBody().skuId).to.equal(bru.getVar('skuId'));
+          expect(res.getBody().quantity).to.equal(5);
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  /v2 add: 200 SkuItem. Setup: picks a fresh skuId and a fresh UUID key, and saves the body for the replay check.

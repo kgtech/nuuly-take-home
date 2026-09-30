@@ -1,0 +1,34 @@
+info:
+  name: "Purchase 2"
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/inventory/{{skuId}}/purchase"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 2
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("quantity 3", function () {
+          expect(res.getBody()).to.deep.equal({ skuId: bru.getVar('skuId'), quantity: 3 });
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Spec API purchase: 200 with the remaining quantity (5 - 2).

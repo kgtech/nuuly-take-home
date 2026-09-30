@@ -1,0 +1,6 @@
+info:
+  name: "v2 paging"
+  type: folder
+  seq: 5
+docs: |-
+  GET /v2/inventory: limit, after and the Link header (README 'Paging'). Self-contained: the first four requests seed four SKUs with keyed adds, so the folder runs alone on an empty database.

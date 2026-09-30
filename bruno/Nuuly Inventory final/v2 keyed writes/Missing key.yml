@@ -1,0 +1,32 @@
+info:
+  name: "Missing key"
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/v2/inventory/{{skuId}}"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 5
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("400 text/plain \"Invalid request\"", function () {
+          expect(res.getStatus()).to.equal(400);
+          expect(res.getHeader('content-type')).to.match(/^text\/plain/);
+          expect(res.getBody()).to.equal("Invalid request");
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  /v2 requires the key: none is 400 'Invalid request' (OD-1 in README '/v2 API').

@@ -1,0 +1,38 @@
+info:
+  name: "Replay same key"
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/v2/inventory/{{skuId}}"
+  headers:
+    - name: "Idempotency-Key"
+      value: "{{idemKey}}"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 5
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("identical body, stock not changed again", function () {
+          expect(JSON.stringify(res.getBody())).to.equal(bru.getVar('firstBody'));
+          expect(res.getBody().quantity).to.equal(5);
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Y4, R2: the same key and request replays the stored 200 unchanged; stock changed once (still 5, not 10).

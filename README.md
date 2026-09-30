@@ -117,6 +117,14 @@ Start from an empty database (`docker compose down -v && docker compose up --bui
 API=http://localhost:${APP_PORT:-8080}   # once per shell; every command below uses $API
 ```
 
+### Bruno collection
+
+[`bruno/`](bruno/README.md) holds a [Bruno](https://www.usebruno.com) collection that walks both versions (requests, tests and notes per decision). With the service running, from the repo root:
+
+```bash
+cd "bruno/Nuuly Inventory final" && npx --yes @usebruno/cli@latest run --env Local -r   # add --env-var baseUrl=http://localhost:$APP_PORT for another port
+```
+
 ### The spec API (unversioned)
 
 ```bash

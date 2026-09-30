@@ -1,0 +1,44 @@
+info:
+  name: "Seed SKU 1"
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/v2/inventory/BR-{{pageStamp}}-P1"
+  headers:
+    - name: "Idempotency-Key"
+      value: "{{seedKey}}"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 1
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        bru.setVar('pageStamp', Date.now().toString(36).toUpperCase());
+        const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
+        bru.setVar('seedKey', uuid());
+        bru.setVar('seedSku1', 'BR-' + bru.getVar('pageStamp') + '-P1');
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("quantity 1", function () {
+          expect(res.getBody().skuId).to.equal(bru.getVar('seedSku1'));
+          expect(res.getBody().quantity).to.equal(1);
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Seeds SKU 1 of 4 with a keyed /v2 add (fresh UUID key) so the walk below has at least four SKUs even on an empty database. Picks the run's pageStamp.

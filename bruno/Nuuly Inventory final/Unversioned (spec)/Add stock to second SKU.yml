@@ -1,0 +1,34 @@
+info:
+  name: "Add stock to second SKU"
+  type: http
+  seq: 9
+
+http:
+  method: POST
+  url: "{{baseUrl}}/inventory/{{skuId2}}"
+  body:
+    type: json
+    data: |-
+      {
+        "quantity": 1
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("quantity 1", function () {
+          expect(res.getBody().quantity).to.equal(1);
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Seeds a second SKU so the list requests below return more than one row.

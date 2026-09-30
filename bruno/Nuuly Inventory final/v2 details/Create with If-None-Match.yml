@@ -1,0 +1,56 @@
+info:
+  name: "Create with If-None-Match"
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/v2/inventory/{{detailSku}}/details"
+  headers:
+    - name: "If-None-Match"
+      value: "*"
+  body:
+    type: json
+    data: |-
+      {
+        "name": "Linen shirt",
+        "description": "Long sleeve",
+        "cost": {
+          "amount": 12900,
+          "currency": "USD"
+        },
+        "images": [
+          "https://cdn.example.com/a.jpg"
+        ]
+      }
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        bru.setVar('detailSku', 'BR-' + Date.now().toString(36).toUpperCase() + '-D');
+    - type: after-response
+      code: |-
+        bru.setVar('etag', res.getHeader('etag'));
+    - type: tests
+      code: |-
+        test("201 with JSON", function () {
+          expect(res.getStatus()).to.equal(201);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("ETag \"1\", quantity 0, details as sent", function () {
+          const b = res.getBody();
+          expect(res.getHeader('etag')).to.equal('"1"');
+          expect(b.skuId).to.equal(bru.getVar('detailSku'));
+          expect(b.quantity).to.equal(0);
+          expect(b.details.name).to.equal('Linen shirt');
+          expect(b.details.cost).to.deep.equal({ amount: 12900, currency: 'USD' });
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  If-None-Match: * on a new SKU creates it at quantity 0: 201 with ETag "1". Setup: picks a fresh detailSku.

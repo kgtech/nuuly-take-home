@@ -1,0 +1,37 @@
+opencollection: 1.0.0
+
+info:
+  name: Nuuly Inventory final
+config:
+  proxy:
+    inherit: true
+    config:
+      protocol: http
+      hostname: ""
+      port: ""
+      auth:
+        username: ""
+        password: ""
+      bypassProxy: ""
+
+request:
+  variables:
+    - name: baseUrl
+      value: http://localhost:8080
+
+docs:
+  content: |-
+    Nuuly take-home inventory API, final build: the unversioned spec API (/inventory) and the /v2 API.
+
+    Start the service from the repo root: docker compose up --build   (app on :8080; APP_PORT overrides, then edit baseUrl in the Local environment)
+    Pick the "Local" environment, then run the whole collection with the Runner (or `bru run` in this folder), or any one folder.
+    The first request of each folder generates fresh SKU IDs (and keys) per run and saves them as runtime variables, so re-runs never collide.
+    Every error is text/plain with a fixed body; the tests assert status, Content-Type and the exact body.
+    Folders: Health, Unversioned (spec), v2 keyed writes, v2 details, v2 paging.
+  type: text/markdown
+bundled: false
+extensions:
+  bruno:
+    ignore:
+      - node_modules
+      - .git

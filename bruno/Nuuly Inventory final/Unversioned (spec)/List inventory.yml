@@ -1,0 +1,30 @@
+info:
+  name: "List inventory"
+  type: http
+  seq: 3
+
+http:
+  method: GET
+  url: "{{baseUrl}}/inventory"
+  auth:
+    type: none
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("200 with JSON", function () {
+          expect(res.getStatus()).to.equal(200);
+          expect(res.getHeader('content-type')).to.match(/^application\/json/);
+        });
+        test("array of items", function () {
+          const b = res.getBody();
+          expect(b).to.be.an('array');
+          b.forEach(i => { expect(i).to.have.property('skuId'); expect(i.quantity).to.be.a('number'); });
+        });
+settings:
+  encodeUrl: false
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+docs: |-
+  Spec API list: a JSON array (sorted by skuId, at most 250 per page, OD-5). This run's SKU is included while the database holds fewer than 250 SKUs.
