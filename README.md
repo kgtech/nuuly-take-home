@@ -14,10 +14,12 @@ Versions: Java 25, Spring Boot 4.1.x (built with 4.1.1), springdoc-openapi 3.1.x
 
 ```bash
 docker compose up --build
-# API:        http://localhost:8080/inventory  and  http://localhost:8080/v2/inventory
-# Swagger UI: http://localhost:8080/swagger-ui.html
-# Health:     http://localhost:8080/actuator/health  (/liveness, /readiness)
-docker compose down -v   # stop and remove the database
+```
+
+The API is at `http://localhost:8080/inventory` and `http://localhost:8080/v2/inventory`, Swagger UI at `http://localhost:8080/swagger-ui.html`, and health at `http://localhost:8080/actuator/health` (`/liveness`, `/readiness`). This starts the service and its database only; the front end runs separately (see below). To stop it and remove the database:
+
+```bash
+docker compose down -v
 ```
 
 This builds the app image, starts Postgres 18, waits for its health check and starts the app on host port 8080 (`APP_PORT=9090 docker compose up --build` changes the host port; the container always listens on 8080). Postgres is published on loopback only, on a random host port (`docker compose port postgres 5432`). The app container has a readiness health check and an explicit heap policy (`-XX:MaxRAMPercentage=75.0`). To wait until the app is ready when running detached:
@@ -30,8 +32,13 @@ until curl -sf localhost:8080/actuator/health/readiness >/dev/null; do sleep 2; 
 **Development (JDK 25 + Docker):**
 
 ```bash
-./gradlew bootRun              # starts Postgres from compose.yaml, stops it on exit; app on :8080
-docker compose up -d postgres  # the database alone, e.g. for a debugger-launched app
+./gradlew bootRun
+```
+
+`bootRun` starts Postgres from `compose.yaml`, stops it on exit, and serves the app on :8080. To start the database alone, for example for a debugger-launched app:
+
+```bash
+docker compose up -d postgres
 ```
 
 An app started outside `bootRun` needs the database's address:
@@ -50,8 +57,13 @@ See [`frontend/README.md`](frontend/README.md) and [`frontend/DECISIONS.md`](fro
 ```bash
 cd frontend
 npm ci
-npm run dev          # http://localhost:5173, proxies /v2 to http://localhost:8080 (VITE_PORT and API_URL override)
-npm run test:e2e     # Playwright against the real service through the dev proxy (run `npx playwright install chromium` once)
+npm run dev
+```
+
+`npm run dev` serves http://localhost:5173 and proxies `/v2` to http://localhost:8080 (`VITE_PORT` and `API_URL` override). Without the service running, the proxy answers 502. To run the Playwright tests against the real service through that proxy (run `npx playwright install chromium` once):
+
+```bash
+npm run test:e2e
 ```
 
 The front end calls only `/v2`: it lists, views, creates and edits SKUs with their details, and adds and purchases stock with an `Idempotency-Key` created once per user action.
@@ -59,21 +71,38 @@ The front end calls only `/v2`: it lists, views, creates and edits SKUs with the
 ## Run all the tests
 
 ```bash
-./gradlew build      # compiles with -Werror and runs every service test (Testcontainers: Postgres); also checks the committed OpenAPI export
-cd frontend && npm ci && npm run lint && npm run typecheck && npm run check:api && npm test && npm run build
-cd frontend && npm run test:e2e          # Playwright, with the service running (see above)
-scripts/gate.sh [--e2e]                  # all of the above; --e2e also starts the compose stack and runs Playwright
+./gradlew build
 ```
 
-**Last green run.** `scripts/gate.sh --e2e` on the final tip on 2026-09-29: 998 service tests, 257 front-end tests and 48 Playwright tests passed (the code is the tip after the critique fixes #117 and #118; the last commits are docs and board only). No CI runs it yet: the workflow is parked at [`ai/final/ci-workflow.yml`](ai/final/ci-workflow.yml) until the GitHub token has the `workflow` scope.
+This compiles with -Werror and runs every service test (Testcontainers: Postgres); it also checks the committed OpenAPI export. The front end:
+
+```bash
+cd frontend && npm ci && npm run lint && npm run typecheck && npm run check:api && npm test && npm run build
+```
+
+Playwright, with the service running:
+
+```bash
+cd frontend && npm run test:e2e
+```
+
+All of the above in one command; `--e2e` also starts the compose stack and runs Playwright, and `--load` starts it and runs the load test:
+
+```bash
+scripts/gate.sh [--e2e] [--load]
+```
+
+**Last green run.** `scripts/gate.sh --e2e` on 2026-09-29: 998 service tests, 257 front-end tests and 48 Playwright tests passed (the code is the tip after the critique fixes #117 and #118). On 2026-09-30, after the ledger trigger (V5) and `MixedStockConcurrencyTest` were added, `./gradlew build` passed all 1,011 service tests; the front-end and Playwright suites were not re-run then. No CI runs it yet: the workflow is parked at [`ai/final/ci-workflow.yml`](ai/final/ci-workflow.yml) until the GitHub token has the `workflow` scope.
 
 **What the tests protect, and what they skip.**
 
 - Every SQL statement and constraint runs against a real Postgres (Testcontainers), never a stand-in; concurrency tests (at most 8 threads) assert no oversell across both versions, and a per-test check asserts `quantity = SUM(ledger)`.
 - ArchUnit rules keep the layout honest because rules written only as text were broken twice before: the raw request path is read by one class (L19), one test annotation and one container serve every Spring test (L27), and the unversioned controller never reaches idempotency code (L31). See [`ai/final/lessons.md`](ai/final/lessons.md).
-- The critique's scratch mutation run changed 57 pieces of Java behaviour and the suite failed for 52; the survivors are gaps in test coverage, not defects, and test-only fixes close them. Not covered: load and performance (none measured), a real browser other than Chromium, and anything behind a proxy.
+- The critique's scratch mutation run changed 57 pieces of Java behaviour and the suite failed for 52; the survivors are gaps in test coverage, not defects, and test-only fixes close them. Not covered: production-scale performance, a real browser other than Chromium, and anything behind a proxy.
 
-`scripts/gate.sh` accepts `--service-only` and `--frontend-only`; it uses `APP_PORT` (default 8080) and `VITE_PORT` (default 5173) and, with `--e2e`, stops if either port is busy. The same steps are written as a GitHub Actions workflow that is parked at [`ai/final/ci-workflow.yml`](ai/final/ci-workflow.yml) (see [Deviations](#deviations)), so the gate is the local one.
+`scripts/gate.sh` accepts `--service-only` and `--frontend-only`; it uses `APP_PORT` (default 8080) and `VITE_PORT` (default 5173) and, with `--e2e` or `--load`, stops if either port is busy. The same steps are written as a GitHub Actions workflow that is parked at [`ai/final/ci-workflow.yml`](ai/final/ci-workflow.yml) (see [Deviations](#deviations)), so the gate is the local one.
+
+**Load test.** `scripts/loadtest.py [port]` (Python 3, standard library only) drives a running service with 32 to 100 threads and checks the result: scarcity (1,000 purchases of 500 units: exactly 500 succeed and the balance ends at 0), adds to one hot SKU (no lost update), a mixed read/add/purchase run over 500 SKUs (every balance equals its seed plus the successful adds minus the successful purchases), and one `Idempotency-Key` sent from 32 threads (stock moves once). It exits 1 if a check fails. `scripts/gate.sh --load` starts the compose stack, runs it and tears the stack down. On one laptop the hot SKU sustained about 1,300 requests per second (p99 97 ms) and the mixed run about 8,600 (p99 21 ms); these are a single-machine sanity check, not a benchmark, and the pool-exhaustion and lock-timeout paths were not driven.
 
 **Regenerate the board export.** `DECISIONS.md` and `CLAUDE.md` come from the board; run from `frontend/`, where Playwright is installed (the script resolves `playwright` from its own directory, so it is fed through stdin), and use a date to stamp the header (today's regenerates; the committed file's date reproduces it byte for byte):
 
@@ -110,6 +139,8 @@ The `/v2` `ETag` is the details validator only: it does not change when the quan
 Swagger UI at `/swagger-ui.html` shows both versions. There are two OpenAPI documents: [`openapi.yaml`](openapi.yaml) is the unversioned API (1.0.0) and `openapi-v2.yaml` the `/v2` API (2.0.0); the groups are named `inventory` and `inventory-v2`, and the running service serves each as YAML at `/v3/api-docs.yaml/{group}` (and as JSON under `/v3/api-docs/{group}`). Both files are committed exports that a test regenerates and fails on when the code and the file differ, and a conformance test compares `openapi.yaml` with the YAML block in the spec, allowing only the differences listed in the test (each with its decision ID). The front end's types are generated from `openapi-v2.yaml` only, so a call to an unversioned path fails the type check.
 
 ## Try it
+
+In zsh, run `setopt interactive_comments` once first: the trailing `# …` notes after some commands are otherwise passed to the command and fail.
 
 Start from an empty database (`docker compose down -v && docker compose up --build`). Error bodies are `text/plain`; successful bodies are JSON. Outputs below were produced by these commands against the running stack; `Link` values show the default port.
 
@@ -254,14 +285,14 @@ From the build process ([`ai/final/deviations.md`](ai/final/deviations.md)):
 Known divergences kept frozen from build v2 (recorded, not fixed; changing one is the owner's decision). The critique also found that the unversioned POSTs capped only `Content-Length`, so a chunked body was unbounded; the service fix counts 4096 bytes while reading on both POSTs of both versions, so that is no longer a divergence:
 
 - **Build v2's M-13:** the request guard runs before `@Valid`, so a `;` SKU with a bad body on purchase answers 404, not 400.
-- **Accept tie-break:** among equally specific Accept ranges the first listed decides (main's C3 amendment says the highest q).
+- **Accept tie-break:** among equally specific Accept ranges the first listed decides (the C3 amendment on the earlier `main`, tag `main-before-final`, says the highest q).
 
 ## Designed, not built
 
 Deferred, with their reasons and decision IDs; none changes the API above.
 
 - **Store a domain outcome instead of the HTTP response against an Idempotency-Key** (A35, [#83](https://github.com/kgtech/nuuly-take-home/issues/83), [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). Every keyed caller today is the HTTP controller, so it would change no behavior, and it would trade byte-for-byte replays (Y4) for re-rendered ones.
-- **Messaging: an outbox to a broker for ERP sync, throughput and flash sales** (A36, [#85](https://github.com/kgtech/nuuly-take-home/issues/85), [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). The spec's operations answer synchronously (G10); the no-oversell and exactly-once guarantees already hold in one Postgres transaction; no consumer exists in this scope; hot-SKU throughput has not been measured. The first step is a load test.
+- **Messaging: an outbox to a broker for ERP sync, throughput and flash sales** (A36, [#85](https://github.com/kgtech/nuuly-take-home/issues/85), [`DESIGN-V2.md`](ai/v2/DESIGN-V2.md) §11). The spec's operations answer synchronously (G10); the no-oversell and exactly-once guarantees already hold in one Postgres transaction; no consumer exists in this scope; hot-SKU throughput has only a single-machine sanity check (see the load test above). The next step is a benchmark on separate hosts.
 - **Redis, a cache or a replay copy** (A30, A31, A32). Postgres alone holds every guarantee; no benchmark showed a need.
 - **Read replicas** (H18, [`DESIGN.md`](DESIGN.md) §11). Item and list reads would come from lag-bounded streaming replicas, while every write, precondition and idempotency lookup stays on the primary. That weakens the read promise above from "the last committed count" to "up to the lag limit", and no measurement shows reads outgrowing one primary.
 - **A write-off endpoint** ([`DESIGN.md`](DESIGN.md) §12, [#124](https://github.com/kgtech/nuuly-take-home/issues/124)). `POST /v2/inventory/{skuId}/write-off` with a reason (damaged, lost, expired, vendor return), decided by the same conditional UPDATE as a purchase so it can't take stock below 0. It needs a migration first: V5's ledger trigger records only `add` and `purchase`. No board card exists yet, so it has no decision ID. Today shrinkage can only be entered as a purchase.
@@ -273,4 +304,4 @@ Deferred, with their reasons and decision IDs; none changes the API above.
 
 ## AI process
 
-The decision board for this build is a private artifact, https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG (main's board is separate and read only); [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md) are generated from it by `ai/export-board.mjs`, and its database is dumped in [`ai/final/board-db/`](ai/final/board-db/) so the exports can be reproduced without the artifact. The final build was made in one autonomous run of the Fable model after a plan gate. Its records: the instructions [`ai/final/PROMPT.md`](ai/final/PROMPT.md), [`lessons.md`](ai/final/lessons.md) (what both earlier builds learned, with the test or rule that enforces each), [`plan.md`](ai/final/plan.md), [`log.md`](ai/final/log.md), [`current-state.md`](ai/final/current-state.md), [`board-cards.md`](ai/final/board-cards.md), [`issues.md`](ai/final/issues.md), [`preflight.md`](ai/final/preflight.md), [`deviations.md`](ai/final/deviations.md), and the decision board's URL above. [`ai/final/report.md`](ai/final/report.md) is the final report of the run; [`ai/final/critique.md`](ai/final/critique.md) the self-critique with the outcome of every finding; [`ai/final/interview-defense.md`](ai/final/interview-defense.md) the questions an interviewer would ask, with answers and the three weakest points. Build v2's history is in [`ai/v2/`](ai/v2/) ([`DESIGN-V2.md`](ai/v2/DESIGN-V2.md), [`DECISIONS-v2.md`](ai/v2/DECISIONS-v2.md), [`REPORT.md`](ai/v2/REPORT.md), [`run-records/`](ai/v2/run-records/)); build v1 is on `main`. The per-session prompt log is [`agent-prompts.md`](agent-prompts.md).
+The decision board for this build is a private artifact, https://claude.ai/artifact/5SCRVQ6fveSeN3TfbpQDAG (the earlier `main`'s board is separate and read only); [`DECISIONS.md`](DECISIONS.md) and [`CLAUDE.md`](CLAUDE.md) are generated from it by `ai/export-board.mjs`, and its database is dumped in [`ai/final/board-db/`](ai/final/board-db/) so the exports can be reproduced without the artifact. The final build was made in one autonomous run of the Fable model after a plan gate. Its records: the instructions [`ai/final/PROMPT.md`](ai/final/PROMPT.md), [`lessons.md`](ai/final/lessons.md) (what both earlier builds learned, with the test or rule that enforces each), [`plan.md`](ai/final/plan.md), [`log.md`](ai/final/log.md), [`current-state.md`](ai/final/current-state.md), [`board-cards.md`](ai/final/board-cards.md), [`issues.md`](ai/final/issues.md), [`preflight.md`](ai/final/preflight.md), [`deviations.md`](ai/final/deviations.md), and the decision board's URL above. [`ai/final/report.md`](ai/final/report.md) is the final report of the run; [`ai/final/critique.md`](ai/final/critique.md) the self-critique with the outcome of every finding; [`ai/final/interview-defense.md`](ai/final/interview-defense.md) the questions an interviewer would ask, with answers and the three weakest points. Build v2's history is in [`ai/v2/`](ai/v2/) ([`DESIGN-V2.md`](ai/v2/DESIGN-V2.md), [`DECISIONS-v2.md`](ai/v2/DECISIONS-v2.md), [`REPORT.md`](ai/v2/REPORT.md), [`run-records/`](ai/v2/run-records/)); build v1 is in the history before the merge that made `main` the final build, at the tag `main-before-final`. The per-session prompt log is [`agent-prompts.md`](agent-prompts.md).
