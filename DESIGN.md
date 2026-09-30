@@ -131,7 +131,7 @@ Reused from build v1 and #87: the decision-board process, the text/plain error c
 
 ## 10. Designed, not built
 
-Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope); read replicas (H18, §11). Nothing here is claimed as a performance property without a benchmark.
+Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope); read replicas (H18, §11); a write-off endpoint (§12). Nothing here is claimed as a performance property without a benchmark.
 
 ## 11. Read replicas and scale (H18, designed, not built)
 
@@ -179,3 +179,17 @@ In code: a second `DataSource` and `JdbcClient`, used by `StockRepository.find` 
 **Checking the invariant in production.** Today `BalancesRecordedExtension` checks `quantity = SUM(quantity_delta)` in tests, and V5 enforces it against everyone but the table owner (§3). A scheduled reconciliation on a replica (the `Invariants.balanceMismatches` query) would catch an owner-level bypass and alert on any row.
 
 **What building B takes** (H18 estimates about a day): the second `DataSource` and `JdbcClient`, the lag check, a Testcontainers primary with a streaming replica for the tests (a replica read may return the older quantity; a purchase decided while the replica lags never oversells; a replica past the limit is skipped), and the README's read promise changed through H18.
+
+## 12. Write-off endpoint (designed, not built)
+
+Today the only way to lower a balance is a purchase, so shrinkage (damaged, lost, expired, returned to the vendor) would be recorded as a sale. A write-off is a separate decrement with its own reason. No board card exists yet, so it has no decision ID; `DECISIONS.md` is generated from the board (S9), and a card must be added there before this is built.
+
+**Shape.** `POST /v2/inventory/{skuId}/write-off`, body `{"quantity": n, "reason": "damaged" | "lost" | "expired" | "vendor_return"}`, `Idempotency-Key` required like the other `/v2` writes. It answers 200 with the remaining quantity, 404 "SKU not found", 400 "Insufficient inventory", or 400 "Invalid request". There is no unversioned route (the spec's four operations don't change, G10). `quantity` stays a positive Integer (V2); a negative `quantity` is never accepted, and the balance never goes below 0 (E1's CHECK).
+
+**Concurrency (the same rule as a purchase, E1).** One statement decides: `UPDATE sku SET quantity = quantity - :q, version = version + 1 WHERE sku_id = :id AND quantity >= :q RETURNING quantity, version`, in the write's READ COMMITTED transaction, with the same 404-versus-400 `EXISTS` read. A write-off and a purchase of the same SKU queue on the row lock, and whichever the database runs second re-checks the committed balance, so together they can never take more than is on hand. It doesn't retry. A write-off racing a restock behaves like a purchase racing a restock, which `MixedStockConcurrencyTest` covers.
+
+**The ledger change it needs.** V5's `record_balance_change()` derives the reason from the sign of the delta (`add` or `purchase`), and `inventory_ledger.reason` allows only those two values, so a write-off would be logged as a purchase. Building it means a migration that widens the CHECK to include `write_off` and its reason, and a way to pass the reason to the trigger without breaking A14's one-row-per-change rule: a transaction-local setting (`set_config('inventory.reason', …, true)`) that the trigger reads, defaulting to today's mapping when unset so existing writes are unchanged. The ledger would also need the sub-reason column (`damaged`, `lost`, …). A14's tests (`LedgerTriggerTest`, `Invariants`) extend to the new reason.
+
+**Not the same as a stock-take.** "Set the count to n" is a different operation: an absolute write loses updates to a concurrent purchase, so it needs an `If-Match` on the SKU's version (the mechanism `PUT …/details` already uses) or must be expressed as a signed delta computed against a read the caller holds. It is out of scope here.
+
+**Tests it would need.** Write-offs racing purchases of the same SKU (sold plus written off never exceeds stock, the leftover is smaller than every refused amount); a write-off racing a restock; the same key from many threads writes off once; the ledger row carries the `write_off` reason and the balance still equals the ledger sum.

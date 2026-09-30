@@ -1285,5 +1285,9 @@ Tool: Claude Code (desktop app). One orchestrator; four parallel research subage
 **Limits**
 - One app instance, one laptop, load generator on the same machine. The pool-exhaustion 500 (3 s) and lock-timeout (5 s) paths were not driven. There is no throughput baseline from a separate host. `gate.sh --load` is opt-in and was checked with `bash -n`, not run end to end.
 
+- Recorded the write-off endpoint as future design: DESIGN §12 and the README's "Designed, not built" list. Not built; no board card yet (DECISIONS.md is generated from the board, S9).
+
 **My response**
 - "Yes and save this to the notes."
+- "Tests to investigate concurrent mixed purchases, purchases racing restocks, and racing a negative adjustment."
+- "The write off endpoint should be added as future design."
