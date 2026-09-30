@@ -24,7 +24,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | D2 | Design | Build tool | A: Gradle wrapper 9.x (Kotlin DSL) | Yes |
 | D3 | Design | Data access layer | A: Spring Data JPA (Hibernate 7.x), native queries for writes | No |
 | D4 | Design | How do add and purchase stay correct under concurrency? | D: SERIALIZABLE isolation + retry | No |
-| D5 | Design | How is the schema created and migrated? | E: final: Flyway migrations V1-V3 as built, V4+ only; ddl-auto none | Yes |
+| D5 | Design | How is the schema created and migrated? | F: final: Flyway migrations V1-V3 as built, V4+ only, V5 the ledger trigger; ddl-auto none | Yes |
 | D6 | Design | How are errors turned into text/plain responses? | A: One @RestControllerAdvice returning text/plain | Yes |
 | D7 | Design | Spec-first (generated) or code-first (springdoc)? | D: final: code-first + springdoc 3.1.x, two groups and two committed files | Yes |
 | D8 | Design | How does a reviewer run it? | C: Both | Yes |
@@ -39,7 +39,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | R7 | Spec gap | Confirm the skuId pattern | D: final: alphanumeric first, 1–64; the pattern applies to add | Yes |
 | R8 | Spec gap | Confirm the maximum page size for limit | D: final: 250 is the maximum and default page on both versions; limit exists on /v2 only | Yes |
 | R9 | Spec gap | Confirm how and when Idempotency-Keys expire | E: final: on /v2, 24h, expire on read (no deletes) | Yes |
-| S1 | Design | How does the code run a write statement that returns a row (RETURNING), given that @Modifying queries cannot return rows? | E: final: JdbcClient statements in StockRepository, DetailsRepository and IdempotencyStore (superseded by E2) | Yes |
+| S1 | Design | How does the code run a write statement that returns a row (RETURNING), given that @Modifying queries cannot return rows? | F: final: JdbcClient statements in StockRepository, DetailsRepository and IdempotencyStore; the ledger row from V5 (superseded by E2) | Yes |
 | S2 | Spec gap | Where is the skuId format checked, so that GET and purchase return 404 (not 400) for an ID that fails the pattern? | D: final: no constraint annotations on @PathVariable; the service checks skuId; the filter answers ";" first | Yes |
 | S3 | Spec gap | What does a valid Idempotency-Key look like, and what happens to an empty or oversized one? | D: final: /v2 requires a UUID key; the unversioned POSTs reject any key | Yes |
 | S4 | Design | How do reviewers start app + Postgres with Docker while bootRun starts only Postgres? | E: final: two files, app in compose.override.yaml on host port 8080 (APP_PORT overrides) | Yes |
@@ -73,11 +73,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | F: final: text/plain valve, %2F passthrough, TRACE, /error and bad chunk framing text/plain, advice declines library paths | Yes |
 | C2 | Spec gap | What does GET /inventory return when no limit is given? | F: final: fixed 250 page and after-only Link unversioned; limit, limit Link and skuId schema on /v2 (classes as built) | Yes |
 | C3 | Spec gap | What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0? | D: final: guard filter, driven by route kind, for every route of both versions; first listed range wins | Yes |
-| E1 | Design | Where does stock live, and how does a write stay correct under concurrency without retries? | F: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read (DESIGN-V2 path cited) | Yes |
+| E1 | Design | Where does stock live, and how does a write stay correct under concurrency without retries? | G: final: balance row, conditional UPDATE at READ COMMITTED; the ledger row comes from the V5 trigger (A14) | Yes |
 | E2 | Design | How does the code run SQL once nothing needs Spring Data JPA? | D: final: JdbcClient only, in three places | Yes |
-| E3 | Design | How does an existing v1 database move to the balance row, and how is the ledger kept append-only? | F: final: V1 carries the balance row and triggers; no backfill, no upgrade from main; append-only holds against the API | Yes |
+| E3 | Design | How does an existing v1 database move to the balance row, and how is the ledger kept append-only? | G: final: V1 carries the balance row and triggers; append-only holds against the API; V5 records every balance change (A14) | Yes |
 | A11 | Design | Which error does the append-only trigger raise? | A: P0001 from RAISE EXCEPTION | Yes |
-| A14 | Design | Is quantity = SUM(quantity_delta) kept by the database or asserted by tests? | D: final: asserted by tests after every write test | Yes |
+| A14 | Design | Is quantity = SUM(quantity_delta) kept by the database or asserted by tests? | E: final: Postgres writes the ledger row from the balance change (V5) | Yes |
 | A18 | Spec gap | What does a keyed POST get when its key's row is committed without a stored response? | C: final: on /v2, 400 "Invalid request" for a row with no stored response | Yes |
 | A33 | Design | Where does Idempotency-Key handling sit once nothing needs ordering against a retry? | D: final: explicit IdempotencyStore.run on the keyed /v2 entry points only | Yes |
 | A34 | Spec gap | In what order are a POST's body, Idempotency-Key and skuId checked, and where? | E: final: unversioned order rejects the key; /v2 order requires it; each check once (tests as they are) | Yes |
@@ -110,6 +110,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | A35 | Design | Does the idempotency row store a domain outcome instead of the HTTP response? | A: Keep the rendered response (deferred #83) | Yes |
 | A36 | Design | Does the service use a message broker? | A: No broker | Yes |
 | H17 | Design | Which server-side time bounds does the service set? | A: Hikari connection-timeout 3000 ms and Postgres lock_timeout 5 s | Yes |
+| H18 | Design | How would the service scale reads with read replicas, and what does a read promise then? | A: Primary only (today); replicas designed, not built | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -342,13 +343,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## D5: How is the schema created and migrated?
 
 - **Type:** Design choice
-- **Choice:** E: final: Flyway migrations V1-V3 as built, V4+ only; ddl-auto none
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** F: final: Flyway migrations V1-V3 as built, V4+ only, V5 the ledger trigger; ddl-auto none
+- **My reasoning:** A14 (V5): the migration list gains V5.
 - **Rejected:**
   - A: Flyway migrations + ddl-auto=validate. Superseded: the card described migrations (a V3 balance row) that the code does not have.
   - B: Hibernate ddl-auto=update. Drawback noted in research: Tests never run reviewed DDL.
   - C: schema.sql via spring.sql.init. Drawback noted in research: No versioning.
   - D: Liquibase. Drawback noted in research: More ceremony than needed.
+  - E: final: Flyway migrations V1-V3 as built, V4+ only; ddl-auto none. Superseded by A14: V5 adds the ledger trigger.
 - **Matched recommendation:** Yes
 
 ## D6: How are errors turned into text/plain responses?
@@ -510,13 +512,14 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## S1: How does the code run a write statement that returns a row (RETURNING), given that @Modifying queries cannot return rows?
 
 - **Type:** Design choice
-- **Choice:** E: final: JdbcClient statements in StockRepository, DetailsRepository and IdempotencyStore (superseded by E2)
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** F: final: JdbcClient statements in StockRepository, DetailsRepository and IdempotencyStore; the ledger row from V5 (superseded by E2)
+- **My reasoning:** A14 (V5): the ledger row is no longer a JdbcClient write.
 - **Rejected:**
   - A: Plain native @Query without @Modifying. Drawback noted in research: Relies on undocumented behaviour: Spring Data closed #2270 as invalid, and nothing states that Hibernate 7.1 runs DML through getResultList. Needs a spike test before building on it..
   - B: Repository fragment using JdbcClient for writes. Superseded by E2, now with three SQL places.
   - C: EntityManager.createNativeQuery in a custom fragment. Drawback noted in research: Same unconfirmed Hibernate behaviour as option A (DML through getResultList). JPA only forbids getResultList for JPQL UPDATE/DELETE and says nothing about native DML..
   - D: Drop RETURNING: @Modifying row count, then SELECT. Drawback noted in research: Two round trips on every successful add and purchase..
+  - E: final: JdbcClient statements in StockRepository, DetailsRepository and IdempotencyStore (superseded by E2). Superseded by A14: StockRepository no longer inserts ledger rows.
 - **Matched recommendation:** Yes
 
 ## S2: Where is the skuId format checked, so that GET and purchase return 404 (not 400) for an ID that fails the pattern?
@@ -912,14 +915,15 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## E1: Where does stock live, and how does a write stay correct under concurrency without retries?
 
 - **Type:** Design choice
-- **Choice:** F: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read (DESIGN-V2 path cited)
-- **My reasoning:** Follow-up 8.
+- **Choice:** G: final: balance row, conditional UPDATE at READ COMMITTED; the ledger row comes from the V5 trigger (A14)
+- **My reasoning:** A14 (V5): the ledger row comes from the trigger.
 - **Rejected:**
   - A: Balance row, conditional UPDATE at READ COMMITTED. Superseded: the code runs the purchase as an UPDATE plus a second SELECT, not one statement.
   - B: Keep SUM, SERIALIZABLE and retries. Drawback noted in research: Writes to different SKUs still fail with 40001 under SSI (#26), and every write sums a ledger that only grows.
   - C: Balance kept by a trigger. Drawback noted in research: The trigger, not the conditional UPDATE, decides and returns the balance, and every write runs a second UPDATE (A14).
   - D: Lock, then check. Drawback noted in research: Two statements and a Java-side check (G7) for what one conditional UPDATE does.
   - E: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read. Superseded by follow-up 8: DESIGN-V2 is now cited with its path.
+  - F: final: balance row, conditional UPDATE at READ COMMITTED; purchase is an UPDATE plus a read (DESIGN-V2 path cited). Superseded by A14: the ledger row now comes from the V5 trigger, not StockRepository.
 - **Matched recommendation:** Yes
 
 ## E2: How does the code run SQL once nothing needs Spring Data JPA?
@@ -936,14 +940,15 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## E3: How does an existing v1 database move to the balance row, and how is the ledger kept append-only?
 
 - **Type:** Design choice
-- **Choice:** F: final: V1 carries the balance row and triggers; no backfill, no upgrade from main; append-only holds against the API
-- **My reasoning:** Critique M-36: append-only by trigger holds against the API, not against the DB owner.
+- **Choice:** G: final: V1 carries the balance row and triggers; append-only holds against the API; V5 records every balance change (A14)
+- **My reasoning:** A14 (V5): the owner limit names the recorded UPDATE.
 - **Rejected:**
   - A: V3: backfill from the ledger, then row-level triggers. Superseded: build v2 rewrote V1, so there is no V3 backfill and no MigrationUpgradeTest, and no in-place upgrade from main.
   - B: Backfill version as 0. Drawback noted in research: version would count every change for new SKUs but only later ones for migrated SKUs.
   - C: Statement-level triggers (#63). Drawback noted in research: Rejects every UPDATE on sku, which the balance row needs on every write, and blocks the TRUNCATE that test cleanup uses.
   - D: Privilege separation. Drawback noted in research: The deployment has one database role, so it needs a second role and separate migration credentials first.
   - E: final: V1 carries the balance row and triggers; no backfill, no upgrade from main. Superseded by critique M-36: the limit of the trigger guarantee is now stated.
+  - F: final: V1 carries the balance row and triggers; no backfill, no upgrade from main; append-only holds against the API. Superseded by A14: since V5 an UPDATE of sku.quantity is recorded in the ledger.
 - **Matched recommendation:** Yes
 
 ## A11: Which error does the append-only trigger raise?
@@ -958,12 +963,13 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 ## A14: Is quantity = SUM(quantity_delta) kept by the database or asserted by tests?
 
 - **Type:** Design choice
-- **Choice:** D: final: asserted by tests after every write test
-- **My reasoning:** Approved at the plan gate (2026-09-29)
+- **Choice:** E: final: Postgres writes the ledger row from the balance change (V5)
+- **My reasoning:** Owner decision (2026-09-29): Postgres keeps the ledger in step with the balance (V5).
 - **Rejected:**
   - A: Asserted by tests. Superseded: there is no V3 backfill; the helper runs after every write test.
   - B: A trigger keeps the balance. Drawback noted in research: The trigger, not the conditional UPDATE, decides and returns the balance, and each write runs a second UPDATE.
   - C: A constraint trigger checks the sum at commit. Drawback noted in research: Sums the SKU's whole ledger on every commit, the cost E1 removes.
+  - D: final: asserted by tests after every write test. Superseded by the owner's decision: Postgres now writes the ledger row from the balance change (V5); the tests still assert the invariant.
 - **Matched recommendation:** Yes
 
 ## A18: What does a keyed POST get when its key's row is committed without a stored response?
@@ -1281,4 +1287,15 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: No bound (Hikari's 30 s default). The 30 s default lets one stalled lock or a database outage hold requests and then the whole pool (critique M-14).
   - C: A per-request statement_timeout. It does not bound the wait for a pooled connection, and one value must fit the slowest legitimate statement.
+- **Matched recommendation:** Yes
+
+## H18: How would the service scale reads with read replicas, and what does a read promise then?
+
+- **Type:** Design choice
+- **Choice:** A: Primary only (today); replicas designed, not built
+- **My reasoning:** Drafted at the owner's request (2026-09-29) because it will come up in the interview: A records today's code; B is the designed path once reads outgrow the primary (DESIGN.md §11).
+- **Rejected:**
+  - B: Streaming replicas for display reads, lag-bounded. Designed, not built: no measurement shows reads outgrowing the primary, and it changes the README's read promise (DESIGN.md §11).
+  - C: B plus read-your-writes tokens on /v2. Designed, not built: it needs B first and only helps a /v2 client that must read its own writes.
+  - D: Synchronous remote_apply replicas. Every commit would wait for the slowest listed replica, and a down replica stalls writes.
 - **Matched recommendation:** Yes

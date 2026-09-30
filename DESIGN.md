@@ -32,13 +32,21 @@ Postgres is the only data store. There is no cache, no queue and no second copy 
 | Table | Holds | Notes |
 |---|---|---|
 | `sku` | `sku_id varchar(64) COLLATE "C"` primary key, `quantity bigint CHECK (quantity >= 0)`, `version bigint` | The source of truth for stock. `sku_id` is case-sensitive (G1) and validated against `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` before any I/O (G11). |
-| `inventory_ledger` | one row per stock change: `sku_id`, `quantity_delta <> 0`, `reason` add or purchase, `created_at` | Append-only, enforced by a trigger that raises `P0001` on UPDATE and DELETE (A11); TRUNCATE is allowed for tests. Append-only by trigger protects against the API, not against the database owner: the app connects as the owner, which can disable the trigger, TRUNCATE or UPDATE `sku` directly (privilege separation was weighed and rejected, E3). |
+| `inventory_ledger` | one row per stock change: `sku_id`, `quantity_delta <> 0`, `reason` add or purchase, `created_at` | Written only by Postgres: V5's trigger inserts the row whenever `sku.quantity` changes, and a guard refuses any other insert (A14). Append-only, enforced by a trigger that raises `P0001` on UPDATE and DELETE (A11); TRUNCATE is allowed for tests. These triggers protect against the API, not against the database owner: the app connects as the owner, which can disable a trigger, TRUNCATE or UPDATE `sku` directly (since V5 such an update is recorded; privilege separation was weighed and rejected, E3). See "Limits of the ledger trigger" below. |
 | `sku_details` | `sku_id` primary key (references `sku`), name, description, cost, image URLs, `version` | Details are never columns on `sku` (A22): the stock UPDATE rewrites its row under a lock, so a wide row would tax every purchase. Rows are never deleted. |
 | `idempotency_keys` | `idempotency_key uuid` primary key, `operation`, `sku_id`, `request_hash bytea(32)`, `status`, `content_type`, `body`, `created_at` | Only `/v2` writes touch it (invariant 5). All-NULL or all-set response columns by CHECK (Y4). Rows are never purged (R9); validity is 24 h by the database clock (T1). |
 
-The recorded invariant (3): for every SKU, `sku.quantity` equals the sum of its ledger deltas. `BalancesRecordedExtension` asserts it after every `@IntegrationTest` test (an explicit `@AllowsBalanceMismatch(reason)` is the only opt-out; none is used).
+The recorded invariant (3): for every SKU, `sku.quantity` equals the sum of its ledger deltas. Postgres keeps it (V5, A14). `record_balance_change()`, run by an AFTER INSERT and an AFTER UPDATE trigger on `sku`, inserts the ledger row in the same statement whenever `quantity` changes (reason `add` for a positive delta, `purchase` for a negative one), and `ledger_only_from_balance()` refuses every other ledger insert with `P0001`. The conditional UPDATE still decides and returns the balance (E1); `StockRepository` no longer inserts ledger rows. `BalancesRecordedExtension` still asserts the invariant after every `@IntegrationTest` test (an explicit `@AllowsBalanceMismatch(reason)` is the only opt-out; none is used).
 
-Migrations V1–V3 are published on `v2` and never edited. `V4__idempotency_checks.sql` (H9, approved) narrows the idempotency CHECKs that V3 widened for build v2's create route: `operation IN ('add','purchase')` and `status IN (200,400,404)`, both `NOT VALID`. `NOT VALID` enforces them for new rows without scanning old ones, so a database that still holds a `create`, 201 or 409 row migrates and keeps reading it (rows are never purged); such a key fails as a different operation (400).
+Migrations V1–V3 are published on `v2` and never edited. `V4__idempotency_checks.sql` (H9, approved) narrows the idempotency CHECKs that V3 widened for build v2's create route: `operation IN ('add','purchase')` and `status IN (200,400,404)`, both `NOT VALID`. `NOT VALID` enforces them for new rows without scanning old ones, so a database that still holds a `create`, 201 or 409 row migrates and keeps reading it (rows are never purged); such a key fails as a different operation (400). `V5__ledger_follows_balance.sql` (A14) adds the two ledger triggers. It first checks that every SKU's balance equals its ledger sum and fails the migration if one differs, so it never carries existing drift forward: reconcile first, then migrate.
+
+**Limits of the ledger trigger.** Each was reproduced against PostgreSQL 18.6.
+
+- **The owner can bypass it.** It holds against the API and against any role that doesn't own the tables. The table owner or a superuser can still break the invariant: `ALTER TABLE … DISABLE TRIGGER`, `TRUNCATE inventory_ledger` on its own (row triggers don't fire on TRUNCATE), `SET session_replication_role = replica` (superuser only), or a trigger of its own that inserts ledger rows (the guard only checks the trigger depth). The app connects as the owner, and compose's `inventory` user is a superuser, so the app's own credentials can do all four. The fix is privilege separation, which E3 rejected. With it, `record_balance_change()` becomes `SECURITY DEFINER` and the app loses INSERT on the ledger; a probe showed stock writes still work that way and a direct insert gets "permission denied".
+- **Restores and replication.** `pg_restore --disable-triggers` and a logical-replication subscriber (which applies rows as `replica`) don't fire the triggers, so restoring or replicating `sku` without `inventory_ledger` would break the invariant.
+- **The reason comes from the sign.** A positive change is `add` and a negative one `purchase`. A new reason, such as a return, needs the trigger to be told, for example through `SET LOCAL` and `current_setting()`.
+- **A hand-written change is recorded, not prevented.** An owner's `UPDATE sku SET quantity = …` keeps the books balanced, but it is still an unreviewed stock change, and the ledger shows it as an ordinary add or purchase.
+- **Closed by V5 itself, and tested:** a session's temporary table named `inventory_ledger` would have captured the row (both functions pin `search_path = public, pg_temp`), and an `UPDATE OF quantity` trigger would have missed a change made by another BEFORE trigger (the UPDATE trigger has no column list).
 
 ## 4. Concurrency (reused from build v2 §2, still true)
 
@@ -46,7 +54,7 @@ Migrations V1–V3 are published on `v2` and never edited. `V4__idempotency_chec
 
 All stock writes run in one READ COMMITTED transaction:
 
-- **Add:** `INSERT INTO sku … ON CONFLICT DO NOTHING`, then `UPDATE sku SET quantity = quantity + :q, version = version + 1 WHERE sku_id = :id AND quantity <= max − :q RETURNING …` (no row → overflow → 400), then the ledger insert.
+- **Add:** `INSERT INTO sku … ON CONFLICT DO NOTHING`, then `UPDATE sku SET quantity = quantity + :q, version = version + 1 WHERE sku_id = :id AND quantity <= max − :q RETURNING …` (no row → overflow → 400). The V5 trigger writes the ledger row in the same statement (A14).
 - **Purchase:** `UPDATE sku SET quantity = quantity − :q … WHERE sku_id = :id AND quantity >= :q RETURNING …`; no row → a second read decides 404 (missing) or 400 "Insufficient inventory".
 - **Why READ COMMITTED is enough:** two purchases of 5 against stock 5 both pass the first read; the second UPDATE waits on the row lock, Postgres re-evaluates its `WHERE` against the committed row (PostgreSQL docs, Read Committed), finds 0 and updates nothing. No lost update; `CHECK (quantity >= 0)` would refuse it anyway. Lock order is the same everywhere (idempotency row, `sku` row, then a key-share on the same row for the ledger's foreign key), so there is no cycle.
 - **Known and accepted:** the purchase's 404-versus-400 read uses a later snapshot than its UPDATE. If a create for a brand-new SKU commits between the two, the purchase answers "Insufficient inventory" for a SKU that did not exist when the UPDATE ran. Stock is never wrong. (Card E1 changes to say so.)
@@ -117,9 +125,57 @@ There is no Redis, so no cache failure modes (build v2 §4's Redis rows are gone
 | Decision board is the source of truth again (OD-9, OD-10); cards changed to match the code where #87 described code that was never built | `DECISIONS.md` and `CLAUDE.md` must describe what runs. |
 | ArchUnit guards; one shared test annotation and container | Lessons L19, L27, L31: rules written as text were still broken. |
 | Ports 8080 and 5173 | The owner asked to use the ports main uses (H13). |
+| Postgres writes the ledger row from the balance change (V5) | Owner decision after the build: a write path that skips the ledger is refused, and a hand-written balance change is recorded, instead of only being caught by tests (A14). |
 
 Reused from build v1 and #87: the decision-board process, the text/plain error contract, the keyset paging design, the C1 Tomcat text errors, most hardening tests. Reused from build v2: storage, concurrency, idempotency claim, the front end, the run-records layout.
 
 ## 10. Designed, not built
 
-Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope). Nothing here is claimed as a performance property without a benchmark.
+Carried forward with their IDs (README repeats this list): storing a domain outcome instead of the HTTP response (A35, #83); a message broker or outbox (A36, #85); Redis, a cache or a replay copy (A30, A31, A32); authentication (G10); `X-Forwarded-*` and servlet-path support (Scope); read replicas (H18, §11). Nothing here is claimed as a performance property without a benchmark.
+
+## 11. Read replicas and scale (H18, designed, not built)
+
+The service runs on one Postgres primary. Card H18 records that, and the design for adding read replicas; nothing here is built. No load test shows reads outgrowing the primary, and the README makes no performance claim.
+
+**Short answer.** Replicas scale reads, not writes. Every decision stays on the primary: the conditional UPDATE (E1), the ledger trigger (A14), the idempotency claim and replay (R2), and the `If-Match`/`If-None-Match` checks. Replicas serve only reads that decide nothing. So write correctness doesn't change; what changes is how fresh a read is.
+
+**What stays on the primary.**
+
+- Both versions' add and purchase, `PUT …/details`, everything in `IdempotencyStore`, and the purchase's 404-versus-400 `EXISTS` read, which runs inside the write's transaction.
+- The rule: no write is decided from a replica read. Checking stock on a replica and then writing would bring back oversell; the conditional UPDATE on the primary is the check.
+
+**What a replica shows.**
+
+- Streaming (physical) replicas replay whole transactions. The balance, its ledger row and the idempotency row commit together, so a replica can lag the primary but never shows a balance without its ledger row. Triggers don't run on a standby and don't need to.
+- Logical replication and change-data capture apply rows with triggers off. Publish `sku` and `inventory_ledger` together and keep A14's triggers at their default (origin only); enabling them on a subscriber would write duplicate ledger rows.
+- Since V5, each balance change has exactly one ledger row in the same commit, so the ledger is a dependable change feed for a later outbox or ERP sync (A36, #85).
+
+**Routing (option B).**
+
+| Request | Goes to | Why |
+|---|---|---|
+| `POST` add and purchase (both versions), `PUT …/details` | Primary | Decides the outcome |
+| Idempotency claim, replay and the purchase's `EXISTS` read | Primary | Part of the write's transaction |
+| `GET /inventory/{skuId}`, `GET /v2/inventory/{skuId}` | Replica | Display only; a stale `ETag` makes a later `If-Match` fail with 412 on the primary, never a wrong write |
+| `GET /inventory`, `GET /v2/inventory` | Replica | Keyset pages stay correct, but the pages of one walk can come from different moments |
+| Balance-versus-ledger reconciliation | Replica | A full scan, kept off the primary |
+
+In code: a second `DataSource` and `JdbcClient`, used by `StockRepository.find` and `page` and the `/v2` reads that join `sku_details`. Routing on a read-only transaction flag won't work here, because the reads run with no transaction at all (E1).
+
+**How fresh a read is.** The README's "a read is always the last committed count" becomes "the last committed count, up to the lag limit". In layers:
+
+1. **Lag limit.** A replica leaves the read pool when its replay lag passes the limit, read on the primary from `pg_stat_replication.replay_lag` (`now() - pg_last_xact_replay_timestamp()` on the replica also grows while the primary is idle, so it overstates lag). With no replica left, reads go to the primary.
+2. **The write's own response.** Every write already returns the new quantity (`InventoryItem`, `SkuItem`), so a client never needs to re-read its own write.
+3. **Option C, only for a `/v2` client that must read its own writes.** A write returns its commit LSN in a response header; a read that sends it back is served by a replica whose `pg_last_wal_replay_lsn()` has reached it, otherwise by the primary. The unversioned API can't carry the header (H1).
+4. **Option D, `synchronous_commit = remote_apply`**, makes the listed replicas current before each write is acknowledged. Every commit then waits for the slowest of them, so it isn't recommended beyond one or two.
+
+**Failover.** This is separate from read routing. With asynchronous replicas, promoting one after the primary fails can lose writes that were already acknowledged. They are lost consistently, because the balance, ledger row and key row are one transaction, so a retry with the same key applies once on the new primary; but the client was told 200 for a write that no longer exists. To keep every acknowledged write, commit synchronously to at least one standby (`synchronous_standby_names = 'ANY 1 (…)'`), at the cost of a network round trip per commit.
+
+**Beyond replicas.**
+
+- **Write capacity.** Writers to one SKU queue on its row lock. A local pgbench run (SQL only, 8 clients) gave about 1,100–1,600 writes per second on one SKU; that is a laptop figure, not a capacity claim. Past one primary, shard by `sku_id`: every write touches one SKU, so its row lock, trigger and ledger row stay on one shard and no transaction spans shards. The price is that key rows follow their SKU's shard, so a key reused on a SKU in another shard is no longer caught (S8).
+- **Connection poolers.** PgBouncer in transaction mode drops per-connection settings, so `lock_timeout` (H17, set today by Hikari's init SQL) would move to `ALTER ROLE … SET lock_timeout = '5s'` or to `SET LOCAL` in each transaction.
+
+**Checking the invariant in production.** Today `BalancesRecordedExtension` checks `quantity = SUM(quantity_delta)` in tests, and V5 enforces it against everyone but the table owner (§3). A scheduled reconciliation on a replica (the `Invariants.balanceMismatches` query) would catch an owner-level bypass and alert on any row.
+
+**What building B takes** (H18 estimates about a day): the second `DataSource` and `JdbcClient`, the lag check, a Testcontainers primary with a streaming replica for the tests (a replica read may return the older quantity; a purchase decided while the replica lags never oversells; a replica past the limit is skipped), and the README's read promise changed through H18.

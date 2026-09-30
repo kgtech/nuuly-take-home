@@ -41,10 +41,10 @@ Questions a senior interviewer would ask about the non-obvious choices, each wit
 
 ## 9. You replaced SERIALIZABLE ledger sums with a balance row. Where is that story? (D4, V1, W1, E1; `DESIGN.md` §4)
 - **Answer:** the first build derived every balance from a `SUM` over an append-only ledger at SERIALIZABLE with retries; concurrent purchases of different SKUs then hit serialization failures (#26). Build v2 keeps a balance per SKU as a row updated by a conditional `UPDATE … WHERE quantity >= :q` at READ COMMITTED (the second writer re-evaluates the predicate on the committed row: PostgreSQL docs, Read Committed) and still appends every change to the ledger. `DESIGN.md` §4 opens with this history; the older cards carry "superseded by E1".
-- **Price:** two records of one fact (balance and ledger). The invariant "balance equals ledger SUM" is asserted after every integration test (`BalancesRecordedExtension`).
+- **Price:** two records of one fact (balance and ledger). Since V5, Postgres writes the ledger row from each balance change and refuses any other ledger insert (A14), and `BalancesRecordedExtension` still checks "balance equals ledger SUM" after every integration test.
 
 ## 10. Why is the ledger append-only by trigger, and is it really? (G5, A11, E3)
-- **Answer:** a trigger raises `P0001` on `UPDATE` and `DELETE`, so a bug in the API cannot rewrite history. It protects against the API, not against the database owner: the app connects as the owner (the critique confirmed `TRUNCATE` and `DISABLE TRIGGER` work). Privilege separation was weighed and left out of a take-home.
+- **Answer:** a trigger raises `P0001` on `UPDATE` and `DELETE`, so a bug in the API cannot rewrite history. It protects against the API, not against the database owner: the app connects as the owner (the critique confirmed `TRUNCATE` and `DISABLE TRIGGER` work). Privilege separation was weighed and left out of a take-home. Since V5 the ledger is also written only by Postgres, from each balance change (A14); the same owner limit applies, and `DESIGN.md` §3 lists how the owner can bypass it.
 
 ## 11. Why does the guard filter run before `@Valid`, and why "first listed" for equal Accept ranges? (H11, H16 = build v2's M-13)
 - **Answer:** Spring strips `;matrix` content before binding, so `/inventory/ABC-1;lot=7` would reach SKU `ABC-1`; a filter on the routed path answers it as the malformed id it is, before any binding. The price is that a `;` skuId with a bad body on purchase answers 404 instead of the body's 400. For equally specific Accept ranges the first listed decides (build v2's behaviour, kept; C3's "highest q" text was changed to match).
@@ -64,6 +64,11 @@ Questions a senior interviewer would ask about the non-obvious choices, each wit
 
 ## 16. The Create page is two steps. What if the browser dies between them? (FE33, FE34)
 - **Answer:** the SKU then exists at stock 0 with its details; the initial quantity is lost and the user adds stock from the SKU page (recorded in FE34). If the create response is lost and the user clicks again, the 412 says the earlier attempt most likely created it and sends the user to the SKU page instead of silently dropping the stock.
+
+## 17. How would this scale with read replicas? (H18, E1, A14; `DESIGN.md` §11)
+- **Answer:** replicas scale reads, not writes, and no write depends on a read. Every decision stays on the primary (the conditional UPDATE, the ledger trigger, the key claim and the `If-Match` check), so only display reads move: item and list GETs, served by streaming replicas that leave the pool past a lag limit. A replica replays whole transactions, so it can be behind but never shows a balance without its ledger row. A stale `ETag` just earns a 412. A client that must see its own write uses the write's response, which already carries the new quantity, or on `/v2` a commit-LSN token (option C).
+- **Follow-ups to expect:** failover with asynchronous replicas can lose acknowledged writes (consistently, so a same-key retry applies once) unless one standby is synchronous; one hot SKU is bounded by its row lock, and sharding by `sku_id` is the next step; PgBouncer's transaction mode needs `lock_timeout` set per role, not per connection.
+- **Price:** the read promise weakens from "last committed" to "up to the lag limit", and nothing is built. H18 records the design and what would trigger building it: a load test showing reads saturating the primary.
 
 ## Three weakest points
 1. **The strong ETag that does not change with stock (M-05).** It is the contract, not an accident, but a reviewer who knows RFC 9110 will notice. Answer: it is the details validator under `no-store` with conditional GET ignored, recorded with the RFC sentences; the fix is a future `/v3` or a separate details resource, and I would not honour `If-None-Match` on GET before that.
