@@ -20,6 +20,10 @@ runtime:
           expect(res.getStatus()).to.equal(200);
           expect(res.getHeader('content-type')).to.match(/^application\/json/);
         });
+        test("this run's second SKU is in the page with quantity 1", function () {
+          const mine = res.getBody().find(i => i.skuId === bru.getVar('skuId2'));
+          expect(mine).to.deep.equal({ skuId: bru.getVar('skuId2'), quantity: 1 });
+        });
         test("every row sorts after the cursor", function () {
           const after = bru.getVar('skuId');
           res.getBody().forEach(i => expect(i.skuId > after).to.equal(true));

@@ -1,7 +1,7 @@
 info:
   name: "Purchase with new key"
   type: http
-  seq: 6
+  seq: 7
 
 http:
   method: POST
@@ -26,6 +26,7 @@ runtime:
     - type: after-response
       code: |-
         bru.setVar('purchaseBody', JSON.stringify(res.getBody()));
+        bru.setVar('expectedQty', res.getBody().quantity);
     - type: tests
       code: |-
         test("200 with JSON", function () {

@@ -27,6 +27,7 @@ runtime:
     - type: after-response
       code: |-
         bru.setVar('firstBody', JSON.stringify(res.getBody()));
+        bru.setVar('expectedQty', res.getBody().quantity);
     - type: tests
       code: |-
         test("200 with JSON", function () {

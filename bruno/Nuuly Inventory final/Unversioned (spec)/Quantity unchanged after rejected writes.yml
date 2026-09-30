@@ -1,7 +1,7 @@
 info:
-  name: "Get item after rejected keyed add"
+  name: "Quantity unchanged after rejected writes"
   type: http
-  seq: 8
+  seq: 18
 
 http:
   method: GET
@@ -16,8 +16,7 @@ runtime:
           expect(res.getStatus()).to.equal(200);
           expect(res.getHeader('content-type')).to.match(/^application\/json/);
         });
-        test("quantity still 3", function () {
-          expect(res.getBody().quantity).to.equal(3);
+        test("quantity equals the saved value", function () {
           expect(res.getBody().quantity).to.equal(bru.getVar('expectedQty'));
         });
 settings:
@@ -26,4 +25,4 @@ settings:
   followRedirects: true
   maxRedirects: 5
 docs: |-
-  OD-4 follow-up: nothing was written, quantity is still 3.
+  Proves the rejected writes above (invalid skuId, malformed JSON, quantity 0, XML Accept) wrote nothing: this run's SKU still has the saved quantity 3.

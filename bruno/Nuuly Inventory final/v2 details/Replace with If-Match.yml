@@ -35,6 +35,7 @@ runtime:
           expect(res.getHeader('etag')).to.equal('"2"');
           expect(b.details.name).to.equal('Linen shirt, navy');
           expect(b.details.description).to.equal('');
+          expect(b.details).to.not.have.property('cost');
           expect(b.quantity).to.equal(0);
         });
 settings:

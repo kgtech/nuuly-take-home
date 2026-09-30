@@ -1,14 +1,17 @@
 info:
   name: "Invalid limit is ignored"
   type: http
-  seq: 8
+  seq: 9
 
 http:
   method: GET
-  url: "{{baseUrl}}/v2/inventory?limit=0"
+  url: "{{baseUrl}}/v2/inventory?limit=0&after={{pageAfter}}"
   params:
     - name: "limit"
       value: "0"
+      type: query
+    - name: "after"
+      value: "{{pageAfter}}"
       type: query
   auth:
     type: none
@@ -20,8 +23,8 @@ runtime:
           expect(res.getStatus()).to.equal(200);
           expect(res.getHeader('content-type')).to.match(/^application\/json/);
         });
-        test("more than one row (default page)", function () {
-          expect(res.getBody().length).to.be.above(1);
+        test("the four seeded SKUs, in order", function () {
+          expect(res.getBody().map(i => i.skuId)).to.deep.equal(JSON.parse(bru.getVar('seedIds')));
         });
 settings:
   encodeUrl: false
@@ -29,4 +32,4 @@ settings:
   followRedirects: true
   maxRedirects: 5
 docs: |-
-  R4: a limit below 1 (or non-numeric) is ignored, so the default page of up to 250 applies.
+  R4: a limit below 1 (or non-numeric) is ignored, so the default page of up to 250 applies: all four seeded SKUs come back.

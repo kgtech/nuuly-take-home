@@ -5,10 +5,13 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/inventory?limit=1"
+  url: "{{baseUrl}}/inventory?limit=1&after={{listAfter}}"
   params:
     - name: "limit"
       value: "1"
+      type: query
+    - name: "after"
+      value: "{{listAfter}}"
       type: query
   auth:
     type: none
@@ -20,8 +23,11 @@ runtime:
           expect(res.getStatus()).to.equal(200);
           expect(res.getHeader('content-type')).to.match(/^application\/json/);
         });
-        test("limit=1 is ignored: more than one row", function () {
-          expect(res.getBody().length).to.be.above(1);
+        test("limit=1 is ignored: both of this run's SKUs are in the page", function () {
+          const ids = res.getBody().map(i => i.skuId);
+          expect(ids.length).to.be.above(1);
+          expect(ids).to.include(bru.getVar('skuId'));
+          expect(ids).to.include(bru.getVar('skuId2'));
         });
         test("any Link carries after and not limit=1", function () {
           const link = res.getHeader('link');
@@ -37,4 +43,4 @@ settings:
   followRedirects: true
   maxRedirects: 5
 docs: |-
-  OD-5: the unversioned list ignores limit, so more than one SKU comes back. A Link (only when more than 250 SKUs exist) carries after, never limit=1.
+  OD-5: the unversioned list ignores limit, so both of this run's SKUs come back (anchored with the same cursor as 'List inventory'). A Link (only when more than 250 SKUs follow) carries after, never limit=1.

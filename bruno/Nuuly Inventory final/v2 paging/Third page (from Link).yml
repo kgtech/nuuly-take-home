@@ -24,14 +24,13 @@ runtime:
           expect(res.getStatus()).to.equal(200);
           expect(res.getHeader('content-type')).to.match(/^application\/json/);
         });
-        test("one row and a next Link", function () {
+        test("one row, ascending, matching the seeded IDs so far", function () {
           expect(res.getBody().length).to.equal(1);
-          expect(res.getHeader('link')).to.match(/<[^>]+>;\s*rel="next"/);
-        });
-        test("SKU IDs so far are strictly ascending, no repeats", function () {
           const seen = JSON.parse(bru.getVar('seen'));
-          expect(seen).to.deep.equal([...seen].sort());
-          expect(new Set(seen).size).to.equal(seen.length);
+          expect(seen).to.deep.equal(JSON.parse(bru.getVar('seedIds')).slice(0, seen.length));
+        });
+        test("a Link to the next page", function () {
+          expect(res.getHeader('link')).to.match(/<[^>]+>;\s*rel="next"/);
         });
 settings:
   encodeUrl: false
@@ -39,4 +38,4 @@ settings:
   followRedirects: true
   maxRedirects: 5
 docs: |-
-  Follows the Link URL of the second page; the walk goes on while more SKUs follow.
+  Follows the Link URL of the second page.

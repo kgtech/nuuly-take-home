@@ -3,4 +3,4 @@ info:
   type: folder
   seq: 5
 docs: |-
-  GET /v2/inventory: limit, after and the Link header (README 'Paging'). Self-contained: the first four requests seed four SKUs with keyed adds, so the folder runs alone on an empty database.
+  GET /v2/inventory: limit, after and the Link header (README 'Try it' > 'The `/v2` API', paragraph Paging). Self-contained: the first four requests seed four SKUs with keyed adds; the walk is anchored on them, so it works on an empty or a used database.

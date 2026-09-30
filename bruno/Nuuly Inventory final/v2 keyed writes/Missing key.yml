@@ -29,4 +29,4 @@ settings:
   followRedirects: true
   maxRedirects: 5
 docs: |-
-  /v2 requires the key: none is 400 'Invalid request' (OD-1 in README '/v2 API').
+  /v2 requires the key: none is 400 'Invalid request' (OD-3, OD-4; README 'API versions').

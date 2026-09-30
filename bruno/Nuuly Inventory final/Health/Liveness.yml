@@ -16,6 +16,9 @@ runtime:
           expect(res.getStatus()).to.equal(200);
           expect(res.getHeader('content-type')).to.match(/^application\/json/);
         });
+        test("status UP", function () {
+          expect(res.getBody().status).to.equal('UP');
+        });
 settings:
   encodeUrl: false
   timeout: 0

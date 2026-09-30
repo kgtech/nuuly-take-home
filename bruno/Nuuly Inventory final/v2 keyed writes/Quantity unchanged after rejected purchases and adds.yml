@@ -1,11 +1,11 @@
 info:
-  name: "Get item after rejected keyed add"
+  name: "Quantity unchanged after rejected purchases and adds"
   type: http
-  seq: 8
+  seq: 13
 
 http:
   method: GET
-  url: "{{baseUrl}}/inventory/{{skuId}}"
+  url: "{{baseUrl}}/v2/inventory/{{skuId}}"
   auth:
     type: none
 runtime:
@@ -16,8 +16,7 @@ runtime:
           expect(res.getStatus()).to.equal(200);
           expect(res.getHeader('content-type')).to.match(/^application\/json/);
         });
-        test("quantity still 3", function () {
-          expect(res.getBody().quantity).to.equal(3);
+        test("quantity equals the saved value", function () {
           expect(res.getBody().quantity).to.equal(bru.getVar('expectedQty'));
         });
 settings:
@@ -26,4 +25,4 @@ settings:
   followRedirects: true
   maxRedirects: 5
 docs: |-
-  OD-4 follow-up: nothing was written, quantity is still 3.
+  Proves the rejected writes above (insufficient purchase, unknown SKU, invalid skuId on add and purchase) wrote nothing: this run's SKU still has the saved quantity 3.

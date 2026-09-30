@@ -1,7 +1,7 @@
 info:
-  name: "Next page (from Link)"
+  name: "Last page (from Link)"
   type: http
-  seq: 6
+  seq: 8
 
 http:
   method: GET
@@ -29,8 +29,11 @@ runtime:
           const seen = JSON.parse(bru.getVar('seen'));
           expect(seen).to.deep.equal(JSON.parse(bru.getVar('seedIds')).slice(0, seen.length));
         });
-        test("a Link to the next page", function () {
-          expect(res.getHeader('link')).to.match(/<[^>]+>;\s*rel="next"/);
+        test("no Link header on the last page", function () {
+          expect(res.getHeader('link')).to.equal(undefined);
+        });
+        test("the four seeded SKUs were walked in order", function () {
+          expect(JSON.parse(bru.getVar('seen'))).to.deep.equal(JSON.parse(bru.getVar('seedIds')));
         });
 settings:
   encodeUrl: false
@@ -38,4 +41,4 @@ settings:
   followRedirects: true
   maxRedirects: 5
 docs: |-
-  Follows the Link URL of the first page.
+  Follows the Link URL of the third page: the fourth seeded SKU is the last row of the database, so there is no Link, and the four pages together were exactly the four seeded SKUs in order. (Assumes no SKU ID sorts after ZZ-BR-..., e.g. a later collection run or a lowercase ID.)

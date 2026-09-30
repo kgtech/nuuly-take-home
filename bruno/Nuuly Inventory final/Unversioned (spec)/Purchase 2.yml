@@ -16,6 +16,9 @@ http:
     type: none
 runtime:
   scripts:
+    - type: after-response
+      code: |-
+        bru.setVar('expectedQty', res.getBody().quantity);
     - type: tests
       code: |-
         test("200 with JSON", function () {

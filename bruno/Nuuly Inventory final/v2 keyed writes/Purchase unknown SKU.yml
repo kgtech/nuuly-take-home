@@ -1,7 +1,7 @@
 info:
   name: "Purchase unknown SKU"
   type: http
-  seq: 9
+  seq: 10
 
 http:
   method: POST

@@ -21,6 +21,10 @@ runtime:
         const stamp = Date.now().toString(36).toUpperCase();
         bru.setVar('skuId', 'BR-' + stamp);
         bru.setVar('skuId2', 'BR-' + stamp + '-B');
+    - type: after-response
+      code: |-
+        bru.setVar('expectedQty', res.getBody().quantity);
+        bru.setVar('listAfter', bru.getVar('skuId').slice(0, -1));
     - type: tests
       code: |-
         test("200 with JSON", function () {

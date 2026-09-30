@@ -3,4 +3,4 @@ info:
   type: folder
   seq: 2
 docs: |-
-  The spec API under /inventory (README 'Try it' > 'The spec API', 'Deviations' OD-4 and OD-5). The first request picks fresh SKU IDs for this run.
+  The spec API under /inventory (README 'Try it' > 'The spec API (unversioned)', 'Deviations' OD-4 and OD-5). The first request picks fresh SKU IDs for this run.
