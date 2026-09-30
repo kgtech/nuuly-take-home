@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;

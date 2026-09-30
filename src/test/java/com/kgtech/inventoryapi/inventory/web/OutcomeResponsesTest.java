@@ -2,24 +2,38 @@ package com.kgtech.inventoryapi.inventory.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
+import com.kgtech.inventoryapi.inventory.DetailsOutcome;
+import com.kgtech.inventoryapi.inventory.SkuCost;
+import com.kgtech.inventoryapi.inventory.SkuDetails;
+import com.kgtech.inventoryapi.inventory.SkuItem;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
+import com.kgtech.inventoryapi.web.TextErrors;
 
 import tools.jackson.databind.json.JsonMapper;
 
 /**
  * R1, U1, Y4, A33: OutcomeResponses is the KeyedResponses the service stores against a key; toStored renders exactly
- * what the unkeyed path sends. Plain unit test.
+ * what the unkeyed path sends. Plain unit test. The feature's texts are written out here, not read from the class
+ * that holds them, so the test does not depend on where that is (R1-05).
  */
 class OutcomeResponsesTest {
+
+    /** DESIGN-V2 §8, A23: the v2 create's 409 body. */
+    private static final String SKU_EXISTS = "SKU already exists. Set its details with PUT /v2/inventory/{skuId}; "
+            + "add stock with POST /inventory/{skuId}.";
 
     private final OutcomeResponses responses = new OutcomeResponses(JsonMapper.builder().build());
 
@@ -41,13 +55,47 @@ class OutcomeResponsesTest {
         assertThat(responses.toStored("widget", outcome)).isEqualTo(new StoredResponse(status, contentType, body));
     }
 
-    /** The stored text errors are the TextErrors responses the controller sends without a key (S5). */
+    static Stream<Arguments> toStoredMatchesUnkeyedCreateResponse() {
+        SkuDetails details = new SkuDetails("Linen shirt", "Long sleeve", Optional.of(new SkuCost(12900, "USD")),
+                List.of("https://cdn.example.com/a.jpg"));
+        return Stream.of(
+                Arguments.of(new DetailsOutcome.Created(new SkuItem("widget", 5, Optional.of(details), 1)), 201,
+                        "application/json", "{\"skuId\":\"widget\",\"quantity\":5,\"details\":{"
+                                + "\"name\":\"Linen shirt\",\"description\":\"Long sleeve\","
+                                + "\"cost\":{\"amount\":12900,\"currency\":\"USD\"},"
+                                + "\"images\":[\"https://cdn.example.com/a.jpg\"]}}"),
+                Arguments.of(new DetailsOutcome.Created(new SkuItem("widget", 0, Optional.empty(), 0)), 201,
+                        "application/json", "{\"skuId\":\"widget\",\"quantity\":0}"),
+                Arguments.of(new DetailsOutcome.AlreadyExists(), 409, "text/plain", SKU_EXISTS));
+    }
+
+    /**
+     * Y4, A28, A38: the v2 create's 201 (the item, without the ETag's details version) and 409 are stored exactly as
+     * the unkeyed create sends them; the first details version rides in the ETag, not the body.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void toStoredMatchesUnkeyedCreateResponse(DetailsOutcome outcome, int status, String contentType, String body) {
+        assertThat(responses.toStored("widget", outcome)).isEqualTo(new StoredResponse(status, contentType, body));
+    }
+
+    /**
+     * S5, G6: a stored text error renders as the text/plain response the unkeyed path sends: G6's exact body with
+     * Content-Type text/plain, and the overflow 400 exactly as TextErrors.invalidRequest().
+     */
     @Test
-    void storedTextErrorsMatchTextErrors() {
-        assertStoredEquals(responses.toStored("widget", new StockOutcome.NotFound()), TextErrors.skuNotFound());
+    void storedTextErrorsMatchTheUnkeyedResponses() {
+        assertStoredEquals(responses.toStored("widget", new StockOutcome.NotFound()),
+                textPlain(HttpStatus.NOT_FOUND, "SKU not found"));
         assertStoredEquals(responses.toStored("widget", new StockOutcome.Insufficient()),
-                TextErrors.insufficientInventory());
+                textPlain(HttpStatus.BAD_REQUEST, "Insufficient inventory"));
         assertStoredEquals(responses.toStored("widget", new StockOutcome.Overflow()), TextErrors.invalidRequest());
+        assertStoredEquals(responses.toStored("widget", new DetailsOutcome.AlreadyExists()),
+                textPlain(HttpStatus.CONFLICT, SKU_EXISTS));
+    }
+
+    private static ResponseEntity<String> textPlain(HttpStatus status, String body) {
+        return ResponseEntity.status(status).contentType(MediaType.TEXT_PLAIN).body(body);
     }
 
     private static void assertStoredEquals(StoredResponse stored, ResponseEntity<String> expected) {

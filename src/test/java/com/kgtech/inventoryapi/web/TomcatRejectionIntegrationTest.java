@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.web;
 
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,8 +50,8 @@ class TomcatRejectionIntegrationTest {
 
     private static final String SEEDED = "ABC-1";
     private static final String QUANTITY_BODY = "{\"quantity\":1}";
-    /** Package-private in inventory.web, so it is named rather than referenced. */
-    private static final String TEXT_VALVE = "com.kgtech.inventoryapi.inventory.web.TextErrorReportValve";
+    /** The app-wide text valve lives in web beside this test (C1, A37). */
+    private static final String TEXT_VALVE = TextErrorReportValve.class.getName();
     private static final int OVERSIZED = 10_000;
 
     @LocalServerPort

@@ -36,8 +36,8 @@ class DurabilityAcrossServiceInstancesTest {
 
     @Test
     void aFreshInstanceReportsTheAcknowledgedStock() {
-        assertThat(service.add("durable", 10, null)).isEqualTo(new StockOutcome.Ok(10));
-        assertThat(service.purchase("durable", 3, null)).isEqualTo(new StockOutcome.Ok(7));
+        assertThat(service.add("durable", 10, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Ok(10)));
+        assertThat(service.purchase("durable", 3, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Ok(7)));
         assertThat(service.find("durable")).contains(new InventoryItem("durable", 7));
 
         // A real second instance: the full application on its own random port, configured by connection properties

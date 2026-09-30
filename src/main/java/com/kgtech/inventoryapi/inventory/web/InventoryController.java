@@ -6,8 +6,6 @@ import static com.kgtech.inventoryapi.inventory.SkuId.MAX_LENGTH;
 import static com.kgtech.inventoryapi.inventory.SkuId.PATTERN_REGEX;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.AFTER_DESCRIPTION;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_TITLE;
-import static com.kgtech.inventoryapi.inventory.web.InventoryApi.API_VERSION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.BASE_PATH;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_INVALID_DESCRIPTION;
 import static com.kgtech.inventoryapi.inventory.web.InventoryApi.CREATE_OK_DESCRIPTION;
@@ -37,12 +35,10 @@ import static org.springframework.http.MediaType.TEXT_PLAIN_VALUE;
 
 import java.util.List;
 
-import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.headers.Header;
-import io.swagger.v3.oas.annotations.info.Info;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -60,23 +56,19 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import com.kgtech.inventoryapi.inventory.DetailsOutcome;
+import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.InventoryItem;
-import com.kgtech.inventoryapi.inventory.InventoryPage;
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
-import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
-import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
-import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
-import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
+import com.kgtech.inventoryapi.inventory.Page;
+import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
+import com.kgtech.inventoryapi.inventory.WriteResult.Done;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+import com.kgtech.inventoryapi.web.TextErrors;
 
-/** The four spec operations (hand-written, D7), with the spec's info, operationIds and summaries. */
-@OpenAPIDefinition(info = @Info(title = API_TITLE, version = API_VERSION))
+/** The four spec operations (hand-written, D7), with the spec's operationIds and summaries. */
 @Tag(name = TAG)
 @RestController
 @RequestMapping(BASE_PATH)
@@ -102,7 +94,7 @@ class InventoryController {
             @PathVariable String skuId) {
         return service.find(skuId)
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
-                .orElseGet(TextErrors::skuNotFound);
+                .orElseGet(InventoryErrors::skuNotFound);
     }
 
     @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
@@ -160,47 +152,25 @@ class InventoryController {
                     schema = @Schema(type = "string"))
             @RequestParam(name = AFTER, required = false) String after,
             HttpServletRequest request) {
-        if (isRepeated(request, AFTER)) {
+        if (Paging.repeatsAfter(request)) {
             return TextErrors.invalidRequest();
         }
-        InventoryPage page = service.list(limit, after);
+        Page<InventoryItem> page = service.list(limit, after);
         return page.next()
-                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next)).body(page.items()))
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, Paging.nextLink(BASE_PATH, next))
+                        .body(page.items()))
                 .orElseGet(() -> ResponseEntity.ok(page.items()));
     }
 
-    /** Z3: the cursor is one sku_id, so a second value (even an empty one) makes the request ambiguous. */
-    private static boolean isRepeated(HttpServletRequest request, String name) {
-        String[] values = request.getParameterValues(name);
-        return values != null && values.length > 1;
-    }
-
     /**
-     * G9, C2: absolute next-page URL from the request's scheme, host, port and context path plus the routed path, never
-     * the raw request URI; only limit and after, with after strictly encoded.
-     */
-    private static String nextLink(Next next) {
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path(BASE_PATH)
-                .queryParam(LIMIT, next.limit())
-                .queryParam(AFTER, "{after}")
-                .encode()
-                .buildAndExpand(next.after())
-                .toUriString();
-        return "<" + url + ">; rel=\"next\"";
-    }
-
-    /**
-     * One mapping for every write result (C-17, issue #28): a stock outcome is rendered through the same
+     * One mapping for both stock writes' results (C-17, issue #28, A38): an outcome is rendered through the same
      * OutcomeResponses.toStored that a keyed request stores, so unkeyed and replayed responses are byte-identical (Y4).
      */
-    private ResponseEntity<?> toResponse(String skuId, WriteResult result) {
+    private <O extends StockOutcome> ResponseEntity<?> toResponse(String skuId, WriteResult<O> result) {
         return switch (result) {
-            case Stored stored -> StoredResponses.toResponseEntity(stored.response());
-            case InvalidRequest _ -> TextErrors.invalidRequest();
-            case Ok _, NotFound _, Insufficient _, Overflow _ ->
-                    StoredResponses.toResponseEntity(outcomes.toStored(skuId, result));
-            case DetailsOutcome _ -> throw new IllegalStateException("not a stock outcome: " + result);
+            case Done<O>(O outcome) -> StoredResponses.toResponseEntity(outcomes.toStored(skuId, outcome));
+            case Stored<O>(StoredResponse response) -> StoredResponses.toResponseEntity(response);
+            case InvalidRequest<O> _ -> TextErrors.invalidRequest();
         };
     }
 }

@@ -1,7 +1,10 @@
 package com.kgtech.inventoryapi.inventory;
 
-/** Business results of the v2 create; never thrown, stored against an Idempotency-Key like stock outcomes (R1, A28). */
-public sealed interface DetailsOutcome extends WriteResult {
+/**
+ * Business results of the v2 create; never thrown, stored against an Idempotency-Key like stock outcomes (R1, A28).
+ * Not a WriteResult: the create returns WriteResult<DetailsOutcome>, which wraps one (A38).
+ */
+public sealed interface DetailsOutcome {
 
     /** 201: the created SKU with its details and initial stock. */
     record Created(SkuItem item) implements DetailsOutcome {

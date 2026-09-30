@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory.web;
+package com.kgtech.inventoryapi.web;
 
 import java.io.IOException;
 import java.io.Writer;

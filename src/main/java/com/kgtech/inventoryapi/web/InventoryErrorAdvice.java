@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory.web;
+package com.kgtech.inventoryapi.web;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import java.util.List;
@@ -28,6 +28,11 @@ import org.springframework.web.util.pattern.PathPatternParser;
  * Maps every thrown error to a text/plain response (D6, S5, S6, G6, T3, U2, Z3), except on /actuator/** and the
  * springdoc paths, where it rethrows so Spring Boot's own error handling answers (S6, C1). An undecodable query string
  * is the exception: it is answered here on every path (C1, Z3).
+ * <p>
+ * Despite its name, the advice is app-wide: it serves every path outside those library paths, unknown paths included
+ * (G10, S6), not only the inventory feature's routes, and it answers only with web's generic texts. The name is kept
+ * because DECISIONS.md names the class in S6 and Z3, and DECISIONS.md is never hand-edited on v2 (S9,
+ * DEVIATIONS.md); a rename would leave it naming a class that does not exist (A37).
  */
 @RestControllerAdvice
 class InventoryErrorAdvice {

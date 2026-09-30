@@ -43,7 +43,7 @@ class InventoryServiceTest {
 
     @Test
     void addCreatesTheSkuRowAndFirstLedgerRow() {
-        assertThat(service.add("widget", 5, null)).isEqualTo(new StockOutcome.Ok(5));
+        assertThat(service.add("widget", 5, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Ok(5)));
 
         assertThat(row("widget")).containsEntry("quantity", 5L).containsEntry("version", 1L);
         assertThat(ledgerRows("widget")).isEqualTo(1);
@@ -53,7 +53,7 @@ class InventoryServiceTest {
     @Test
     void addAccumulatesAndBumpsTheVersion() {
         service.add("widget", 5, null);
-        assertThat(service.add("widget", 7, null)).isEqualTo(new StockOutcome.Ok(12));
+        assertThat(service.add("widget", 7, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Ok(12)));
 
         assertThat(row("widget")).containsEntry("quantity", 12L).containsEntry("version", 2L);
         assertThat(ledgerRows("widget")).isEqualTo(2);
@@ -64,8 +64,8 @@ class InventoryServiceTest {
     void addRejectsOverflowWithoutWriting() {
         Tables.seed(jdbc, "big", Long.MAX_VALUE - 5);
 
-        assertThat(service.add("big", 5, null)).isEqualTo(new StockOutcome.Ok(Long.MAX_VALUE));
-        assertThat(service.add("big", 1, null)).isEqualTo(new StockOutcome.Overflow());
+        assertThat(service.add("big", 5, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Ok(Long.MAX_VALUE)));
+        assertThat(service.add("big", 1, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Overflow()));
 
         assertThat(row("big")).containsEntry("quantity", Long.MAX_VALUE).containsEntry("version", 2L);
         assertThat(ledgerRows("big")).isEqualTo(2);
@@ -75,7 +75,7 @@ class InventoryServiceTest {
     void purchaseDeductsAndRecords() {
         Tables.seed(jdbc, "widget", 10);
 
-        assertThat(service.purchase("widget", 4, null)).isEqualTo(new StockOutcome.Ok(6));
+        assertThat(service.purchase("widget", 4, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Ok(6)));
 
         assertThat(row("widget")).containsEntry("quantity", 6L).containsEntry("version", 2L);
         assertThat(jdbc.sql("SELECT quantity_delta FROM inventory_ledger WHERE sku_id = 'widget' AND reason = 'purchase'")
@@ -86,9 +86,11 @@ class InventoryServiceTest {
     void purchaseNeverOversellsAndWritesNothingWhenShort() {
         Tables.seed(jdbc, "widget", 3);
 
-        assertThat(service.purchase("widget", 4, null)).isEqualTo(new StockOutcome.Insufficient());
-        assertThat(service.purchase("widget", 3, null)).isEqualTo(new StockOutcome.Ok(0));
-        assertThat(service.purchase("widget", 1, null)).isEqualTo(new StockOutcome.Insufficient());
+        assertThat(service.purchase("widget", 4, null))
+                .isEqualTo(new WriteResult.Done<>(new StockOutcome.Insufficient()));
+        assertThat(service.purchase("widget", 3, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.Ok(0)));
+        assertThat(service.purchase("widget", 1, null))
+                .isEqualTo(new WriteResult.Done<>(new StockOutcome.Insufficient()));
 
         assertThat(row("widget")).containsEntry("quantity", 0L);
         assertThat(ledgerRows("widget")).isEqualTo(2);
@@ -97,7 +99,7 @@ class InventoryServiceTest {
 
     @Test
     void purchaseOfUnknownSkuIsNotFound() {
-        assertThat(service.purchase("ghost", 1, null)).isEqualTo(new StockOutcome.NotFound());
+        assertThat(service.purchase("ghost", 1, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.NotFound()));
         assertThat(service.find("ghost")).isEmpty();
         assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isZero();
     }
@@ -114,8 +116,8 @@ class InventoryServiceTest {
     /** S2, G11: malformed ids are rejected before any I/O. */
     @Test
     void malformedSkuIdIsRejectedBeforeAnyWrite() {
-        assertThat(service.add("bad/id", 1, null)).isEqualTo(new WriteResult.InvalidRequest());
-        assertThat(service.purchase("bad/id", 1, null)).isEqualTo(new StockOutcome.NotFound());
+        assertThat(service.add("bad/id", 1, null)).isEqualTo(new WriteResult.InvalidRequest<>());
+        assertThat(service.purchase("bad/id", 1, null)).isEqualTo(new WriteResult.Done<>(new StockOutcome.NotFound()));
         assertThat(service.find("bad/id")).isEmpty();
         assertThat(jdbc.sql("SELECT count(*) FROM sku").query(Long.class).single()).isZero();
     }

@@ -2,14 +2,25 @@ package com.kgtech.inventoryapi.inventory;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 
-/** What a write returns: a stock or details outcome, a stored keyed response, or an invalid request (R1, A33). */
-public sealed interface WriteResult permits StockOutcome, DetailsOutcome, WriteResult.Stored, WriteResult.InvalidRequest {
+/**
+ * What a write returns (R1, A33, A38): the outcome of its own family {@code O} (StockOutcome.Add for an add,
+ * StockOutcome.Purchase for a purchase, DetailsOutcome for the v2 create), a stored keyed response, or an invalid
+ * request. A caller's switch over one write's result is exhaustive over that write's outcomes only.
+ */
+public sealed interface WriteResult<O> {
 
-    /** A first or replayed keyed response, sent unchanged (Y4). */
-    record Stored(StoredResponse response) implements WriteResult {
+    /** The write's outcome, unkeyed; also purchase's 404 for a malformed skuId (G11). Rendered like a stored one. */
+    record Done<O>(O outcome) implements WriteResult<O> {
     }
 
-    /** 400 "Invalid request": malformed skuId on create (spec or v2), malformed or reused Idempotency-Key; never stored. */
-    record InvalidRequest() implements WriteResult {
+    /** A first or replayed keyed response, sent unchanged (Y4). */
+    record Stored<O>(StoredResponse response) implements WriteResult<O> {
+    }
+
+    /**
+     * 400 "Invalid request": a malformed skuId on create (spec or v2), a malformed or reused Idempotency-Key; never
+     * stored.
+     */
+    record InvalidRequest<O>() implements WriteResult<O> {
     }
 }

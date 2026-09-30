@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory.web;
+package com.kgtech.inventoryapi.web;
 
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;

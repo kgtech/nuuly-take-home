@@ -6,23 +6,23 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
+import com.kgtech.inventoryapi.inventory.DetailsOutcome;
 import com.kgtech.inventoryapi.inventory.DetailsOutcome.AlreadyExists;
 import com.kgtech.inventoryapi.inventory.DetailsOutcome.Created;
 import com.kgtech.inventoryapi.inventory.InventoryItem;
 import com.kgtech.inventoryapi.inventory.KeyedResponses;
+import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Insufficient;
 import com.kgtech.inventoryapi.inventory.StockOutcome.NotFound;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Ok;
 import com.kgtech.inventoryapi.inventory.StockOutcome.Overflow;
-import com.kgtech.inventoryapi.inventory.WriteResult;
-import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
-import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+import com.kgtech.inventoryapi.web.TextErrors;
 
 import tools.jackson.databind.json.JsonMapper;
 
 /**
  * How write outcomes become responses: the one rendering an unkeyed answer gets and a keyed one stores against its
- * Idempotency-Key (R1, U1, Y4, A28, A33).
+ * Idempotency-Key (R1, U1, Y4, A28, A33), one exhaustive switch per outcome family (A38).
  */
 @Component
 final class OutcomeResponses implements KeyedResponses {
@@ -33,20 +33,25 @@ final class OutcomeResponses implements KeyedResponses {
         this.json = json;
     }
 
-    /** Y4, R1, U1: exactly the status, Content-Type and body the unkeyed path sends. */
+    /** Y4, R1, U1: exactly the status, Content-Type and body the unkeyed stock write sends. */
     @Override
-    public StoredResponse toStored(String skuId, WriteResult result) {
-        return switch (result) {
+    public StoredResponse toStored(String skuId, StockOutcome outcome) {
+        return switch (outcome) {
             case Ok ok -> new StoredResponse(200, APPLICATION_JSON_VALUE,
                     json.writeValueAsString(new InventoryItem(skuId, ok.quantity())));
-            case NotFound _ -> text(TextErrors.skuNotFound());
-            case Insufficient _ -> text(TextErrors.insufficientInventory());
+            case NotFound _ -> text(InventoryErrors.skuNotFound());
+            case Insufficient _ -> text(InventoryErrors.insufficientInventory());
             case Overflow _ -> text(TextErrors.invalidRequest());
+        };
+    }
+
+    /** Y4, A28: exactly the status, Content-Type and body the unkeyed create sends (its ETag is the controller's). */
+    @Override
+    public StoredResponse toStored(String skuId, DetailsOutcome outcome) {
+        return switch (outcome) {
             case Created created -> new StoredResponse(201, APPLICATION_JSON_VALUE,
                     json.writeValueAsString(created.item()));
-            case AlreadyExists _ -> text(TextErrors.skuExists());
-            case Stored _, InvalidRequest _ ->
-                    throw new IllegalStateException("not a stock outcome: " + result);
+            case AlreadyExists _ -> text(InventoryErrors.skuExists());
         };
     }
 

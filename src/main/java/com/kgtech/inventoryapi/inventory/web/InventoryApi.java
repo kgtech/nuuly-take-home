@@ -18,8 +18,6 @@ final class InventoryApi {
     static final String LIMIT = "limit";
     static final String AFTER = "after";
 
-    static final String API_TITLE = "Inventory API";
-    static final String API_VERSION = "1.0.0";
     static final String TAG = "inventory";
 
     static final String GET_SUMMARY = "Get inventory for a SKU";
@@ -63,13 +61,13 @@ final class InventoryApi {
             + "one created by POST /inventory/{skuId}) is 409; set its details with PUT and add stock with "
             + "POST /inventory/{skuId}.";
     static final String V2_CREATED_DESCRIPTION = "The created SKU";
-    static final String V2_CONFLICT_DESCRIPTION = TextErrors.SKU_EXISTS;
+    static final String V2_CONFLICT_DESCRIPTION = InventoryErrors.SKU_EXISTS;
     static final String V2_REPLACE_SUMMARY = "Replace a SKU's details";
     static final String V2_REPLACE_DESCRIPTION = "Replaces the SKU's details (creates them for a SKU that has none). "
             + "Stock is not changed. With If-Match, the details are replaced only when their current ETag is one of "
             + "the listed values, else 412.";
     static final String V2_REPLACED_DESCRIPTION = "The SKU after the update";
-    static final String V2_PRECONDITION_DESCRIPTION = TextErrors.DETAILS_CHANGED;
+    static final String V2_PRECONDITION_DESCRIPTION = InventoryErrors.DETAILS_CHANGED;
     static final String ETAG_DESCRIPTION = "The details version, a strong validator for If-Match; \"0\" before any "
             + "details";
     static final String CREATED_ETAG_DESCRIPTION = "The details version of a new SKU, always \"1\" (also on a replayed "

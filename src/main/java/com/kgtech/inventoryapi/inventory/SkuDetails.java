@@ -26,10 +26,10 @@ public record SkuDetails(
                 schema = @Schema(type = "string", format = "uri", maxLength = SkuDetails.MAX_URL))
         List<String> images) {
 
-    public static final int MAX_NAME = 120;
-    public static final int MAX_DESCRIPTION = 2000;
-    public static final int MAX_IMAGES = 10;
-    public static final int MAX_URL = 2048;
+    private static final int MAX_NAME = 120;
+    private static final int MAX_DESCRIPTION = 2000;
+    private static final int MAX_IMAGES = 10;
+    private static final int MAX_URL = 2048;
 
     public SkuDetails {
         if (name == null || name.isBlank() || name.length() > MAX_NAME) {

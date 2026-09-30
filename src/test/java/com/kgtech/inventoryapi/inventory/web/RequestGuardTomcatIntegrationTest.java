@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.inventory.web;
 
 import static com.kgtech.inventoryapi.RawHttp.header;
 import static org.springframework.http.HttpHeaders.ACCEPT;

@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi;
+package com.kgtech.inventoryapi.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.HttpHeaders.ACCEPT;
@@ -27,6 +27,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
 
 import com.jayway.jsonpath.JsonPath;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
 
 /**

@@ -3,6 +3,7 @@ java = "25"
 spring-boot = "4.1.1"
 postgres = "18"
 springdoc = "3.1.1"
+archunit = "1.5.1"
 
 [libraries]
 spring-boot-starter-webmvc = { module = "org.springframework.boot:spring-boot-starter-webmvc" }
@@ -20,6 +21,7 @@ spring-boot-testcontainers = { module = "org.springframework.boot:spring-boot-te
 testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql" }
 testcontainers = { module = "org.testcontainers:testcontainers" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+archunit = { module = "com.tngtech.archunit:archunit", version.ref = "archunit" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }

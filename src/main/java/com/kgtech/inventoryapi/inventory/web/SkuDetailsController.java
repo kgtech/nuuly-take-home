@@ -67,26 +67,24 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.kgtech.inventoryapi.idempotency.StoredResponse;
 import com.kgtech.inventoryapi.inventory.CreateSku;
-import com.kgtech.inventoryapi.inventory.DetailsOutcome.AlreadyExists;
-import com.kgtech.inventoryapi.inventory.DetailsOutcome.Created;
+import com.kgtech.inventoryapi.inventory.DetailsOutcome;
 import com.kgtech.inventoryapi.inventory.DetailsPrecondition;
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.Page;
 import com.kgtech.inventoryapi.inventory.ReplaceResult;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.NotFound;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.Replaced;
 import com.kgtech.inventoryapi.inventory.ReplaceResult.VersionMismatch;
 import com.kgtech.inventoryapi.inventory.SkuDetails;
 import com.kgtech.inventoryapi.inventory.SkuItem;
-import com.kgtech.inventoryapi.inventory.SkuPage;
-import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
+import com.kgtech.inventoryapi.inventory.WriteResult.Done;
 import com.kgtech.inventoryapi.inventory.WriteResult.InvalidRequest;
 import com.kgtech.inventoryapi.inventory.WriteResult.Stored;
+import com.kgtech.inventoryapi.web.TextErrors;
 
 /** The v2 details operations (DESIGN-V2 §8, A21): create with details, replace details, read one, read a page. */
 @Tag(name = TAG_V2)
@@ -118,7 +116,7 @@ class SkuDetailsController {
             @PathVariable String skuId) {
         return service.findSku(skuId)
                 .<ResponseEntity<?>>map(item -> withEtag(ResponseEntity.ok(), item))
-                .orElseGet(TextErrors::skuNotFound);
+                .orElseGet(InventoryErrors::skuNotFound);
     }
 
     @PostMapping(path = SKU_PATH, consumes = APPLICATION_JSON_VALUE, produces = APPLICATION_JSON_VALUE)
@@ -170,8 +168,8 @@ class SkuDetailsController {
         ReplaceResult result = service.replaceDetails(skuId, body, precondition.get());
         return switch (result) {
             case Replaced replaced -> withEtag(ResponseEntity.ok(), replaced.item());
-            case NotFound _ -> TextErrors.skuNotFound();
-            case VersionMismatch _ -> TextErrors.detailsChanged();
+            case NotFound _ -> InventoryErrors.skuNotFound();
+            case VersionMismatch _ -> InventoryErrors.detailsChanged();
             case ReplaceResult.InvalidRequest _ -> TextErrors.invalidRequest();
         };
     }
@@ -193,27 +191,14 @@ class SkuDetailsController {
                     schema = @Schema(type = "string"))
             @RequestParam(name = AFTER, required = false) String after,
             HttpServletRequest request) {
-        String[] afters = request.getParameterValues(AFTER);
-        if (afters != null && afters.length > 1) {
+        if (Paging.repeatsAfter(request)) {
             return TextErrors.invalidRequest(); // Z3
         }
-        SkuPage page = service.listSkus(limit, after);
+        Page<SkuItem> page = service.listSkus(limit, after);
         return page.next()
-                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, nextLink(next))
+                .<ResponseEntity<?>>map(next -> ResponseEntity.ok().header(LINK, Paging.nextLink(V2_BASE_PATH, next))
                         .header(CACHE_CONTROL, NO_STORE).body(page.items()))
                 .orElseGet(() -> ResponseEntity.ok().header(CACHE_CONTROL, NO_STORE).body(page.items()));
-    }
-
-    /** C2 for v2: the Link is built from the request's origin plus the routed base path. */
-    private static String nextLink(Next next) {
-        String url = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path(V2_BASE_PATH)
-                .queryParam(LIMIT, next.limit())
-                .queryParam(AFTER, "{after}")
-                .encode()
-                .buildAndExpand(next.after())
-                .toUriString();
-        return "<" + url + ">; rel=\"next\"";
     }
 
     /** The ETag is a details validator for If-Match, not a cache key for the count: no store, no 304 (§8). */
@@ -224,16 +209,15 @@ class SkuDetailsController {
     }
 
     /**
-     * One mapping for every create result: a details outcome is rendered through the same OutcomeResponses.toStored a
-     * keyed request stores, so unkeyed and replayed responses are byte-identical (Y4); a 201 carries the ETag of
-     * version 1 whether first or replayed.
+     * One mapping for every create result (A38): a details outcome is rendered through the same
+     * OutcomeResponses.toStored a keyed request stores, so unkeyed and replayed responses are byte-identical (Y4); a
+     * 201 carries the ETag of version 1 whether first or replayed.
      */
-    private ResponseEntity<?> toResponse(String skuId, WriteResult result) {
+    private ResponseEntity<?> toResponse(String skuId, WriteResult<DetailsOutcome> result) {
         return switch (result) {
-            case Stored stored -> render(stored.response());
-            case InvalidRequest _ -> TextErrors.invalidRequest();
-            case Created _, AlreadyExists _ -> render(outcomes.toStored(skuId, result));
-            case StockOutcome _ -> throw new IllegalStateException("not a create outcome: " + result);
+            case Done<DetailsOutcome>(DetailsOutcome outcome) -> render(outcomes.toStored(skuId, outcome));
+            case Stored<DetailsOutcome>(StoredResponse response) -> render(response);
+            case InvalidRequest<DetailsOutcome> _ -> TextErrors.invalidRequest();
         };
     }
 

@@ -44,8 +44,8 @@ class SkuDetailsConcurrencyTest {
     void concurrentCreatesOfOneIdGiveOneCreatedAndTheRest409() throws InterruptedException {
         String sku = "race-" + UUID.randomUUID().toString().substring(0, 8);
 
-        List<WriteResult> results = Concurrently.run(THREADS,
-                () -> service.create(sku, new CreateSku(DETAILS, 3), null));
+        List<DetailsOutcome> results = Concurrently.run(THREADS, () ->
+                ((WriteResult.Done<DetailsOutcome>) service.create(sku, new CreateSku(DETAILS, 3), null)).outcome());
 
         assertThat(results).filteredOn(DetailsOutcome.Created.class::isInstance).hasSize(1);
         assertThat(results).filteredOn(DetailsOutcome.AlreadyExists.class::isInstance).hasSize(THREADS - 1);
@@ -60,12 +60,12 @@ class SkuDetailsConcurrencyTest {
         String sku = "race-add-" + UUID.randomUUID().toString().substring(0, 8);
         AtomicInteger turn = new AtomicInteger();
 
-        List<WriteResult> results = Concurrently.run(2, () -> turn.getAndIncrement() == 0
-                ? service.create(sku, new CreateSku(DETAILS, 5), null)
-                : service.add(sku, 2, null));
+        List<Object> results = Concurrently.run(2, () -> turn.getAndIncrement() == 0
+                ? ((WriteResult.Done<DetailsOutcome>) service.create(sku, new CreateSku(DETAILS, 5), null)).outcome()
+                : ((WriteResult.Done<StockOutcome.Add>) service.add(sku, 2, null)).outcome());
 
-        WriteResult created = results.stream().filter(DetailsOutcome.class::isInstance).findFirst().orElseThrow();
-        WriteResult added = results.stream().filter(StockOutcome.class::isInstance).findFirst().orElseThrow();
+        Object created = results.stream().filter(DetailsOutcome.class::isInstance).findFirst().orElseThrow();
+        Object added = results.stream().filter(StockOutcome.class::isInstance).findFirst().orElseThrow();
         assertThat(added).isInstanceOf(StockOutcome.Ok.class);
         // Either order: the add lands on the created SKU (details kept) or the create finds the SKU and answers 409.
         if (created instanceof DetailsOutcome.Created) {
@@ -86,13 +86,14 @@ class SkuDetailsConcurrencyTest {
         String sku = "keyed-" + UUID.randomUUID().toString().substring(0, 8);
         String key = UUID.randomUUID().toString();
 
-        List<WriteResult> results = Concurrently.run(THREADS,
+        List<WriteResult<DetailsOutcome>> results = Concurrently.run(THREADS,
                 () -> service.create(sku, new CreateSku(DETAILS, 3), key));
 
         assertThat(results).allSatisfy(r -> assertThat(r).isInstanceOf(WriteResult.Stored.class));
         java.util.Set<String> bodies = new java.util.HashSet<>();
-        for (WriteResult r : results) {
-            com.kgtech.inventoryapi.idempotency.StoredResponse response = ((WriteResult.Stored) r).response();
+        for (WriteResult<DetailsOutcome> r : results) {
+            com.kgtech.inventoryapi.idempotency.StoredResponse response =
+                    ((WriteResult.Stored<DetailsOutcome>) r).response();
             assertThat(response.status()).isEqualTo(201);
             bodies.add(response.body());
         }
@@ -105,9 +106,10 @@ class SkuDetailsConcurrencyTest {
 
         // The 409 variant: the same fresh key on a SKU that now exists stores and replays one 409.
         String again = UUID.randomUUID().toString();
-        List<WriteResult> conflicts = Concurrently.run(THREADS,
+        List<WriteResult<DetailsOutcome>> conflicts = Concurrently.run(THREADS,
                 () -> service.create(sku, new CreateSku(DETAILS, 3), again));
-        assertThat(conflicts).allSatisfy(r -> assertThat(((WriteResult.Stored) r).response().status()).isEqualTo(409));
+        assertThat(conflicts).allSatisfy(
+                r -> assertThat(((WriteResult.Stored<DetailsOutcome>) r).response().status()).isEqualTo(409));
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(1);
     }
 
@@ -120,8 +122,8 @@ class SkuDetailsConcurrencyTest {
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
     void aPutCompletesWhileAPurchaseHoldsTheRowLock(boolean detailsExist) throws Exception {
         if (detailsExist) {
-            assertThat(service.create("locked-1", new CreateSku(DETAILS, 5), null))
-                    .isInstanceOf(DetailsOutcome.Created.class);
+            assertThat(((WriteResult.Done<DetailsOutcome>) service.create("locked-1", new CreateSku(DETAILS, 5), null))
+                    .outcome()).isInstanceOf(DetailsOutcome.Created.class);
         } else {
             Tables.seed(jdbc, "locked-1", 5);
         }
@@ -161,7 +163,8 @@ class SkuDetailsConcurrencyTest {
 
     @Test
     void concurrentConditionalPutsApplyExactlyOne() throws InterruptedException {
-        assertThat(service.create("edit-1", new CreateSku(DETAILS, 1), null)).isInstanceOf(DetailsOutcome.Created.class);
+        assertThat(((WriteResult.Done<DetailsOutcome>) service.create("edit-1", new CreateSku(DETAILS, 1), null))
+                .outcome()).isInstanceOf(DetailsOutcome.Created.class);
         DetailsPrecondition version1 = new DetailsPrecondition.Versions(List.of(1L));
         AtomicInteger n = new AtomicInteger();
 
