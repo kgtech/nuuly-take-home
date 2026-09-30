@@ -34,21 +34,17 @@ public final class Tables {
         return counts;
     }
 
-    /** Seeds stock the way a committed add would leave it: the balance row plus one ledger row (DESIGN-V2 §1). */
+    /** Seeds stock the way a committed add would leave it: the balance row, whose V5 trigger writes the ledger row (A14). */
     public static void seed(JdbcClient jdbc, String skuId, long quantity) {
         jdbc.sql(SEED_SKU).params(skuId, quantity).update();
-        jdbc.sql(SEED_LEDGER).params(skuId, quantity).update();
     }
 
     public static void seed(JdbcTemplate jdbc, String skuId, long quantity) {
         jdbc.update(SEED_SKU, skuId, quantity);
-        jdbc.update(SEED_LEDGER, skuId, quantity);
     }
 
     private static final String SEED_SKU = """
             INSERT INTO sku (sku_id, quantity, version) VALUES (?, ?, 1)
             ON CONFLICT (sku_id) DO UPDATE SET quantity = sku.quantity + EXCLUDED.quantity, version = sku.version + 1
             """;
-    private static final String SEED_LEDGER =
-            "INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, ?, 'add')";
 }

@@ -6,7 +6,10 @@ import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** All stock SQL (DESIGN-V2 §2): conditional row updates plus the append-only ledger, through JdbcClient. */
+/**
+ * All stock SQL (DESIGN-V2 §2): conditional row updates through JdbcClient. Postgres writes the append-only ledger row
+ * whenever a balance changes (V5 trigger, A14), so this class never inserts one.
+ */
 @Repository
 class StockRepository {
 
@@ -28,8 +31,6 @@ class StockRepository {
             RETURNING quantity, version
             """;
 
-    static final String LEDGER = "INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (:id, :d, :r)";
-
     static final String EXISTS = "SELECT EXISTS (SELECT 1 FROM sku WHERE sku_id = :id)";
 
     static final String FIND = "SELECT quantity, version FROM sku WHERE sku_id = :id";
@@ -45,21 +46,16 @@ class StockRepository {
         this.jdbc = jdbc;
     }
 
-    /** Inside the caller's transaction: create the SKU if needed, add, record. Empty → overflow (nothing written). */
+    /** Inside the caller's transaction: create the SKU if needed, then add. Empty → overflow (nothing written). */
     Optional<Balance> add(String skuId, int quantity) {
         jdbc.sql(INSERT_SKU).param("id", skuId).update();
-        Optional<Balance> balance = jdbc.sql(ADD).param("id", skuId).param("q", quantity).param("max", MAX_QUANTITY)
+        return jdbc.sql(ADD).param("id", skuId).param("q", quantity).param("max", MAX_QUANTITY)
                 .query(Balance.class).optional();
-        balance.ifPresent(b -> record(skuId, quantity, "add"));
-        return balance;
     }
 
-    /** Inside the caller's transaction: deduct and record. Empty → missing SKU or insufficient stock. */
+    /** Inside the caller's transaction: deduct. Empty → missing SKU or insufficient stock. */
     Optional<Balance> purchase(String skuId, int quantity) {
-        Optional<Balance> balance =
-                jdbc.sql(PURCHASE).param("id", skuId).param("q", quantity).query(Balance.class).optional();
-        balance.ifPresent(b -> record(skuId, -(long) quantity, "purchase"));
-        return balance;
+        return jdbc.sql(PURCHASE).param("id", skuId).param("q", quantity).query(Balance.class).optional();
     }
 
     boolean exists(String skuId) {
@@ -74,9 +70,5 @@ class StockRepository {
     List<InventoryItem> page(String after, long limit) {
         return jdbc.sql(PAGE).param("after", after).param("limit", limit)
                 .query((rs, n) -> new InventoryItem(rs.getString("sku_id"), rs.getLong("quantity"))).list();
-    }
-
-    private void record(String skuId, long delta, String reason) {
-        jdbc.sql(LEDGER).param("id", skuId).param("d", delta).param("r", reason).update();
     }
 }
