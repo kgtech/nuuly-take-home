@@ -22,10 +22,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -33,10 +33,10 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * D9, S11, W2 over real HTTP (#4): concurrent purchases and adds through Tomcat, the filter chain and the Hikari
  * pool, asserting the client only ever sees the spec's 200 and 400 (never a 500). Not @Transactional: every request
- * commits its own SERIALIZABLE transaction, so the tables are emptied before each test.
+ * commits its own READ COMMITTED transaction (E1), so the tables are reset before each test. Each test ends by
+ * asserting the balance invariants (A14).
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class InventoryHttpConcurrencyTest {
 
     /** W2 caps concurrency tests at 8 threads per SKU. */
@@ -57,9 +57,7 @@ class InventoryHttpConcurrencyTest {
 
     @BeforeEach
     void setUp() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
         http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(TIMEOUT).build();
     }
 
@@ -116,6 +114,12 @@ class InventoryHttpConcurrencyTest {
         return jdbc.sql(sql).param(sku).query(Long.class).single();
     }
 
+    /** A14: after concurrent writes every balance equals its ledger sum and none is negative. */
+    private void assertInvariants() {
+        assertThat(Invariants.balanceMismatches(jdbc)).as("quantity = SUM(quantity_delta)").isEmpty();
+        assertThat(Invariants.minQuantity(jdbc)).as("smallest quantity").isNotNegative();
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {1, 7})
     void concurrentPurchasesNeverOversell(int stock) throws Exception {
@@ -138,6 +142,7 @@ class InventoryHttpConcurrencyTest {
         assertThat(ledgerSum(sku)).isZero();
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
                 .isEqualTo(stock);
+        assertInvariants();
     }
 
     @Test
@@ -152,5 +157,6 @@ class InventoryHttpConcurrencyTest {
         assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(THREADS);
         assertThat(ledgerSum(sku)).isEqualTo(THREADS);
+        assertInvariants();
     }
 }

@@ -21,12 +21,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -34,10 +34,9 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * AC4, R2, W2 over real HTTP: concurrent requests with the same fresh Idempotency-Key produce one stock change and
  * the same response; the losers replay after their 40001 retry. Not @Transactional: tables are emptied before each
- * test (S11). At most 8 threads per SKU (W2).
+ * test (S11). At most 8 threads per SKU (W2). Each test ends by asserting the balance invariants (A14).
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class IdempotencyHttpConcurrencyTest {
 
     private static final int THREADS = 8;
@@ -58,9 +57,7 @@ class IdempotencyHttpConcurrencyTest {
     @BeforeEach
     void setUp() {
         // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
         http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(TIMEOUT).build();
     }
 
@@ -116,6 +113,12 @@ class IdempotencyHttpConcurrencyTest {
         return jdbc.sql("SELECT count(*) FROM idempotency_keys").query(Long.class).single();
     }
 
+    /** A14: after concurrent writes every balance equals its ledger sum and none is negative. */
+    private void assertInvariants() {
+        assertThat(Invariants.balanceMismatches(jdbc)).as("quantity = SUM(quantity_delta)").isEmpty();
+        assertThat(Invariants.minQuantity(jdbc)).as("smallest quantity").isNotNegative();
+    }
+
     private static void assertAllIdentical(List<Reply> replies) {
         Reply first = replies.getFirst();
         assertThat(replies).allSatisfy(r -> {
@@ -139,6 +142,7 @@ class IdempotencyHttpConcurrencyTest {
         assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(ledgerSum(sku)).isEqualTo(5);
         assertThat(keyRows()).isEqualTo(1);
+        assertInvariants();
     }
 
     @Test
@@ -156,6 +160,7 @@ class IdempotencyHttpConcurrencyTest {
                 .isEqualTo(1);
         assertThat(ledgerSum(sku)).isEqualTo(7);
         assertThat(keyRows()).isEqualTo(1);
+        assertInvariants();
     }
 
     /** S8: one body wins the key; every request with the other body gets 400 "Invalid request". */
@@ -185,6 +190,7 @@ class IdempotencyHttpConcurrencyTest {
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(ledgerSum(sku)).isEqualTo(winner);
         assertThat(keyRows()).isEqualTo(1);
+        assertInvariants();
     }
 
     /** R2, W2: distinct fresh keys never replay each other; stock still never goes negative. */
@@ -209,6 +215,7 @@ class IdempotencyHttpConcurrencyTest {
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
                 .isEqualTo(3);
         assertThat(keyRows()).isEqualTo(THREADS);
+        assertInvariants();
     }
 
     /** R2, W2: distinct fresh keys each add once; every add sees a distinct running total. */
@@ -225,5 +232,6 @@ class IdempotencyHttpConcurrencyTest {
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(THREADS);
         assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(keyRows()).isEqualTo(THREADS);
+        assertInvariants();
     }
 }

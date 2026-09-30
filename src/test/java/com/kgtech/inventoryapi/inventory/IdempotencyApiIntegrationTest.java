@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import java.net.URI;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -17,9 +19,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,17 +28,17 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * Issue #6 end to end against Postgres: Idempotency-Key claim, replay, mismatch, expiry and what is never stored
- * (G8, G14, R1, R2, S2, S3, S8, T1, U3, W2, X1, Y1, Y3, Y4, Z1). Not @Transactional: every request commits its own
- * transaction, so the tables are emptied before each test. Same annotations as InventoryApiIntegrationTest so the
+ * (G8, G14, R1, R2, S2, S3, S8, T1, U3, Y1, Y3, Y4, A18, A33, A34). Not @Transactional: every request commits its own
+ * transaction, so the tables are reset before each test. Same annotations as InventoryApiIntegrationTest so the
  * context and container are reused.
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
 class IdempotencyApiIntegrationTest {
 
     private static final String INVALID_REQUEST = "Invalid request";
@@ -74,10 +74,7 @@ class IdempotencyApiIntegrationTest {
     void cleanTables() {
         fault = new LedgerFaultTrigger(jdbcTemplate);
         fault.drop(); // in case an earlier run was killed before its @AfterEach
-        // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
     }
 
     @AfterEach
@@ -147,13 +144,6 @@ class IdempotencyApiIntegrationTest {
         assertThat(reply.body()).isEqualTo(body);
     }
 
-    private void seedLedger(String skuId, long delta) {
-        jdbc.sql("INSERT INTO sku (sku_id) VALUES (?) ON CONFLICT DO NOTHING").param(skuId).update();
-        jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, ?, 'add')")
-                .params(skuId, delta)
-                .update();
-    }
-
     private long count(String sql, Object... params) {
         return jdbc.sql(sql).params(params).query(Long.class).single();
     }
@@ -176,6 +166,31 @@ class IdempotencyApiIntegrationTest {
 
     private long keyRows() {
         return count("SELECT count(*) FROM idempotency_keys");
+    }
+
+    /**
+     * A key row as v1 wrote it, before V3: request_hash is SHA-256 of operation, skuId and quantity (Y3), computed in
+     * SQL; status, Content-Type and body are null for a claim without a stored response.
+     */
+    private void storeKeyRow(String key, String operation, String skuId, int quantity, Integer status,
+            String contentType, String body) {
+        jdbc.sql("""
+                INSERT INTO idempotency_keys
+                    (idempotency_key, operation, sku_id, request_hash, status, content_type, body)
+                VALUES (?::uuid, ?, ?, sha256(convert_to(? || E'\\n' || ? || E'\\n' || ?, 'UTF8')), ?, ?, ?)
+                """)
+                .params(key, operation, skuId, operation, skuId, Integer.toString(quantity), status, contentType,
+                        body)
+                .update();
+    }
+
+    /** Every column of every key row, request_hash as hex so rows compare by content. */
+    private List<Map<String, Object>> keyRowSnapshot() {
+        return jdbc.sql("""
+                SELECT idempotency_key, operation, sku_id, encode(request_hash, 'hex') AS request_hash,
+                       status, content_type, body, created_at
+                FROM idempotency_keys ORDER BY idempotency_key
+                """).query().listOfRows();
     }
 
     private void backdate(String key, String interval) {
@@ -277,7 +292,7 @@ class IdempotencyApiIntegrationTest {
     void keyOlderThan24hReturns400() throws Exception {
         String key = newKey();
         assertItem(create("widget", 5, key), "widget", 5);
-        backdate(key, "25 hours");
+        backdate(key, "24 hours 1 second");
 
         assertText(create("widget", 5, key), 400, INVALID_REQUEST);
 
@@ -329,7 +344,7 @@ class IdempotencyApiIntegrationTest {
 
     @Test
     void replayedOverflowAsStored() throws Exception {
-        seedLedger("big", Long.MAX_VALUE - 5); // the API can't reach the limit (S11)
+        Tables.seed(jdbc, "big", Long.MAX_VALUE - 5); // the API can't reach the limit (S11)
         String key = newKey();
         Reply first = create("big", 10, key);
         assertText(first, 400, INVALID_REQUEST);
@@ -345,10 +360,12 @@ class IdempotencyApiIntegrationTest {
 
     // ---- AC6: malformed keys → 400 before any database work, nothing stored (S3, U3) ----
 
+    /**
+     * A present empty key and one non-UUID per POST; the full format matrix is IdempotencyKeyTest's, and the service
+     * level is InventoryServiceWriteChecksTest#malformedKeyIsInvalidRequestBeforeAnything.
+     */
     static Stream<Arguments> malformedKeyReturns400AndStoresNothing() {
-        String uuid = UUID.randomUUID().toString();
-        return Stream.of(Post.values()).flatMap(op -> Stream.of("", "abc", "1-1-1-1-1", "{" + uuid + "}", uuid + "x",
-                uuid.replace("-", "")).map(key -> Arguments.of(op, key)));
+        return Stream.of(Post.values()).flatMap(op -> Stream.of("", "abc").map(key -> Arguments.of(op, key)));
     }
 
     @ParameterizedTest(name = "{0} key \"{1}\"")
@@ -410,12 +427,59 @@ class IdempotencyApiIntegrationTest {
                         MediaType.TEXT_PLAIN_VALUE);
     }
 
+    /**
+     * A33, Y3, Y4, E3: keys stored before V3 keep replaying. The rows are exactly as v1 wrote them (hash, status,
+     * Content-Type and body); the same keyed POSTs answer the stored status, Content-Type and body unchanged, write no
+     * sku or ledger row, and leave every key row as it was.
+     */
+    @Test
+    void keyStoredBeforeTheMigrationReplaysByteForByte() throws Exception {
+        String okKey = newKey();
+        String notFoundKey = newKey();
+        String insufficientKey = newKey();
+        storeKeyRow(okKey, "add", "ABC-1", 5, 200, MediaType.APPLICATION_JSON_VALUE, item("ABC-1", 5));
+        storeKeyRow(notFoundKey, "purchase", "NOPE", 1, 404, MediaType.TEXT_PLAIN_VALUE, "SKU not found");
+        storeKeyRow(insufficientKey, "purchase", "ABC-1", 10, 400, MediaType.TEXT_PLAIN_VALUE,
+                "Insufficient inventory");
+        List<Map<String, Object>> before = keyRowSnapshot();
+
+        assertThat(create("ABC-1", 5, okKey))
+                .isEqualTo(new Reply(200, MediaType.APPLICATION_JSON_VALUE, item("ABC-1", 5)));
+        assertThat(purchase("NOPE", 1, notFoundKey))
+                .isEqualTo(new Reply(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found"));
+        assertThat(purchase("ABC-1", 10, insufficientKey))
+                .isEqualTo(new Reply(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory"));
+
+        assertThat(allLedgerRows()).as("ledger rows").isZero();
+        assertThat(allSkuRows()).as("sku rows").isZero();
+        assertThat(keyRowSnapshot()).as("key rows").isEqualTo(before);
+    }
+
+    /**
+     * A18: a committed key row with no stored response, for this very request, is never replayed and never a 500. The
+     * keyed POST gets 400 "Invalid request", writes no ledger row, changes no stock and stores nothing.
+     */
+    @ParameterizedTest
+    @EnumSource(Post.class)
+    void keyRowWithoutAStoredResponseIsInvalidRequest(Post op) throws Exception {
+        assertItem(create("widget", 10, null), "widget", 10);
+        String key = newKey();
+        storeKeyRow(key, op == Post.CREATE ? "add" : "purchase", "widget", 3, null, null, null);
+        List<Map<String, Object>> before = keyRowSnapshot();
+
+        assertText(postTo(op, "widget", quantityJson(3), key), 400, INVALID_REQUEST);
+
+        assertThat(ledgerRows("widget")).as("ledger rows").isEqualTo(1);
+        assertItem(find("widget"), "widget", 10);
+        assertThat(keyRowSnapshot()).as("key rows").isEqualTo(before);
+    }
+
     // ---- AC9: Accept that excludes JSON fails before the claim (Y1) ----
 
     @ParameterizedTest
     @EnumSource(Post.class)
     void keyedAcceptXmlReturns400AndStoresNothing(Post op) throws Exception {
-        seedLedger("widget", 10);
+        Tables.seed(jdbc, "widget", 10);
         String key = newKey();
 
         assertText(postTo(op, "widget", quantityJson(1), key, MediaType.APPLICATION_XML), 400, INVALID_REQUEST);
@@ -432,7 +496,7 @@ class IdempotencyApiIntegrationTest {
     @ParameterizedTest
     @EnumSource(Post.class)
     void keyedPostRefusingJsonIsNotStored(Post op) throws Exception {
-        seedLedger("widget", 10);
+        Tables.seed(jdbc, "widget", 10);
         String key = newKey();
 
         assertText(postTo(op, "widget", quantityJson(1), key, MediaType.parseMediaType("application/json;q=0")),
@@ -450,7 +514,7 @@ class IdempotencyApiIntegrationTest {
     @ParameterizedTest
     @EnumSource(Post.class)
     void validationFailureNotStoredKeyStaysUsable(Post op) throws Exception {
-        seedLedger("widget", 10);
+        Tables.seed(jdbc, "widget", 10);
         String key = newKey();
 
         assertText(postTo(op, "widget", "{\"quantity\":0}", key), 400, INVALID_REQUEST);
@@ -479,7 +543,7 @@ class IdempotencyApiIntegrationTest {
      */
     @Test
     void semicolonSkuIdNotStored() throws Exception {
-        seedLedger("ABC-1", 10);
+        Tables.seed(jdbc, "ABC-1", 10);
         String key = newKey();
 
         assertText(send(post(URI.create("/inventory/ABC-1;lot=7")).accept(MediaType.APPLICATION_JSON)
@@ -502,7 +566,7 @@ class IdempotencyApiIntegrationTest {
         assertThat(allSkuRows()).as("sku rows").isZero();
     }
 
-    /** U3, Z1: the key check (interceptor) runs before the skuId check, so a bad key wins with 400. */
+    /** U3, A34: the service checks the key before the skuId, so a bad key wins with 400. */
     @Test
     void badKeyWinsOverBadSkuIdOnPurchase() throws Exception {
         assertText(purchase("-bad", 1, "nope"), 400, INVALID_REQUEST);
@@ -510,7 +574,7 @@ class IdempotencyApiIntegrationTest {
         assertNothingWritten();
     }
 
-    /** S2, U3, Z1: with a valid key, a malformed skuId on purchase is 404 before the claim; nothing is stored. */
+    /** S2, U3, A34: with a valid key, a malformed skuId on purchase is 404 before the claim; nothing is stored. */
     @Test
     void validKeyBadSkuIdOnPurchase404() throws Exception {
         String key = newKey();
@@ -521,7 +585,7 @@ class IdempotencyApiIntegrationTest {
         assertNothingWritten();
     }
 
-    /** S2, U3, Z1: with a valid key, a malformed skuId on create is 400 before the claim; nothing is stored. */
+    /** S2, U3, A34: with a valid key, a malformed skuId on create is 400 before the claim; nothing is stored. */
     @Test
     void validKeyBadSkuIdOnCreate400() throws Exception {
         String key = newKey();
@@ -546,35 +610,6 @@ class IdempotencyApiIntegrationTest {
         assertNothingWritten();
     }
 
-    /** X1, W2, Z1: a 40001 at commit of the keyed transaction retries claim and write in a new transaction. */
-    @Test
-    void forced40001AtCommitRetriesKeyedWrite() throws Exception {
-        fault.failOnCommit("widget", 1, "40001");
-        String key = newKey();
-
-        Reply first = create("widget", 5, key);
-
-        assertItem(first, "widget", 5);
-        assertThat(fault.attempts()).isEqualTo(2);
-        assertThat(ledgerRows("widget")).isEqualTo(1);
-        assertThat(keyRows()).isEqualTo(1);
-        assertThat(create("widget", 5, key)).isEqualTo(first);
-        assertThat(ledgerRows("widget")).isEqualTo(1);
-    }
-
-    /** X1, Z1: keyed writes run at SERIALIZABLE; the trigger raises P0001 for a ledger insert at any other level. */
-    @Test
-    void keyedWritesRunAtSerializable() throws Exception {
-        fault.failUnlessSerializable("widget");
-
-        assertItem(create("widget", 5, newKey()), "widget", 5);
-        assertItem(purchase("widget", 2, newKey()), "widget", 3);
-
-        assertThat(fault.attempts()).isEqualTo(2);
-        assertThat(ledgerRows("widget")).isEqualTo(2);
-        assertThat(keyRows()).isEqualTo(2);
-    }
-
     // ---- G8: without the header nothing changes ----
 
     @Test
@@ -584,7 +619,7 @@ class IdempotencyApiIntegrationTest {
         assertItem(purchase("widget", 3, null), "widget", 7);
         assertText(purchase("widget", 50, null), 400, "Insufficient inventory");
         assertText(purchase("ghost", 1, null), 404, "SKU not found");
-        seedLedger("big", Long.MAX_VALUE);
+        Tables.seed(jdbc, "big", Long.MAX_VALUE);
         assertText(create("big", 1, null), 400, INVALID_REQUEST);
 
         assertThat(keyRows()).isZero();
@@ -603,26 +638,12 @@ class IdempotencyApiIntegrationTest {
         assertThat(keyRows()).isEqualTo(1);
     }
 
-    // ---- W2, X1: the claim is retried with the write, in a new transaction ----
-
+    /**
+     * E1, A33, G6: a database error in the write is a plain 500 (nothing retries) and rolls back the claim with the
+     * write: nothing is stored and the key stays usable.
+     */
     @Test
-    void forced40001RetriesClaimInNewTransaction() throws Exception {
-        seedLedger("widget", 10);
-        fault.failOnInsert("widget", 1, "40001");
-        String key = newKey();
-
-        Reply first = purchase("widget", 4, key);
-
-        assertItem(first, "widget", 6);
-        assertThat(fault.attempts()).isEqualTo(2);
-        assertThat(ledgerRows("widget", "purchase")).isEqualTo(1);
-        assertThat(keyRows()).isEqualTo(1);
-        assertThat(purchase("widget", 4, key)).isEqualTo(first);
-    }
-
-    /** A 500 rolls back the claim: nothing is stored and the key stays usable (plan OQ3). */
-    @Test
-    void nonRetryableFailureStoresNothing() throws Exception {
+    void writeFailureStoresNothing() throws Exception {
         fault.failOnInsert("widget", 1, "P0001");
         String key = newKey();
 
@@ -630,6 +651,7 @@ class IdempotencyApiIntegrationTest {
         assertThat(fault.attempts()).isEqualTo(1);
         assertThat(keyRows()).isZero();
         assertThat(allLedgerRows()).isZero();
+        assertThat(allSkuRows()).as("the sku row rolled back with the claim").isZero();
 
         assertItem(create("widget", 5, key), "widget", 5);
         assertThat(keyRows()).isEqualTo(1);

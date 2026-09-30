@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory;
+package com.kgtech.inventoryapi.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.HttpHeaders.ACCEPT;
@@ -20,21 +20,20 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * C1, T3, G10 through real Tomcat: TRACE is handled by Spring MVC like any other unsupported method (the same status,
  * text/plain body and Allow methods as PUT) and never echoes the request. MockMvc skips Tomcat's own TRACE handling,
  * so every request is written to a raw socket. Not @Transactional; the tables are emptied before each test.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class TraceIntegrationTest {
 
     private static final String SEEDED = "ABC-1";
@@ -50,13 +49,8 @@ class TraceIntegrationTest {
 
     @BeforeEach
     void seed() {
-        // test-only deletes; the application never deletes key, ledger or sku rows (G5, R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
-        jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(SEEDED).update();
-        jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
-                .param(SEEDED).update();
+        Tables.reset(jdbc);
+        Tables.seed(jdbc, SEEDED, 5);
     }
 
     /** Sends a body-less {@code method path} with Host, Accept JSON, Content-Length 0 and Connection: close. */

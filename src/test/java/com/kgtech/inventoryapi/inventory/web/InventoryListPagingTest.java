@@ -22,6 +22,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
@@ -31,9 +32,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
-import com.kgtech.inventoryapi.inventory.InventoryPage;
-import com.kgtech.inventoryapi.inventory.InventoryPage.Next;
 import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.Page;
+import com.kgtech.inventoryapi.inventory.Page.Next;
 
 /**
  * G9, R4, C2: GET /inventory passes limit and after to the service as raw strings, answers a bare JSON array and,
@@ -41,6 +42,7 @@ import com.kgtech.inventoryapi.inventory.InventoryService;
  * host, port and context path plus the routed path /inventory.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 class InventoryListPagingTest {
 
     private static final Pattern LINK_VALUE = Pattern.compile("^<([^>]+)>; rel=\"next\"$");
@@ -54,7 +56,7 @@ class InventoryListPagingTest {
     InventoryService service;
 
     private void stub(String limit, String after, Optional<Next> next) {
-        when(service.list(limit, after)).thenReturn(new InventoryPage(ITEMS, next));
+        when(service.list(limit, after)).thenReturn(new Page<>(ITEMS, next));
     }
 
     private static URI linkTarget(String link) {
@@ -185,7 +187,7 @@ class InventoryListPagingTest {
     /** G9: the body stays the spec's bare array whether or not there is a next page. */
     @Test
     void emptyPageIsBareEmptyArray() throws Exception {
-        when(service.list("2", "zzz")).thenReturn(new InventoryPage(List.of(), Optional.empty()));
+        when(service.list("2", "zzz")).thenReturn(new Page<>(List.of(), Optional.empty()));
 
         mvc.perform(get("/inventory?limit=2&after=zzz"))
                 .andExpect(status().isOk())

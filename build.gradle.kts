@@ -15,7 +15,7 @@ repositories { mavenCentral() }
 dependencies {
     implementation(platform(SpringBootPlugin.BOM_COORDINATES)) // BOM without a second plugin or version
     implementation(libs.spring.boot.starter.webmvc)
-    implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.spring.boot.starter.jdbc) // JdbcClient and the JDBC transaction manager (E2)
     implementation(libs.spring.boot.starter.flyway)
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.spring.boot.starter.actuator)
@@ -28,6 +28,7 @@ dependencies {
     testImplementation(libs.spring.boot.starter.webmvc.test)
     testImplementation(libs.spring.boot.testcontainers)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.archunit) // ArchitectureTest (A39); not in the Spring Boot BOM, so versioned in the catalog (S10)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 

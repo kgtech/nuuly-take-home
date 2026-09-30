@@ -16,16 +16,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /** The V2 idempotency_keys shape and constraints, executed against Postgres (S3, S8, S11, Y4). */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class IdempotencySchemaTest {
 
     private static final String CHECK_VIOLATION = "23514";
@@ -37,7 +35,7 @@ class IdempotencySchemaTest {
     @BeforeEach
     void cleanTables() {
         // test-only delete; the application never purges keys (R9)
-        jdbc.sql("DELETE FROM idempotency_keys").update();
+        Tables.reset(jdbc);
     }
 
     private static byte[] hash(int length) {

@@ -27,6 +27,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
@@ -36,18 +37,19 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.kgtech.inventoryapi.inventory.InventoryItem;
-import com.kgtech.inventoryapi.inventory.InventoryPage;
 import com.kgtech.inventoryapi.inventory.InventoryService;
+import com.kgtech.inventoryapi.inventory.Page;
 import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 
 /**
  * Request validation at the HTTP edge: G13/G3 bodies (AC3), G4/U3 ordering, U2/Y1/C3 Accept handling. Every body or
- * Accept 400 is text/plain "Invalid request" and never reaches the service. G11/S2/C3 (Z1): the controller passes the
+ * Accept 400 is text/plain "Invalid request" and never reaches the service. G11/S2/C3 (A34): the controller passes the
  * raw skuId segment, ";" content included, to the service unchanged and maps the service's outcome; the no-I/O check
  * is in the service tests.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 class InventoryRequestValidationTest {
 
     private static final String SKU = "widget";
@@ -66,9 +68,11 @@ class InventoryRequestValidationTest {
 
         void stubOk(InventoryService service, String skuId, int quantity) {
             if (this == CREATE) {
-                when(service.add(skuId, quantity, null)).thenReturn(new StockOutcome.Ok(quantity));
+                when(service.add(skuId, quantity, null))
+                        .thenReturn(new WriteResult.Done<>(new StockOutcome.Ok(quantity)));
             } else {
-                when(service.purchase(skuId, quantity, null)).thenReturn(new StockOutcome.Ok(quantity));
+                when(service.purchase(skuId, quantity, null))
+                        .thenReturn(new WriteResult.Done<>(new StockOutcome.Ok(quantity)));
             }
         }
 
@@ -194,14 +198,18 @@ class InventoryRequestValidationTest {
 
     // --- G11 and S2 ---
 
+    /**
+     * Too long and a bad character: the service is a mock, so these rows check only that the raw value is passed and
+     * the outcome mapped, which is the same for every malformed skuId.
+     */
     static Stream<String> invalidSkuIds() {
-        return Stream.of("-bad", "a".repeat(65), "a!b");
+        return Stream.of("a".repeat(65), "a!b");
     }
 
     @ParameterizedTest
     @MethodSource("invalidSkuIds")
     void createPassesInvalidSkuIdToServiceAndReturns400(String skuId) throws Exception {
-        when(service.add(skuId, 5, null)).thenReturn(new WriteResult.InvalidRequest());
+        when(service.add(skuId, 5, null)).thenReturn(new WriteResult.InvalidRequest<>());
 
         expectInvalidRequest(mvc.perform(jsonPost(Post.CREATE, skuId, VALID_BODY)));
         verify(service).add(skuId, 5, null);
@@ -220,7 +228,7 @@ class InventoryRequestValidationTest {
     @ParameterizedTest
     @MethodSource("invalidSkuIds")
     void purchasePassesInvalidSkuIdToServiceAndReturns404(String skuId) throws Exception {
-        when(service.purchase(skuId, 5, null)).thenReturn(new StockOutcome.NotFound());
+        when(service.purchase(skuId, 5, null)).thenReturn(new WriteResult.Done<>(new StockOutcome.NotFound()));
 
         expectText(mvc.perform(jsonPost(Post.PURCHASE, skuId, VALID_BODY)), 404, "SKU not found");
         verify(service).purchase(skuId, 5, null);
@@ -259,8 +267,9 @@ class InventoryRequestValidationTest {
     })
     void skuIdSegmentKeepsSemicolonContent(String op, String rawPath, String expectedSkuId) throws Exception {
         when(service.find(anyString())).thenReturn(Optional.empty());
-        when(service.add(anyString(), anyInt(), isNull())).thenReturn(new WriteResult.InvalidRequest());
-        when(service.purchase(anyString(), anyInt(), isNull())).thenReturn(new StockOutcome.NotFound());
+        when(service.add(anyString(), anyInt(), isNull())).thenReturn(new WriteResult.InvalidRequest<>());
+        when(service.purchase(anyString(), anyInt(), isNull()))
+                .thenReturn(new WriteResult.Done<>(new StockOutcome.NotFound()));
         URI uri = URI.create(rawPath);
         MockHttpServletRequestBuilder request = "GET".equals(op)
                 ? get(uri).accept(MediaType.APPLICATION_JSON)
@@ -286,7 +295,7 @@ class InventoryRequestValidationTest {
     /** C3: under a context path the skuId is still the segment after /inventory, ";" content kept. */
     @Test
     void skuIdSegmentKeepsSemicolonContentUnderContextPath() throws Exception {
-        when(service.add(anyString(), anyInt(), isNull())).thenReturn(new WriteResult.InvalidRequest());
+        when(service.add(anyString(), anyInt(), isNull())).thenReturn(new WriteResult.InvalidRequest<>());
 
         expectInvalidRequest(mvc.perform(post(URI.create("/app/inventory/ABC-1;lot=7")).contextPath("/app")
                 .accept(MediaType.APPLICATION_JSON).contentType(MediaType.APPLICATION_JSON).content(VALID_BODY)));
@@ -297,7 +306,7 @@ class InventoryRequestValidationTest {
 
     @Test
     void purchaseInvalidBodyOnMissingSkuReturns400() throws Exception {
-        when(service.purchase("missing", 0, null)).thenReturn(new StockOutcome.NotFound());
+        when(service.purchase("missing", 0, null)).thenReturn(new WriteResult.Done<>(new StockOutcome.NotFound()));
 
         expectInvalidRequest(mvc.perform(jsonPost(Post.PURCHASE, "missing", "{\"quantity\":0}")));
         verifyNoInteractions(service);
@@ -332,7 +341,7 @@ class InventoryRequestValidationTest {
     void getIgnoresAcceptHeader(String path, String accept, String expectedJson) throws Exception {
         when(service.find(SKU)).thenReturn(Optional.of(new InventoryItem(SKU, 3)));
         when(service.list(null, null))
-                .thenReturn(new InventoryPage(List.of(new InventoryItem(SKU, 3)), Optional.empty()));
+                .thenReturn(new Page<>(List.of(new InventoryItem(SKU, 3)), Optional.empty()));
 
         mvc.perform(get(path).header(ACCEPT, accept))
                 .andExpect(status().isOk())

@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi.inventory.web;
+package com.kgtech.inventoryapi.web;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -6,8 +6,12 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
-/** The single helper for text/plain error responses (S5, D6, G6, T3). */
-final class TextErrors {
+/**
+ * The single helper for text/plain error responses (S5, D6, G6, T3), app-wide: the advice and the Tomcat valve here,
+ * the feature's controller and outcome mapping in inventory.web (A37). Public members are the ones another package
+ * uses.
+ */
+public final class TextErrors {
 
     static final String SKU_NOT_FOUND = "SKU not found";
     static final String INSUFFICIENT_INVENTORY = "Insufficient inventory";
@@ -29,15 +33,15 @@ final class TextErrors {
                 .body(body);
     }
 
-    static ResponseEntity<String> skuNotFound() {
+    public static ResponseEntity<String> skuNotFound() {
         return of(HttpStatus.NOT_FOUND, SKU_NOT_FOUND);
     }
 
-    static ResponseEntity<String> insufficientInventory() {
+    public static ResponseEntity<String> insufficientInventory() {
         return of(HttpStatus.BAD_REQUEST, INSUFFICIENT_INVENTORY);
     }
 
-    static ResponseEntity<String> invalidRequest() {
+    public static ResponseEntity<String> invalidRequest() {
         return of(HttpStatus.BAD_REQUEST, INVALID_REQUEST);
     }
 

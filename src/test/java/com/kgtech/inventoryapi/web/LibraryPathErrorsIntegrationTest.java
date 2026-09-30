@@ -1,4 +1,4 @@
-package com.kgtech.inventoryapi;
+package com.kgtech.inventoryapi.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.http.HttpHeaders.ACCEPT;
@@ -24,10 +24,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 
 import com.jayway.jsonpath.JsonPath;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
 
 /**
@@ -36,8 +37,7 @@ import com.kgtech.inventoryapi.RawHttp.Response;
  * /inventory/** and unknown paths keep the text/plain contract. The /error dispatch only happens in a real servlet
  * container, so every request is written to a raw socket. Reads no tables.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ExtendWith(OutputCaptureExtension.class)
 class LibraryPathErrorsIntegrationTest {
 

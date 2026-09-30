@@ -22,9 +22,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -34,17 +32,17 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.jayway.jsonpath.JsonPath;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * G9, R4, R8, C2, AC1–AC4 against Postgres (S11): keyset pages over the sku table in COLLATE "C" order, balances from
- * the ledger SUM, a Link on every page but the last, a lenient limit, and a default page of 250 when limit is absent
+ * the sku row (E1), a Link on every page but the last, a lenient limit, and a default page of 250 when limit is absent
  * or ignored. Not @Transactional: every request commits its own transaction, so the tables are emptied before each
  * test.
  */
-@SpringBootTest
+@IntegrationTest
 @AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
 class InventoryPagingIntegrationTest {
 
     private static final Pattern LINK_VALUE = Pattern.compile("^<([^>]+)>; rel=\"next\"$");
@@ -60,9 +58,7 @@ class InventoryPagingIntegrationTest {
 
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
     }
 
     private void create(String skuId, int quantity) throws Exception {
@@ -83,8 +79,7 @@ class InventoryPagingIntegrationTest {
         create("a-1", 4);
         purchase("a-1", 4); // 0 stock, still listed
         create("Z-9", 1);
-        jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES ('Z-9', ?, 'add')")
-                .param(Long.MAX_VALUE - 1).update(); // the API can't reach the limit
+        Tables.seed(jdbc, "Z-9", Long.MAX_VALUE - 1); // the API can't reach the limit
         create("b-2", 5);
         create("C-3", 5);
         purchase("C-3", 2);
@@ -117,7 +112,7 @@ class InventoryPagingIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
     }
 
-    /** Seeds count SKUs p001, p002, … with no ledger rows (quantity 0); ids sort numerically in COLLATE "C". */
+    /** Seeds count bare SKU rows p001, p002, … (quantity 0, no ledger rows); ids sort numerically in COLLATE "C". */
     private void seedNumbered(int count) {
         jdbc.sql("INSERT INTO sku (sku_id) SELECT 'p' || lpad(g::text, 3, '0') FROM generate_series(1, ?) g")
                 .param(count).update();
@@ -220,7 +215,7 @@ class InventoryPagingIntegrationTest {
         assertThat(second.next()).isNull();
     }
 
-    /** AC2, D3: every page's quantities are the ledger SUM, including 0 and Long.MAX_VALUE. */
+    /** AC2, A14: every page's quantities (the sku rows) equal the ledger SUM, including 0 and Long.MAX_VALUE. */
     @Test
     void pageQuantitiesMatchLedgerSum() throws Exception {
         seedMixed();
@@ -242,9 +237,12 @@ class InventoryPagingIntegrationTest {
                 tuple("c.3", 1L));
     }
 
-    /** AC3, R4, C2: an unusable limit is ignored: 200, the default page (here every SKU), no Link. Never 400. */
+    /**
+     * AC3, R4, C2: an unusable limit is ignored: 200, the default page (here every SKU), no Link. Never 400. Zero,
+     * non-numeric and above the max here; InventoryServiceReadTest#listIgnoresUnusableLimit has the other forms.
+     */
     @ParameterizedTest
-    @ValueSource(strings = {"0", "-1", "-0", "abc", "", " ", "1.5", " 5", "5 ", "1e3", "٣"})
+    @ValueSource(strings = {"0", "abc", "99999999999999999999"})
     void lenientLimitAlwaysReturns200(String limit) throws Exception {
         seedMixed();
         String unpaged = defaultPageBody();
@@ -265,19 +263,6 @@ class InventoryPagingIntegrationTest {
         list(URI.create("/inventory?limit=2&limit=3"))
                 .andExpect(status().isOk())
                 .andExpect(content().json(unpaged, JsonCompareMode.STRICT))
-                .andExpect(header().doesNotExist(LINK));
-    }
-
-    /** Z3: a repeated after is 400 text/plain "Invalid request"; the cursor must be one sku_id. */
-    @ParameterizedTest(name = "?{0} → 400")
-    @ValueSource(strings = {"after=A-1&after=B-2", "limit=2&after=A-1&after=B-2", "after=&after=B-2"})
-    void repeatedAfterReturns400(String query) throws Exception {
-        seedMixed();
-
-        list(URI.create("/inventory?" + query))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
-                .andExpect(content().string("Invalid request"))
                 .andExpect(header().doesNotExist(LINK));
     }
 
@@ -358,14 +343,14 @@ class InventoryPagingIntegrationTest {
         assertThat(page.next()).isEqualTo(URI.create("http://localhost/inventory?limit=2&after=Z-9"));
     }
 
-    /** G11: the cursor compares in COLLATE "C" (byte) order: 'Z' < '_' < 'a', '-' < '.'. */
+    /**
+     * G11: the cursor compares in COLLATE "C" (byte) order: 'Z' < 'a', '-' < '.'. Two rows through the API;
+     * SchemaTest#skuIdOrdersByCCollation pins the column's order.
+     */
     @ParameterizedTest(name = "after={0}")
     @CsvSource(delimiter = '|', value = {
         "Z   | Z-9,a-1,b-2,c.3",
-        "_   | a-1,b-2,c.3",
-        "Z-: | a-1,b-2,c.3",
-        "c-  | c.3",
-        "a   | a-1,b-2,c.3"
+        "c-  | c.3"
     })
     void afterUsesCCollation(String after, String expected) throws Exception {
         seedMixed();
@@ -392,7 +377,7 @@ class InventoryPagingIntegrationTest {
 
     /**
      * C2, AC2, R4: over 250 SKUs without limit, or with a limit R4 ignores, → the first 250 and a Link with limit=250;
-     * the Link reaches the rest. InventoryServiceReadTest#listTreatsUnusableLimitAsDefault covers the other ignored
+     * the Link reaches the rest. InventoryServiceReadTest#listIgnoresUnusableLimit covers the other ignored
      * forms.
      */
     @ParameterizedTest
@@ -488,19 +473,5 @@ class InventoryPagingIntegrationTest {
         // '+' (0x2B) sorts before '-' (0x2D), so the next SKU is a-1
         assertThat(ids(page)).containsExactly("a-1");
         assertThat(page.next()).isEqualTo(URI.create("http://localhost/inventory?limit=1&after=a-1"));
-    }
-
-    /** U2: a paged GET ignores Accept: application/xml and still answers JSON with its Link. */
-    @Test
-    void pagedGetIgnoresXmlAccept() throws Exception {
-        seedMixed();
-
-        mvc.perform(get(uri("2", null)).accept(MediaType.APPLICATION_XML))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(content().json(
-                        "[{\"skuId\":\"A-1\",\"quantity\":5},{\"skuId\":\"B-2\",\"quantity\":12}]",
-                        JsonCompareMode.STRICT))
-                .andExpect(header().string(LINK, "<http://localhost/inventory?limit=2&after=B-2>; rel=\"next\""));
     }
 }

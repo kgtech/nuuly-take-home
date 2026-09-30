@@ -2,127 +2,95 @@ package com.kgtech.inventoryapi.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.IntegrationTest;
+import com.kgtech.inventoryapi.Tables;
 
 /**
- * S11, D9, W2 (owner decision OQ2): concurrent stock writes through the service; the HTTP versions come in #4.
- * Not @Transactional: every thread commits its own SERIALIZABLE transaction. Tables are emptied before each test.
+ * S11, D9, E1: concurrent stock writes to one SKU through the service; the HTTP versions are
+ * InventoryHttpConcurrencyTest's. Not @Transactional: every thread commits its own READ COMMITTED transaction and
+ * waits on the sku row's lock. Tables are reset before each test, and every test ends with the invariants (A14).
  */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class InventoryConcurrencyTest {
 
-    /** W2 caps concurrency tests at 8 threads per SKU. */
+    /** At most 8 threads per SKU (W2, S11). */
     private static final int THREADS = 8;
 
     @Autowired
     InventoryService service;
 
     @Autowired
-    JdbcTemplate jdbc;
+    JdbcClient jdbc;
 
     @BeforeEach
     void cleanTables() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.update("DELETE FROM inventory_ledger");
-        jdbc.update("DELETE FROM sku");
+        Tables.reset(jdbc);
     }
 
     private static String newSku(String prefix) {
         return prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
-    /** Runs {@code call} on {@link #THREADS} threads released together; any thrown exception fails the test. */
-    private <T> List<T> runTogether(Supplier<T> call) throws InterruptedException {
-        CountDownLatch ready = new CountDownLatch(THREADS);
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<T>> futures = new ArrayList<>();
-        try (ExecutorService pool = Executors.newFixedThreadPool(THREADS)) {
-            for (int i = 0; i < THREADS; i++) {
-                Callable<T> task = () -> {
-                    ready.countDown();
-                    start.await();
-                    return call.get();
-                };
-                futures.add(pool.submit(task));
-            }
-            assertThat(ready.await(30, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
-        }
-        List<T> results = new ArrayList<>();
-        List<Throwable> failures = new ArrayList<>();
-        for (Future<T> future : futures) {
-            try {
-                results.add(future.get());
-            } catch (ExecutionException e) {
-                failures.add(e.getCause());
-            }
-        }
-        assertThat(failures).as("exceptions thrown by writer threads (retries must not run out)").isEmpty();
-        return results;
-    }
-
-    private long balance(String sku) {
-        Long sum = jdbc.queryForObject(
-                "SELECT COALESCE(SUM(quantity_delta), 0)::bigint FROM inventory_ledger WHERE sku_id = ?", Long.class,
-                sku);
-        return sum == null ? 0 : sum;
+    private long quantity(String sku) {
+        return jdbc.sql("SELECT quantity FROM sku WHERE sku_id = ?").param(sku).query(Long.class).single();
     }
 
     private long count(String sql, String sku) {
-        Long n = jdbc.queryForObject(sql, Long.class, sku);
-        return n == null ? 0 : n;
+        return jdbc.sql(sql).param(sku).query(Long.class).single();
     }
 
+    private void assertInvariants() {
+        assertThat(Invariants.balanceMismatches(jdbc)).as("quantity = SUM(quantity_delta)").isEmpty();
+        assertThat(Invariants.minQuantity(jdbc)).isNotNegative();
+    }
+
+    /** D9: 8 purchases of 1 against stock 5; exactly 5 succeed, the rest are Insufficient, and nothing oversells. */
     @Test
     void concurrentPurchasesNeverOversell() throws InterruptedException {
         int stock = 5;
         String sku = newSku("race-buy");
-        jdbc.update("INSERT INTO sku (sku_id) VALUES (?)", sku);
-        jdbc.update("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, ?, 'add')", sku, stock);
+        Tables.seed(jdbc, sku, stock);
 
-        List<WriteResult> outcomes = runTogether(() -> service.purchase(sku, 1, null));
+        List<StockOutcome.Purchase> outcomes = Concurrently.run(THREADS, () -> switch (service.purchase(sku, 1, null)) {
+            case WriteResult.Done<StockOutcome.Purchase>(StockOutcome.Purchase outcome) -> outcome;
+            case WriteResult<StockOutcome.Purchase> other -> throw new AssertionError("not an outcome: " + other);
+        });
 
         assertThat(outcomes).filteredOn(StockOutcome.Ok.class::isInstance).hasSize(stock);
         assertThat(outcomes).filteredOn(StockOutcome.Insufficient.class::isInstance).hasSize(THREADS - stock);
         assertThat(outcomes).filteredOn(StockOutcome.Ok.class::isInstance)
                 .extracting(o -> ((StockOutcome.Ok) o).quantity())
                 .containsExactlyInAnyOrder(4L, 3L, 2L, 1L, 0L);
-        assertThat(balance(sku)).isZero();
+        assertThat(quantity(sku)).isZero();
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ? AND reason = 'purchase'", sku))
                 .isEqualTo(stock);
+        assertInvariants();
     }
 
+    /** S11: 8 adds of 1 to one new SKU all return Ok; none is lost and the SKU has one row. */
     @Test
     void concurrentAddsAreNeverLost() throws InterruptedException {
         String sku = newSku("race-add");
 
-        List<WriteResult> outcomes = runTogether(() -> service.add(sku, 1, null));
+        List<StockOutcome.Add> outcomes = Concurrently.run(THREADS, () -> switch (service.add(sku, 1, null)) {
+            case WriteResult.Done<StockOutcome.Add>(StockOutcome.Add outcome) -> outcome;
+            case WriteResult<StockOutcome.Add> other -> throw new AssertionError("not an outcome: " + other);
+        });
 
         assertThat(outcomes).hasSize(THREADS).allMatch(StockOutcome.Ok.class::isInstance);
         assertThat(outcomes).extracting(o -> ((StockOutcome.Ok) o).quantity())
                 .containsExactlyInAnyOrder(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L);
-        assertThat(balance(sku)).isEqualTo(THREADS);
+        assertThat(quantity(sku)).isEqualTo(THREADS);
         assertThat(count("SELECT count(*) FROM sku WHERE sku_id = ?", sku)).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM inventory_ledger WHERE sku_id = ?", sku)).isEqualTo(THREADS);
+        assertInvariants();
     }
 }

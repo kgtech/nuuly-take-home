@@ -19,13 +19,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import com.jayway.jsonpath.JsonPath;
+import com.kgtech.inventoryapi.IntegrationTest;
 import com.kgtech.inventoryapi.RawHttp;
 import com.kgtech.inventoryapi.RawHttp.Response;
-import com.kgtech.inventoryapi.TestcontainersConfiguration;
+import com.kgtech.inventoryapi.Tables;
 
 /**
  * Z3, R4, G10, S5, C2 through real Tomcat, with the raw query and path: a GET /inventory query string that can't be
@@ -34,8 +34,7 @@ import com.kgtech.inventoryapi.TestcontainersConfiguration;
  * java.net.URI rejects these escapes, so the request is written to a raw socket. Not @Transactional: the server
  * commits its own transactions, so the tables are emptied before each test.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class InventoryListMalformedQueryIntegrationTest {
 
     private static final List<String> SEEDED = List.of("A-1", "B-2", "C-3");
@@ -48,13 +47,9 @@ class InventoryListMalformedQueryIntegrationTest {
 
     @BeforeEach
     void seed() {
-        // test-only deletes; the application never deletes ledger or sku rows (G5)
-        jdbc.sql("DELETE FROM inventory_ledger").update();
-        jdbc.sql("DELETE FROM sku").update();
+        Tables.reset(jdbc);
         for (String skuId : SEEDED) {
-            jdbc.sql("INSERT INTO sku (sku_id) VALUES (?)").param(skuId).update();
-            jdbc.sql("INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) VALUES (?, 5, 'add')")
-                    .param(skuId).update();
+            Tables.seed(jdbc, skuId, 5);
         }
     }
 

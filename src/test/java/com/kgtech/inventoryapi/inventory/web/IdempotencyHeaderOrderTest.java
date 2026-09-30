@@ -1,9 +1,9 @@
 package com.kgtech.inventoryapi.inventory.web;
 
 import static com.kgtech.inventoryapi.web.HttpConstants.IDEMPOTENCY_KEY;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -20,6 +20,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -32,12 +33,13 @@ import com.kgtech.inventoryapi.inventory.StockOutcome;
 import com.kgtech.inventoryapi.inventory.WriteResult;
 
 /**
- * U3, S3, G8, Z1 at the controller: @Valid runs first; after that the controller passes the raw skuId and the raw
+ * U3, S3, G8, A34 at the controller: @Valid runs first; after that the controller passes the raw skuId and the raw
  * Idempotency-Key header (null when absent) to the service and renders the WriteResult it gets back. Key and skuId
- * checks live in the @Idempotent interceptor and the service (IdempotencyInterceptorTest, InventoryServiceReadTest,
- * IdempotencyApiIntegrationTest). The service is a mock, so no advice and no database are involved.
+ * checks live in the service (InventoryServiceWriteChecksTest, IdempotencyApiIntegrationTest). The service is a mock,
+ * so no database is involved.
  */
 @WebMvcTest(InventoryController.class)
+@Import(OutcomeResponses.class)
 class IdempotencyHeaderOrderTest {
 
     private static final String KEY = "3f2b8c1e-9a4d-4e7f-b6a0-1c2d3e4f5a6b";
@@ -54,11 +56,12 @@ class IdempotencyHeaderOrderTest {
             this.path = path;
         }
 
-        void stub(InventoryService service, String skuId, int quantity, String key, WriteResult result) {
+        /** One result feeds either write, so it is stubbed with doReturn (add and purchase differ in type). */
+        void stub(InventoryService service, String skuId, int quantity, String key, WriteResult<?> result) {
             if (this == CREATE) {
-                when(service.add(skuId, quantity, key)).thenReturn(result);
+                doReturn(result).when(service).add(skuId, quantity, key);
             } else {
-                when(service.purchase(skuId, quantity, key)).thenReturn(result);
+                doReturn(result).when(service).purchase(skuId, quantity, key);
             }
         }
 
@@ -114,24 +117,24 @@ class IdempotencyHeaderOrderTest {
     }
 
     static Stream<Arguments> rawKeyAndSkuIdPassedThrough() {
-        List<Arguments> cases = new ArrayList<>();
-        for (Post op : Post.values()) {
-            for (String skuId : List.of("widget", "-bad", "ABC")) {
-                for (String key : List.of(KEY, KEY.toUpperCase(), "nope", "", "1-1-1-1-1")) {
-                    cases.add(Arguments.of(op, skuId, key));
-                }
-            }
-        }
-        return cases.stream();
+        return Stream.of(
+                Arguments.of(Post.CREATE, "widget", KEY),
+                Arguments.of(Post.CREATE, "-bad", ""),
+                Arguments.of(Post.PURCHASE, "ABC", "nope"),
+                Arguments.of(Post.PURCHASE, "-bad", KEY.toUpperCase()));
     }
 
-    /** S2, S3, Z1: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. */
+    /**
+     * S2, S3, A34: the controller neither checks nor parses the key or the skuId; the service gets them unchanged. A
+     * valid, an empty, a non-UUID and an upper-case key, and a malformed and an upper-case skuId, spread over both
+     * POSTs, are enough: the service is a mock, so no row here validates anything.
+     */
     @ParameterizedTest(name = "{0} {1} key \"{2}\"")
     @MethodSource
     void rawKeyAndSkuIdPassedThrough(Post op, String skuId, String key) throws Exception {
         String body = "{\"skuId\":\"" + skuId + "\",\"quantity\":1}";
         op.stub(service, skuId, 1, key,
-                new WriteResult.Stored(new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, body)));
+                new WriteResult.Stored<>(new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, body)));
 
         send(op, skuId, "{\"quantity\":1}", key)
                 .andExpect(status().isOk())
@@ -140,12 +143,12 @@ class IdempotencyHeaderOrderTest {
         op.verifyCalled(service, skuId, 1, key);
     }
 
-    /** Two header values reach the service as one comma-joined string, which the interceptor rejects. */
+    /** Two header values reach the service as one comma-joined string, which the service rejects. */
     @ParameterizedTest
     @EnumSource(Post.class)
     void duplicateKeyHeadersPassedThroughJoined(Post op) throws Exception {
         String joined = KEY + "," + OTHER_KEY;
-        op.stub(service, "widget", 1, joined, new WriteResult.InvalidRequest());
+        op.stub(service, "widget", 1, joined, new WriteResult.InvalidRequest<>());
 
         expectText(send(op, "widget", "{\"quantity\":1}", KEY, OTHER_KEY), 400, "Invalid request");
 
@@ -156,7 +159,7 @@ class IdempotencyHeaderOrderTest {
     @ParameterizedTest
     @EnumSource(Post.class)
     void absentHeaderPassesNull(Post op) throws Exception {
-        op.stub(service, "widget", 5, null, new StockOutcome.Ok(5));
+        op.stub(service, "widget", 5, null, new WriteResult.Done<>(new StockOutcome.Ok(5)));
 
         send(op, "widget", "{\"quantity\":5}")
                 .andExpect(status().isOk())
@@ -166,24 +169,22 @@ class IdempotencyHeaderOrderTest {
     }
 
     static Stream<Arguments> storedResultRenderedUnchanged() {
-        List<Arguments> cases = new ArrayList<>();
-        for (Post op : Post.values()) {
-            for (StoredResponse stored : List.of(
-                    new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, "{\"skuId\":\"widget\",\"quantity\":5}"),
-                    new StoredResponse(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found"),
-                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory"),
-                    new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Invalid request"))) {
-                cases.add(Arguments.of(op, stored));
-            }
-        }
-        return cases.stream();
+        return Stream.of(
+                Arguments.of(Post.CREATE, new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE,
+                        "{\"skuId\":\"widget\",\"quantity\":5}")),
+                Arguments.of(Post.PURCHASE, new StoredResponse(404, MediaType.TEXT_PLAIN_VALUE, "SKU not found")),
+                Arguments.of(Post.PURCHASE,
+                        new StoredResponse(400, MediaType.TEXT_PLAIN_VALUE, "Insufficient inventory")));
     }
 
-    /** Y4: a stored response (first keyed response or replay) is sent with its status, Content-Type and body. */
+    /**
+     * Y4: a stored response (first keyed response or replay) is sent with its status, Content-Type and body. One 200,
+     * one 404 and one 400 cover the single {@code case Stored} branch; StoredResponsesTest holds the other shapes.
+     */
     @ParameterizedTest(name = "{0} {1}")
     @MethodSource
     void storedResultRenderedUnchanged(Post op, StoredResponse stored) throws Exception {
-        op.stub(service, "widget", 5, KEY, new WriteResult.Stored(stored));
+        op.stub(service, "widget", 5, KEY, new WriteResult.Stored<>(stored));
 
         send(op, "widget", "{\"quantity\":5}", KEY)
                 .andExpect(status().is(stored.status()))
@@ -195,9 +196,9 @@ class IdempotencyHeaderOrderTest {
     @Test
     void stored200HasSameContentTypeAsUnkeyed200() throws Exception {
         String body = "{\"skuId\":\"widget\",\"quantity\":5}";
-        Post.CREATE.stub(service, "widget", 5, null, new StockOutcome.Ok(5));
+        Post.CREATE.stub(service, "widget", 5, null, new WriteResult.Done<>(new StockOutcome.Ok(5)));
         Post.CREATE.stub(service, "widget", 5, KEY,
-                new WriteResult.Stored(new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, body)));
+                new WriteResult.Stored<>(new StoredResponse(200, MediaType.APPLICATION_JSON_VALUE, body)));
 
         String unkeyed = send(Post.CREATE, "widget", "{\"quantity\":5}").andExpect(status().isOk())
                 .andReturn().getResponse().getHeader(HttpHeaders.CONTENT_TYPE);
@@ -211,7 +212,7 @@ class IdempotencyHeaderOrderTest {
     @ParameterizedTest
     @EnumSource(Post.class)
     void invalidRequestResultIs400TextPlain(Post op) throws Exception {
-        op.stub(service, "widget", 1, KEY, new WriteResult.InvalidRequest());
+        op.stub(service, "widget", 1, KEY, new WriteResult.InvalidRequest<>());
 
         expectText(send(op, "widget", "{\"quantity\":1}", KEY), 400, "Invalid request");
     }

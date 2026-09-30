@@ -1,6 +1,6 @@
 # DECISIONS
 
-Nuuly inventory API take-home. Generated from the decision board on 2026-09-27.
+Nuuly inventory API take-home. Generated from the decision board on 2026-09-29.
 Each entry records my choice and my reasoning; rejected options list my reason, or the option's main drawback from research when I left it blank.
 
 | ID | Type | Question | Choice | Matched recommendation |
@@ -73,6 +73,17 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 | C1 | Spec gap | How are errors that Spring MVC never sees, and errors on library paths, rendered? | A: Text/plain valve, %2F passthrough, TRACE through Spring, advice declines library paths | Yes |
 | C2 | Spec gap | What does GET /inventory return when no limit is given? | A: Default page of 250 (the R8 maximum), Link for the rest | Yes |
 | C3 | Spec gap | What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0? | A: Raw decoded segment; q=0 refuses JSON on POST | Yes |
+| E1 | Design | Where does stock live, and how does a write stay correct under concurrency without retries? | A: Balance row, conditional UPDATE at READ COMMITTED | Yes |
+| E2 | Design | How does the code run SQL once nothing needs Spring Data JPA? | A: JdbcClient only | Yes |
+| E3 | Design | How does an existing v1 database move to the balance row, and how is the ledger kept append-only? | A: V3: backfill from the ledger, then row-level triggers | Yes |
+| A11 | Design | Which error does the append-only trigger raise? | A: P0001 from RAISE EXCEPTION | Yes |
+| A14 | Design | Is quantity = SUM(quantity_delta) kept by the database or asserted by tests? | A: Asserted by tests | Yes |
+| A18 | Spec gap | What does a keyed POST get when its key's row is committed without a stored response? | B: 400 "Invalid request" (v2's A18) | No |
+| A33 | Design | Where does Idempotency-Key handling sit once nothing needs ordering against a retry? | A: Explicit call to IdempotencyStore.run | Yes |
+| A34 | Spec gap | In what order are a POST's body, Idempotency-Key and skuId checked, and where? | A: Body → key format → skuId → claim, each checked once in the service | Yes |
+| A37 | Design | Where does app-wide HTTP code live, and which types and members are public? | A: App-wide HTTP in web; feature endpoints in inventory.web, all package-private | Yes |
+| A38 | Design | What does each write return, and how does the controller render it? | B: Per-operation results; every outcome rendered through OutcomeResponses | No |
+| A39 | Design | How is the package layout checked on the compiled classes? | A: ArchUnit core, plain JUnit tests | Yes |
 
 ## G1: Are SKU IDs case-sensitive?
 
@@ -92,9 +103,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Any printable string up to 255, no slash, COLLATE "C". Drawback noted in research: URL-encoding cases (spaces, %2F, Unicode) need tests.
   - C: Any non-blank string, database default collation. Drawback noted in research: Sort order depends on the database's locale (en_US puts a before B; C puts B first).
 - **Matched recommendation:** Yes
-- **Refined by:** R7, S2, W1, Z1, C3
+- **Refined by:** R7, S2, W1, A34, C3
 - **Current rules (after refinement):**
-  - Validate skuId against ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Check it in the service with a precompiled Pattern (SkuId.isValid), never with @Pattern on the @PathVariable; controllers pass the raw path value: the decoded skuId segment with any ";" content kept (C3). POST create → 400 "Invalid request"; GET and purchase → 404 "SKU not found" without touching the database or the idempotency table (GET has no 400 in the spec). @Valid body validation runs first, so a bad body wins with 400 (G4). (refined by R7, S2, Z1, C3)
+  - Validate skuId against ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$. Check it in the service with a precompiled Pattern (SkuId.isValid), never with @Pattern on the @PathVariable; controllers pass the raw path value: the decoded skuId segment with any ";" content kept (C3). POST create → 400 "Invalid request"; GET and purchase → 404 "SKU not found" without touching the database or the idempotency table (GET has no 400 in the spec). @Valid body validation runs first, so a bad body wins with 400 (G4). (refined by R7, S2, A34, C3)
   - Column: sku.sku_id varchar(64) COLLATE "C" PRIMARY KEY; inventory_ledger.sku_id references it with the same type and collation (W1). (refined by W1)
 
 ## G2: How wide is quantity: 32-bit or 64-bit?
@@ -118,9 +129,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Let Postgres raise 22003 and map it. Drawback noted in research: 22003 and 23514 arrive as the same Spring exception, so it needs SQLState inspection.
   - C: Check in Java with Math.addExact. Drawback noted in research: Only safe with a lock or version check (D4 B or C).
 - **Matched recommendation:** Yes
-- **Refined by:** S7, V2, W1
+- **Refined by:** S7, V2, W1, E1
 - **Current rules (after refinement):**
-  - Adds that would exceed 9223372036854775807 are rejected by the SUM check in the add's INSERT … WHERE (W1). No row returned → 400 "Invalid request". (refined by S7, V2, W1)
+  - Adds that would exceed 9223372036854775807 are rejected by the add's conditional UPDATE … WHERE quantity <= 9223372036854775807 - :q (E1). No row returned → 400 "Invalid request". (refined by S7, V2, W1, E1)
 
 ## G3: What status does a malformed or unsupported request get?
 
@@ -164,9 +175,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Keep the row; hide from the list. Drawback noted in research: GET and list disagree.
   - C: Delete the row at 0. Drawback noted in research: A purchase can turn a SKU into a 404.
 - **Matched recommendation:** Yes
-- **Refined by:** W1
+- **Refined by:** W1, E3
 - **Current rules (after refinement):**
-  - Never delete sku rows or ledger rows; a SKU at 0 keeps its sku row (W1). (refined by W1)
+  - Never delete sku rows or ledger rows, and never update ledger rows: Postgres rejects UPDATE or DELETE on inventory_ledger and DELETE on sku with P0001 (E3, A11). A SKU at 0 keeps its sku row. (refined by W1, E3)
 
 ## G6: What exact text goes in error bodies?
 
@@ -190,9 +201,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: In-JVM lock per SKU. Drawback noted in research: Breaks as soon as a second instance runs.
   - C: No explicit guarantee. Drawback noted in research: Oversells under load.
 - **Matched recommendation:** Yes
-- **Refined by:** W1
+- **Refined by:** W1, E1
 - **Current rules (after refinement):**
-  - Stock correctness is enforced by Postgres in one transaction, never by a Java-side check alone. There is no balance column to CHECK; SERIALIZABLE plus retries is the guard (W1). (refined by W1)
+  - Stock correctness is enforced by Postgres in one READ COMMITTED transaction, never by a Java-side check alone: the conditional UPDATE … WHERE quantity >= :q and CHECK (quantity >= 0) on sku.quantity are the guard, and nothing retries (E1). (refined by W1, E1)
 
 ## G8: Should the POST endpoints accept an Idempotency-Key, and is it required?
 
@@ -272,9 +283,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Java 21 + Spring Boot 4.1.1. Drawback noted in research: No reason to go older.
   - C: Java 25 + Spring Boot 4.0.x. Drawback noted in research: Misses 4.1 fixes.
 - **Matched recommendation:** Yes
-- **Refined by:** S10
+- **Refined by:** S10, E2
 - **Current rules (after refinement):**
-  - Java 25 toolchain, Spring Boot 4.1.x (built with 4.1.1; set in gradle/libs.versions.toml) (Spring Framework 7, Jackson 3 under tools.jackson, Hibernate 7.x (version from the Spring Boot BOM; 7.4.5 with Boot 4.1.1)). Use spring-boot-starter-webmvc, not -web. (refined by S10)
+  - Java 25 toolchain, Spring Boot 4.1.x (built with 4.1.1; set in gradle/libs.versions.toml) (Spring Framework 7, Jackson 3 under tools.jackson; no JPA or Hibernate ORM (E2); Hibernate Validator, from the Spring Boot BOM, stays for @Valid). Use spring-boot-starter-webmvc, not -web. (refined by S10, E2)
 
 ## D2: Build tool
 
@@ -297,9 +308,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: JdbcClient with hand-written SQL. Drawback noted in research: Manual row mapping.
   - C: jOOQ. Drawback noted in research: Code generation setup eats time.
 - **Matched recommendation:** No
-- **Refined by:** S1, W1, X1, Z1
+- **Refined by:** S1, W1, X1, Z1, E2
 - **Current rules (after refinement):**
-  - Spring Data JPA for reads (balances come from native or projection queries that cast SUM(quantity_delta)::bigint, because SUM(bigint) returns numeric); atomic writes are native SQL run through JdbcClient in a repository fragment, inside the attempt's SERIALIZABLE transaction (X1). No @Modifying. (refined by S1, W1, X1, Z1)
+  - Superseded by E2: all SQL runs through JdbcClient in StockRepository and IdempotencyStore; there is no ORM, repository fragment or @Modifying. (refined by S1, W1, X1, Z1, E2)
 
 ## D4: How do add and purchase stay correct under concurrency?
 
@@ -311,9 +322,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Pessimistic row lock. Drawback noted in research: Two concurrent creates of a new SKU still race (needs ON CONFLICT or retry).
   - C: Optimistic @Version + retry. Drawback noted in research: Hot SKUs retry a lot.
 - **Matched recommendation:** No
-- **Refined by:** S1, S7, V2, W1
+- **Refined by:** S1, S7, V2, W1, E1
 - **Current rules (after refinement):**
-  - Run stock writes at SERIALIZABLE and retry on PessimisticLockingFailureException with root SQLState 40001/40P01 (see W2). (refined by W1)
+  - Stock writes run at READ COMMITTED under the sku row's lock; nothing retries (E1). (refined by W1, E1)
 
 ## D5: How is the schema created and migrated?
 
@@ -325,10 +336,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: schema.sql via spring.sql.init. Drawback noted in research: No versioning.
   - D: Liquibase. Drawback noted in research: More ceremony than needed.
 - **Matched recommendation:** Yes
-- **Refined by:** W1
+- **Refined by:** W1, E2, E3
 - **Current rules (after refinement):**
-  - Schema changes only through Flyway migrations in src/main/resources/db/migration; spring.jpa.hibernate.ddl-auto=validate.
-  - Migrations declare the sku table, the inventory_ledger table (id bigint identity, sku_id, quantity_delta bigint NOT NULL CHECK (quantity_delta <> 0), reason text NOT NULL CHECK (reason IN ('add','purchase')), created_at; index on sku_id) and the sku_id collation from G11 (W1). (refined by W1)
+  - Schema changes only through Flyway migrations in src/main/resources/db/migration. A merged migration is never edited (V1 and V2 keep their checksums). There is no ddl-auto: SchemaTest and IdempotencySchemaTest assert the migrated schema against Postgres (E2). (refined by E2)
+  - Migrations declare the sku table (V3 adds quantity bigint NOT NULL DEFAULT 0 CHECK (quantity >= 0) and version bigint NOT NULL DEFAULT 0, E3), the inventory_ledger table (id bigint identity, sku_id, quantity_delta bigint NOT NULL CHECK (quantity_delta <> 0), reason text NOT NULL CHECK (reason IN ('add','purchase')), created_at; index on sku_id), the sku_id collation from G11 (W1) and V3's append-only triggers (E3). (refined by W1, E3)
 
 ## D6: How are errors turned into text/plain responses?
 
@@ -339,9 +350,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Handle errors in each controller. Drawback noted in research: Framework exceptions (parse, media type) still escape.
   - C: ProblemDetail JSON (RFC 9457). Drawback noted in research: Spec requires text/plain.
 - **Matched recommendation:** Yes
-- **Refined by:** R1, S5
+- **Refined by:** R1, S5, A38
 - **Current rules (after refinement):**
-  - One @RestControllerAdvice maps every thrown error (parsing, validation, framework) to ResponseEntity<String> built by one helper that sets .contentType(MediaType.TEXT_PLAIN) explicitly (never left to content negotiation); the controller's 404/400 outcome responses use the same helper. Keep ProblemDetail off. (refined by R1, S5)
+  - One @RestControllerAdvice maps every thrown error (parsing, validation, framework) to ResponseEntity<String> built by one helper that sets .contentType(MediaType.TEXT_PLAIN) explicitly (never left to content negotiation); the controller's 404 and 400 responses take their status, Content-Type and body from the same helper, directly or, for a write's outcome, through OutcomeResponses and StoredResponses (A38). Keep ProblemDetail off. (refined by R1, S5, A38)
 
 ## D7: Spec-first (generated) or code-first (springdoc)?
 
@@ -377,10 +388,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: H2 in PostgreSQL mode. Drawback noted in research: Doesn't run the same SQL (unverified which parts fail).
   - C: Mock the repository. Drawback noted in research: Never runs SQL; can't prove concurrency.
 - **Matched recommendation:** Yes
-- **Refined by:** S10, W2
+- **Refined by:** S10, W2, E1
 - **Current rules (after refinement):**
   - Integration and repository tests run against Postgres via Testcontainers 2.x (version from the Spring Boot BOM) @ServiceConnection, with the Flyway migrations. (refined by S10)
-  - Include a concurrent purchase test: N ≤ 8 threads, stock M < N, assert exactly M succeed and final quantity is 0. (refined by W2)
+  - Include a concurrent purchase test: N ≤ 8 threads, stock M < N, assert exactly M succeed and final quantity is 0, with quantity = SUM(quantity_delta) (A14). (refined by W2, E1)
 
 ## D10: Package layout and health endpoints
 
@@ -391,9 +402,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Layered packages + actuator health. Drawback noted in research: Everything must be public.
   - C: Feature packages, no actuator. Drawback noted in research: Compose has no health check to wait on.
 - **Matched recommendation:** Yes
-- **Refined by:** Z2
+- **Refined by:** Z2, E2, A37
 - **Current rules (after refinement):**
-  - Package by feature (inventory/, idempotency/); inventory/ is split into domain and web sub-packages (Z2). Classes are package-private unless another package uses them: domain contract types the web layer consumes are public, while persistence internals (SkuRepository, JPA entities, repository fragments) stay package-private in the domain package. (refined by Z2)
+  - Package by feature (inventory/, idempotency/), plus web/ for app-wide HTTP: the error advice, the Tomcat valve and container settings, the OpenAPI definition and HttpConstants (A37). inventory/ is split into domain and web sub-packages (Z2). web and idempotency depend on no feature package; idempotency is the inventory feature's Idempotency-Key support, not a generic facility (A37). Classes are package-private unless another package uses them: domain contract types the web layer consumes are public, while persistence internals (StockRepository and its Balance record, E2) stay package-private in the domain package. Members follow the same rule: Operation.dbValue() is package-private (A37). (refined by Z2, E2, A37)
   - Expose /actuator/health (liveness and readiness).
 
 ## R1: When a request fails, what does its Idempotency-Key remember?
@@ -405,9 +416,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Replay successes only. Drawback noted in research: Changes G14 from A to C, and the README wording.
   - C: Keep throwing; record failures in a separate transaction. Drawback noted in research: Two transactions per failure.
 - **Matched recommendation:** Yes
-- **Refined by:** U1, Z1
+- **Refined by:** U1, Z1, A38
 - **Current rules (after refinement):**
-  - Inside the stock transaction, return an outcome value (Ok / NotFound / Insufficient / Overflow); never throw for business results. Rejections of a malformed skuId or Idempotency-Key, and of a reused key, are outcome values too. The controller maps outcomes to 200/404/400. (refined by U1, Z1)
+  - Inside the stock transaction, return an outcome value (Ok / NotFound / Insufficient / Overflow); never throw for business results. Each write returns a WriteResult of its own outcome family (add WriteResult<StockOutcome.Add>, purchase WriteResult<StockOutcome.Purchase>): Done(outcome), Stored(response) or InvalidRequest (A38). Rejections of a malformed skuId or Idempotency-Key, and of a reused key, are result values too. The controller maps every result to 200/404/400 through OutcomeResponses and StoredResponses, with no branch for another operation's outcomes (A38). (refined by U1, Z1, A38)
   - Store 200, 404 "SKU not found", 400 "Insufficient inventory" and the overflow 400 "Invalid request" against the key. Validation 400s are not stored. (refined by U1)
 
 ## R2: Two requests arrive at the same moment with the same Idempotency-Key. What happens?
@@ -420,9 +431,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Reject the second request with 400. Drawback noted in research: A legitimate retry gets an error.
   - D: Advisory lock on the key first. Drawback noted in research: Extra round trip on every keyed request.
 - **Matched recommendation:** Yes
-- **Refined by:** S8, W1
+- **Refined by:** S8, W1, E1, A18
 - **Current rules (after refinement):**
-  - Claim the key with INSERT … ON CONFLICT DO NOTHING RETURNING. No row → SELECT the stored response and replay it; under SERIALIZABLE a concurrent claim may instead raise 40001, and the W1 retry replays (different operation, skuId or request hash → 400 "Invalid request"). (refined by S8, W1)
+  - Claim the key with INSERT … ON CONFLICT DO NOTHING RETURNING. No row → SELECT the stored response and replay it (different operation, skuId or request hash, or a row with no stored response (A18) → 400 "Invalid request"). At READ COMMITTED a concurrent claim of the same key blocks on the primary key until the first transaction ends, then replays its response, or claims the key if the first rolled back (E1). (refined by S8, W1, E1, A18)
 
 ## R3: Does "every client error → 400" apply to the GET endpoints?
 
@@ -516,10 +527,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: EntityManager.createNativeQuery in a custom fragment. Drawback noted in research: Same unconfirmed Hibernate behaviour as option A (DML through getResultList). JPA only forbids getResultList for JPQL UPDATE/DELETE and says nothing about native DML..
   - D: Drop RETURNING: @Modifying row count, then SELECT. Drawback noted in research: Two round trips on every successful add and purchase..
 - **Matched recommendation:** No
-- **Refined by:** X1, Z1
+- **Refined by:** X1, Z1, E2
 - **Current rules (after refinement):**
-  - Atomic writes live in a repository fragment (e.g. InventoryWrites + InventoryWritesImpl) and run through JdbcClient. Reads use Spring Data JPA.
-  - JdbcClient writes (ledger and idempotency) run only inside the attempt's SERIALIZABLE transaction that X1 defines (JpaTransactionManager shares the connection). Never mix a JPA entity change and a JdbcClient write in one transaction. (refined by X1, Z1)
+  - Superseded by E2: reads and writes are JdbcClient statements in StockRepository (a package-private @Repository in the inventory package) and IdempotencyStore; there is no repository fragment. (refined by E2)
+  - Superseded by E2: JdbcClient writes (balance row, ledger row and idempotency row) run only inside one READ COMMITTED transaction: the service's TransactionTemplate without an Idempotency-Key, IdempotencyStore.run's with one (A33). (refined by X1, Z1, E2)
 
 ## S2: Where is the skuId format checked, so that GET and purchase return 404 (not 400) for an ID that fails the pattern?
 
@@ -530,10 +541,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: No format check on GET and purchase; lookup returns 404. Drawback noted in research: A bad ID costs a database round trip..
   - B: @Pattern everywhere, map HandlerMethodValidationException per endpoint. Drawback noted in research: Body errors on these methods move from MethodArgumentNotValidException to HandlerMethodValidationException. The handler must inspect getParameterValidationResults() and the method (getMethod()) to keep G4-C. Easy to get wrong..
 - **Matched recommendation:** Yes
-- **Refined by:** Z1, C3
+- **Refined by:** Z1, C3, A34
 - **Current rules (after refinement):**
   - Never put constraint annotations on @PathVariable parameters (they switch on method validation, which answers 400).
-  - Controllers pass the raw path skuId to the service: the decoded path segment with any ";" content, which Spring strips from @PathVariable (C3). The service checks it with SkuId.isValid() before any database or idempotency work and returns an outcome value: create → InvalidRequest (400 "Invalid request"); purchase → NotFound and GET → empty (404 "SKU not found"). With an Idempotency-Key, the @Idempotent interceptor runs the same check (IdempotentResults.beforeClaim) before it opens a transaction, and the result is not stored. (refined by Z1, C3)
+  - Controllers pass the raw path skuId to the service: the decoded path segment with any ";" content, which Spring strips from @PathVariable (C3). The service checks it with SkuId.isValid() once, after a POST's Idempotency-Key format and before any database or idempotency work (A34), and returns an outcome value: create → InvalidRequest (400 "Invalid request"); purchase → NotFound and GET → empty (404 "SKU not found"). The answer is never stored. (refined by Z1, C3, A34)
 
 ## S3: What does a valid Idempotency-Key look like, and what happens to an empty or oversized one?
 
@@ -544,9 +555,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Blank = absent; 1-255 printable ASCII, else 400. Drawback noted in research: A client that sends an empty key believing it is protected gets no protection; a retry applies twice..
   - C: Accept anything, store sha-256 of the key. Drawback noted in research: Still needs the blank rule, so it does not remove the validation step..
 - **Matched recommendation:** No
-- **Refined by:** Z1
+- **Refined by:** Z1, A34
 - **Current rules (after refinement):**
-  - Idempotency-Key: absent means no key (G8). The controller passes the raw header to the service; the @Idempotent interceptor checks it. A present key, including an empty one, must match ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$; otherwise → 400 "Invalid request", returned as an outcome value before any database work. This 400 is not stored (R1). (refined by Z1)
+  - Idempotency-Key: absent means no key (G8). The controller passes the raw header to the service, which parses it with IdempotencyKey.parse before the skuId check (A34). A present key, including an empty one, must match ^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$; otherwise → 400 "Invalid request", returned as an outcome value before any database work. This 400 is not stored (R1). (refined by Z1, A34)
   - Column: idempotency key uuid.
 
 ## S4: How do reviewers start app + Postgres with Docker while bootRun starts only Postgres?
@@ -570,9 +581,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Write the response directly with HttpServletResponse. Drawback noted in research: Controller outcomes (R1) are return values; writing them through the servlet response is awkward and fights ResponseEntity in the idempotency replay path (G14)..
   - D: A, plus a text/plain ErrorController for /error. Drawback noted in research: About 45 more minutes for a path that should be rare once the advice has a catch-all (S6)..
 - **Matched recommendation:** Yes
-- **Refined by:** C1
+- **Refined by:** C1, A37, A38
 - **Current rules (after refinement):**
-  - Build every error response (advice and controller) with one helper that calls .contentType(MediaType.TEXT_PLAIN); the Tomcat error valve, which can't return a ResponseEntity, takes its body from the same helper's textFor and sets text/plain itself (C1). Never rely on content negotiation for error bodies. (refined by C1)
+  - Every error response takes its status, Content-Type and body from one helper, web.TextErrors, that calls .contentType(MediaType.TEXT_PLAIN): the advice and the controller return the helper's ResponseEntity, and a write's outcome goes through OutcomeResponses, which copies it into a StoredResponse, and StoredResponses, which sends that unchanged (A38); the Tomcat error valve (web.TextErrorReportValve), which can't return a ResponseEntity, takes its body from the same helper's textFor and sets text/plain itself (C1). Never rely on content negotiation for error bodies. (refined by C1, A37, A38)
   - Test each error status with Accept: application/json and assert Content-Type text/plain and the exact body.
 
 ## S6: What does a 500 look like, and which URLs does the "spec codes only" rule cover?
@@ -585,10 +596,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Catch-all → 500 with an empty text/plain body. Drawback noted in research: A client or reviewer sees a bare 500 with nothing to read; an empty body is harder to tell apart from the empty-body bug in S5..
   - D: 503 for database outages, 500 for the rest. Drawback noted in research: Conflicts with G10-D: 503 is not a listed code and G10 allows only 500 for faults. Priority 3 (spec over convention) says no..
 - **Matched recommendation:** Yes
-- **Refined by:** T3, C1
+- **Refined by:** T3, C1, A37
 - **Current rules (after refinement):**
   - The advice has one @Hidden @ExceptionHandler(Exception.class): log the stack trace at ERROR and return 500 text/plain "Internal server error". If the exception is an ErrorResponse, use its status and G6's fixed text, or the status's standard reason phrase when G6 has none. (refined by T3)
-  - G10 and the text/plain error contract cover /inventory/** and every other path except /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**). On those library paths InventoryErrorAdvice rethrows the exception, so their errors keep library behaviour (Spring Boot's /error JSON, an empty 406, health 503 when DOWN, the Swagger UI redirect), except an undecodable query string, which gets 400 text/plain "Invalid request" on every path. A request Tomcat rejects before routing is text/plain on every path (C1). (refined by C1)
+  - G10 and the text/plain error contract cover /inventory/** and every other path except /actuator/** and the springdoc paths (/v3/api-docs, /v3/api-docs.yaml, /v3/api-docs/**, /swagger-ui.html, /swagger-ui/**). On those library paths the app-wide web.InventoryErrorAdvice (A37) rethrows the exception, so their errors keep library behaviour (Spring Boot's /error JSON, an empty 406, health 503 when DOWN, the Swagger UI redirect), except an undecodable query string, which gets 400 text/plain "Invalid request" on every path. A request Tomcat rejects before routing is text/plain on every path (C1). (refined by C1, A37)
 
 ## S7: Where does the one complete add statement (with the G12 overflow guard) and the purchase statement (with RETURNING) get written down?
 
@@ -599,6 +610,7 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Keep separate rules, add cross-references. Drawback noted in research: The agent must assemble the SQL from two places, which is the failure this finding describes..
   - C: Canonical SQL in one committed file, CLAUDE.md points to it. Drawback noted in research: Until the file exists (no code yet), the agent has nothing to read, so the first version is still written from prose. It needs A's full text anyway for the first build..
 - **Matched recommendation:** Yes
+- **Refined by:** E1
 
 ## S8: Is an Idempotency-Key unique per SKU and endpoint, or across the whole API?
 
@@ -639,11 +651,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Named test matrix in docs/test-plan.md, referenced from CLAUDE.md. Drawback noted in research: About 0.5h more than A for the table and keeping names in sync (priority 2)..
   - C: Only concurrency tests plus happy paths. Drawback noted in research: Breaks priority 1: the G12 guard, CHECK, COLLATE "C" order, Link header and idempotency replay/expiry ship without ever being executed by a test..
 - **Matched recommendation:** Yes
-- **Refined by:** T1, V2, W1, W2, C2
+- **Refined by:** T1, V2, W1, W2, C2, E1, E3, A18
 - **Current rules (after refinement):**
-  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row + first ledger row); add path; G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row inserted; seed one large ledger row directly, since the API can't reach the limit); SERIALIZABLE purchase (W1) (200 with remaining, 400 insufficient, 404 missing); SUM(quantity_delta) never negative after concurrent purchases; COLLATE "C" order; keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2); idempotency claim, replay, different body → 400, key older than 24h rejected with 400; two concurrent requests with the same fresh key produce one stock change. (refined by T1, V2, W1, C2)
+  - Every native SQL statement and every migration constraint has at least one Testcontainers test that executes it against Postgres. Minimum set: create path (sku row, balance and first ledger row); add path (the conditional UPDATE, E1); G12 guard at 9223372036854775807 (accepted) and one above (400, no ledger row and no version change; seed the balance with Tables.seed, since the API can't reach the limit); conditional purchase (E1) (200 with remaining, 400 insufficient, 404 missing, 404 when racing an uncommitted create); quantity = SUM(quantity_delta) and quantity ≥ 0 after concurrent writes (A14); COLLATE "C" order; the append-only triggers (P0001) and the V3 backfill (MigrationUpgradeTest, E3); keyset query and Link header (last page has no Link); GET /inventory without limit over more than 250 SKUs returns 250 and a Link (C2); idempotency claim, replay, different body → 400, key older than 24h rejected with 400, a key row with no stored response rejected with 400 (A18); two concurrent requests with the same fresh key produce one stock change. (refined by T1, V2, W1, C2, E1, E3, A18)
   - Include a concurrent add test: N ≤ 8 threads add 1 to one new SKU through the service; assert all return Ok and the final quantity is N. (refined by W2)
-  - Concurrency tests are not @Transactional; clean tables in @BeforeEach.
+  - Concurrency tests are not @Transactional; use at most 8 threads per SKU; clean tables with Tables.reset in @BeforeEach; assert the invariants (A14) at the end. (refined by E1)
 
 ## S12: What checks that the built API and the exported openapi.yaml still match the original spec's contract?
 
@@ -710,6 +722,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: Treat overflow like validation: roll back, store nothing. Drawback noted in research: Needs setRollbackOnly, a second pattern next to R1's return-value rule.
 - **Matched recommendation:** Yes
+- **Refined by:** A38
+- **Current rules (after refinement):**
+  - The add returns WriteResult<StockOutcome.Add>, whose outcome is Ok or Overflow (A38). Overflow → 400 "Invalid request", stored against the Idempotency-Key like NotFound and Insufficient. (refined by A38)
 
 ## U2: What do the GET endpoints return for an unsupported Accept header?
 
@@ -733,9 +748,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: skuId first (404), then key format (400). Drawback noted in research: Opposite of G4-C's order.
 - **Matched recommendation:** Yes
-- **Refined by:** Z1
+- **Refined by:** Z1, A34
 - **Current rules (after refinement):**
-  - Order on both POSTs: body validation (@Valid, controller) → Idempotency-Key format (@Idempotent interceptor, 400) → skuId pattern (service check; run by the interceptor before the claim when a key is present; create 400, purchase 404) → claim and stock write. (refined by Z1)
+  - Order on both POSTs: body validation (@Valid, controller) → Idempotency-Key format (service, 400) → skuId pattern (service, once; create 400, purchase 404) → claim and write, through IdempotencyStore.run when a key is present (A34). (refined by Z1, A34)
 
 ## V1: Should stock changes also be recorded in an append-only ledger?
 
@@ -746,9 +761,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: No ledger; list it under Future improvements. Drawback noted in research: No stock history in the build.
   - B: Hybrid: balance row + ledger row in the same statement. Drawback noted in research: About 2h with tests.
 - **Matched recommendation:** No
-- **Refined by:** W1
+- **Refined by:** W1, E1
 - **Current rules (after refinement):**
-  - Stock is the SUM of inventory_ledger.quantity_delta per SKU. Every write checks the SUM and inserts the delta in one SERIALIZABLE transaction: Add: INSERT INTO sku (sku_id) VALUES (:id) ON CONFLICT DO NOTHING; then INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, :q, 'add' WHERE (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) <= 9223372036854775807 - :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) + :q)::bigint; no row → Overflow. Purchase: INSERT INTO inventory_ledger (sku_id, quantity_delta, reason) SELECT :id, -:q, 'purchase' WHERE EXISTS (SELECT 1 FROM sku WHERE sku_id = :id) AND (SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) >= :q RETURNING ((SELECT COALESCE(SUM(quantity_delta),0) FROM inventory_ledger WHERE sku_id = :id) - :q)::bigint; no row → SELECT the sku row in the same transaction: missing → NotFound, otherwise Insufficient. The RETURNING subquery doesn't see the row being inserted, so the balance is the old SUM ± :q. The ledger is append-only: never UPDATE or DELETE inventory_ledger rows (W1). (refined by W1)
+  - Superseded by E1: stock is sku.quantity, changed by one conditional statement per write at READ COMMITTED; every change still appends an inventory_ledger row in the same transaction, and triggers keep the ledger append-only (E3). (refined by W1, E1)
 - **Unresolved conflicts at export:** About 4h more, plus a new concurrency design.
 
 ## V2: With quantities stored as bigint/long, how wide is the request quantity, and what happens to the overflow guard?
@@ -771,9 +786,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Lock the SKU row, then check and insert (D4 → B). Drawback noted in research: Two statements per write.
   - C: Go back to the hybrid (V1 → B). Drawback noted in research: The ledger isn't the source of truth.
 - **Matched recommendation:** No
-- **Refined by:** W2
+- **Refined by:** W2, E1
 - **Current rules (after refinement):**
-  - Stock writes run at SERIALIZABLE and retry on SQLSTATE 40001 or 40P01 as W2 specifies; X1 sets where the retry and the transaction boundary sit. (refined by W2)
+  - Superseded by E1: stock writes run at READ COMMITTED under the sku row's lock, and nothing retries. (refined by W2, E1)
 
 ## W2: How many times does a SERIALIZABLE write retry, and what happens when retries run out?
 
@@ -784,6 +799,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Default 3 retries; tests accept some 500s. Drawback noted in research: Weakens the S11 concurrent-add test ("all return Ok").
   - C: Switch W1 to A (row lock, no retries). Drawback noted in research: Hot SKUs still serialize (queue instead of retry).
 - **Matched recommendation:** Yes
+- **Refined by:** E1
+- **Current rules (after refinement):**
+  - Superseded by E1: nothing retries; there is no retry policy or backoff. (refined by E1)
+  - Superseded by E1: there are no retries to exhaust; a database error during a write rolls it back and returns 500 "Internal server error" (G6). (refined by E1)
+  - Concurrency tests use at most 8 threads per SKU. inventory_ledger keeps its index on sku_id (SchemaTest asserts it); no application query sums the ledger (E1). (refined by E1)
 
 ## X1: Where do the retry and the SERIALIZABLE transaction boundary sit in the code?
 
@@ -794,9 +814,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A: Two beans: @Retryable service calls a @Transactional writer. Drawback noted in research: One more class per feature.
   - C: Both annotations on one method. Drawback noted in research: Behaviour not documented.
 - **Matched recommendation:** Yes
-- **Refined by:** Z1
+- **Refined by:** Z1, E1
 - **Current rules (after refinement):**
-  - @Retryable sits on the service's stock-write method and wraps everything beneath it; each attempt runs in one new SERIALIZABLE transaction. Without an Idempotency-Key, the method's TransactionTemplate (ISOLATION_SERIALIZABLE, PROPAGATION_REQUIRED) starts it. With a key, the @Idempotent interceptor, which runs inside the retry, starts it (TransactionTemplate, ISOLATION_SERIALIZABLE, PROPAGATION_REQUIRES_NEW) and runs the claim, the stock write and the stored response in it; the method's TransactionTemplate joins. Stock-write methods have no @Transactional annotation. (refined by Z1)
+  - Superseded by E1 and A33: nothing retries. Each stock write runs in one READ COMMITTED transaction (PROPAGATION_REQUIRED): the service's TransactionTemplate opens it without an Idempotency-Key, IdempotencyStore.run with one (A33). Stock-write methods have no @Transactional annotation. (refined by Z1, E1)
 
 ## Y1: Where is a POST's Accept header checked, so an unacceptable Accept never changes stock?
 
@@ -820,6 +840,11 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - B: Spring Retry exceptionExpression (SpEL). Spring Retry and Apache Commons Lang would be two new dependencies, and its attributes (maxAttempts, @Backoff) differ from the Framework 7 @Retryable chosen in W2 and X1.
   - C: Check inside the retried method. Drawback noted in research: Retry policy split between the annotation and a catch block.
 - **Matched recommendation:** Yes
+- **Refined by:** E1
+- **Current rules (after refinement):**
+  - Superseded by E1: nothing retries, so there is no @Retryable, no retry predicate and no @EnableResilientMethods. (refined by E1)
+  - Don't add Spring Retry, Apache Commons Lang or any other retry library; nothing retries (E1). (refined by E1)
+  - Test: ArchitectureTest (no main class depends on org.springframework.resilience) and PackageBoundaryTest (no serializable isolation or retry annotation in src/main/java) keep retries out (E1, A39). (refined by E1)
 
 ## Y3: What goes into the Idempotency-Key request hash?
 
@@ -829,6 +854,10 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: SHA-256 of the raw body bytes. Drawback noted in research: Formatting differences and unknown fields turn a legitimate retry into 400.
 - **Matched recommendation:** Yes
+- **Refined by:** A33
+- **Current rules (after refinement):**
+  - request_hash is SHA-256 of operation + "\n" + skuId + "\n" + the canonical request, computed from the parsed, validated request: the quantity's decimal digits on both POSTs, the same bytes as before A33, so stored keys still replay. Never hash the raw body. (refined by A33)
+  - Test: same key and quantity with different whitespace or an extra unknown field → replay; same key with a different quantity → 400 "Invalid request".
 
 ## Y4: How does a replayed response get its Content-Type?
 
@@ -849,6 +878,12 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: MVC HandlerInterceptor. Drawback noted in research: Can't share the ledger write's transaction (G14) without an in-progress state and a 409 the spec doesn't list.
   - D: Redis in front. Drawback noted in research: A new dependency and a 409 the spec doesn't list (G10).
 - **Matched recommendation:** Yes
+- **Refined by:** A33
+- **Current rules (after refinement):**
+  - Superseded by A33: InventoryService calls IdempotencyStore.run explicitly; there is no spring-aop advice, annotation or pointcut for Idempotency-Key handling. (refined by A33)
+  - Superseded by A33 and E1: nothing retries, so there is no proxy order to keep. Writes still return result values, never exceptions, for bad input (A38). (refined by A33)
+  - Superseded by A33: stock writes run at READ COMMITTED (PROPAGATION_REQUIRED), and IdempotencyStore.run refuses a caller's transaction at any isolation other than READ COMMITTED or DEFAULT. (refined by A33)
+  - Superseded by A33: IdempotencyStoreTest and InventoryServiceWriteChecksTest replace the advice-order, keyed-retry and isolation tests. (refined by A33)
 
 ## Z2: How is the inventory feature split between web and domain code?
 
@@ -858,9 +893,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - A: One flat inventory package. Drawback noted in research: Web and domain code mix; nothing stops the domain importing HTTP types.
 - **Matched recommendation:** Yes
-- **Refined by:** C2
+- **Refined by:** C2, A37, A38
 - **Current rules (after refinement):**
-  - The inventory feature has a domain package (com.kgtech.inventoryapi.inventory: InventoryService, SkuRepository, InventoryWrites/InventoryWritesImpl, Sku, SkuQuantity, StockOutcome, WriteResult, SkuId, InventoryItem, InventoryPage, SerializationFailure, StockWriteFailureLogger) and a web package (com.kgtech.inventoryapi.inventory.web: InventoryController, InventoryErrorAdvice, JsonAcceptForGetFilter, TextErrors, InventoryQuantity, OutcomeResponses, InventoryApi (API paths, parameter names and OpenAPI texts, C2)). The web layer declares no business types or enums; it imports them from the domain package. The domain package never imports Spring MVC or HTTP transport types. (refined by C2)
+  - The inventory feature has a domain package (com.kgtech.inventoryapi.inventory: InventoryService, StockRepository, Balance, StockOutcome, WriteResult, KeyedResponses, Page, SkuId, InventoryItem) and a web package whose types are all package-private (com.kgtech.inventoryapi.inventory.web: InventoryController, OutcomeResponses, StoredResponses, Paging (next-page Link and repeated-after check), JsonAcceptForGetFilter, JsonAcceptForPostInterceptor, InventoryQuantity, InventoryApi (API paths, parameter names and OpenAPI texts, C2)). App-wide HTTP lives in com.kgtech.inventoryapi.web (A37: InventoryErrorAdvice, TextErrors, TextErrorReportValve, ServletContainerConfiguration, OpenApiConfiguration, HttpConstants); its public types are HttpConstants and TextErrors, the ones inventory.web uses. The web layer declares no business types or enums; it imports them from the domain package. The domain package never imports Spring MVC or HTTP transport types, and web and idempotency import no inventory code (A37). (refined by C2, A37, A38)
   - Header names are never string literals in code: they come from com.kgtech.inventoryapi.web.HttpConstants (e.g. IDEMPOTENCY_KEY) or Spring's HttpHeaders/MediaType constants, including in springdoc annotations.
   - Controllers static-import constants and import nested types, so method bodies and annotations use no qualified names (e.g. case Ok ok ->, APPLICATION_JSON_VALUE).
 
@@ -874,9 +909,9 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - A2: Catch and ignore both parameters. Drawback noted in research: One bad unrelated parameter drops a valid limit.
   - C: Leave the 500. Drawback noted in research: A client error answers 500, against G10.
 - **Matched recommendation:** No
-- **Refined by:** C1
+- **Refined by:** C1, A37
 - **Current rules (after refinement):**
-  - InventoryErrorAdvice maps Tomcat's InvalidParameterException (a malformed percent-escape or invalid UTF-8 in the query) to 400 "Invalid request" text/plain, ahead of the catch-all, on every path including /actuator/** and the springdoc paths, and logs one WARN line with the method and path and no stack trace (C1). A repeated after on GET /inventory returns the same 400; a repeated limit is still ignored (R4). (refined by C1)
+  - web.InventoryErrorAdvice (A37) maps Tomcat's InvalidParameterException (a malformed percent-escape or invalid UTF-8 in the query) to 400 "Invalid request" text/plain, ahead of the catch-all, on every path including /actuator/** and the springdoc paths, and logs one WARN line with the method and path and no stack trace (C1). A repeated after on GET /inventory returns the same 400 (checked by inventory.web.Paging, A37); a repeated limit is still ignored (R4). (refined by C1, A37)
   - The GET /inventory OpenAPI operation documents the 400 (text/plain "Invalid request"), and the after parameter's description says it must not be repeated.
   - Test the undecodable query through a real server (RANDOM_PORT, raw HTTP), since MockMvc doesn't decode the query; test a repeated after, and assert the documented 400 in ApiDocsTest.
 
@@ -890,6 +925,13 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Hard-code the Allow lists in the valve for TRACE. Drawback noted in research: A second copy of the routing that drifts from the controller.
   - D: Keep %2F rejected; map it in the valve. Drawback noted in research: Hand-written path parsing in a Tomcat valve.
 - **Matched recommendation:** Yes
+- **Refined by:** A37
+- **Current rules (after refinement):**
+  - Tomcat's host ErrorReportValve is replaced by web.TextErrorReportValve, installed by a Tomcat context customizer (web.ServletContainerConfiguration, A37) ordered after Spring Boot's. A request Tomcat rejects before routing (a malformed or invalid-UTF-8 percent-escape, %00 or %5C in the path, an oversized request line or header, a missing or repeated Host) gets text/plain with TextErrors.textFor(status): 400 → "Invalid request"; any other status (e.g. 505, 501) → its reason phrase. It never writes HTML, and never overwrites a body already written or an error page already rendered. (refined by A37)
+  - The connector passes an encoded slash through undecoded (encodedSolidusHandling=passthrough), so /inventory/A%2FB reaches the controller with skuId "A/B" and fails SkuId.isValid (G11): GET and purchase → 404 "SKU not found", create → 400 "Invalid request".
+  - TRACE reaches Spring MVC like any other unsupported method: the connector sets allowTrace=true and the dispatcherServlet bean (web.ServletContainerConfiguration, A37) is a DispatcherServlet whose doTrace only calls processRequest (never HttpServlet's echo). TRACE gets the same response as PUT: 405 text/plain "Method Not Allowed" with Spring's Allow header, or 404 on an unknown path. (refined by A37)
+  - A query string Tomcat can't decode (InvalidParameterException) is answered by web.InventoryErrorAdvice (A37) on every path, library paths included: 400 text/plain "Invalid request" and one WARN log line (method and path, no stack trace). It is never rethrown, so Tomcat logs no ERROR for it. (refined by A37)
+  - Test Tomcat rejections, the encoded slash, TRACE and library-path errors through a real server (RANDOM_PORT, raw HTTP), since MockMvc bypasses Tomcat and the /error dispatch; assert a TRACE response never echoes request headers.
 
 ## C2: What does GET /inventory return when no limit is given?
 
@@ -901,6 +943,13 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
   - C: Stream every row. Drawback noted in research: Response time and database load still grow with the table.
   - D: Default page of 50. Drawback noted in research: More round trips; a second number to document next to R8's 250.
 - **Matched recommendation:** Yes
+- **Refined by:** E2, A37
+- **Current rules (after refinement):**
+  - GET /inventory always runs the keyset query with a page size: limit when R4 accepts it, otherwise 250 (R8's maximum). The next-page Link carries the page size used, e.g. limit=250.
+  - The next-page Link is built by inventory.web.Paging (A37) from the request's scheme, host, port and context path plus the routed path /inventory, never from the raw request URI, so an encoded request path (/%69nventory) still yields a working /inventory Link. It carries only limit and after, with after strictly encoded. (refined by A37)
+  - The OpenAPI documents G11 on every skuId path parameter with @Parameter(schema = @Schema(pattern, minLength 1, maxLength 64)) built from SkuId's constants, never @Pattern (S2); InventoryItem.quantity has minimum 0 as in the spec; GET /inventory's description and limit parameter (default 250) document the default page. ApiDocsTest asserts each.
+  - Test with more than 250 SKUs: GET /inventory without limit, and with after alone, returns 250 and a Link, and following Links visits every SKU once; exactly 250 SKUs gives no Link.
+  - The web layer's API strings live together in inventory.web.InventoryApi: the API paths (the base path /inventory and the item and purchase path templates), the query parameter names and the operations' OpenAPI texts. The API-wide OpenAPI title and version live in web.OpenApiConfiguration beside its @OpenAPIDefinition, not on a controller (A37). InventoryController, JsonAcceptForGetFilter and inventory.web.Paging static-import them, so mapping annotations need no literal and no qualified name. Other constants stay beside the logic that owns them: SQL in StockRepository and IdempotencyStore (E2), error texts in web.TextErrors (G6, A37), the skuId pattern in SkuId (G11), page sizes in InventoryService (R8, C2). (refined by E2, A37)
 
 ## C3: What does the API do with ";" in the skuId segment and with an Accept that gives JSON q=0?
 
@@ -910,4 +959,120 @@ Each entry records my choice and my reasoning; rejected options list my reason, 
 - **Rejected:**
   - B: Reject any ";" under /inventory/**. Drawback noted in research: Changes routes that work today (/inventory;v=1).
   - C: Document as known edges. Drawback noted in research: A request for one ID changes another SKU's stock.
+- **Matched recommendation:** Yes
+- **Refined by:** E1
+- **Current rules (after refinement):**
+  - Controllers pass the skuId path segment as sent: the raw segment of the request path, percent-decoded, with any ";" content kept (Spring strips it from @PathVariable, which only routes and documents the parameter). /inventory/ABC-1;lot=7 and /inventory/ABC-1%3Blot=7 are both checked as "ABC-1;lot=7": create → 400 "Invalid request"; GET and purchase → 404 "SKU not found"; nothing is written or stored, with or without an Idempotency-Key. ";" content on the literal segments (/inventory;v=1/…, …/purchase;x) is ignored, as Spring does.
+  - InventoryService.find checks SkuId.isValid before any database access, then runs one autocommit query with no transaction (E1), so an invalid GET skuId borrows no connection. (refined by E1)
+  - On POST, the most specific Accept range compatible with application/json decides (RFC 9110): ranges are matched with isCompatibleWith, as handler lookup does, so suffix ranges such as application/*+json count, and among equally specific ranges the highest q counts; q=0 means JSON is refused. Spring's produces condition ignores q, so JsonAcceptForPostInterceptor (a HandlerInterceptor on /inventory/**) checks it after handler lookup and before argument resolution and throws HttpMediaTypeNotAcceptableException (→ 400 "Invalid request" on POST, U2). application/json;q=0, "application/json;q=0, */*" and */*;q=0 → 400; */*;q=0.1 and "application/*;q=0, application/json" → accepted. GET still ignores Accept (U2).
+  - Test ";" and %3B in the skuId segment and ";" on the literal segments through a real server (RANDOM_PORT, raw HTTP) and MockMvc; test the q=0 forms on both POSTs with no ledger or idempotency row written; assert find with an invalid skuId never touches the transaction manager; JsonAcceptForGetFilterTest covers /inventory;v=1/x and /%69nventory/x.
+
+## E1: Where does stock live, and how does a write stay correct under concurrency without retries?
+
+- **Type:** Design choice
+- **Choice:** A: Balance row, conditional UPDATE at READ COMMITTED
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: Keep SUM, SERIALIZABLE and retries. Drawback noted in research: Writes to different SKUs still fail with 40001 under SSI (#26), and every write sums a ledger that only grows.
+  - C: Balance kept by a trigger. Drawback noted in research: The trigger, not the conditional UPDATE, decides and returns the balance, and every write runs a second UPDATE (A14).
+  - D: Lock, then check. Drawback noted in research: Two statements and a Java-side check (G7) for what one conditional UPDATE does.
+- **Matched recommendation:** Yes
+
+## E2: How does the code run SQL once nothing needs Spring Data JPA?
+
+- **Type:** Design choice
+- **Choice:** A: JdbcClient only
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: JPA for reads, JdbcClient for writes (D3 as is). Drawback noted in research: Hibernate ORM, Spring Data and a ddl-auto check for two primary-key queries, and two data-access styles in one transaction (S1).
+  - C: Spring Data JDBC. Drawback noted in research: An aggregate and repository layer around statements that are all hand-written SQL with RETURNING.
+- **Matched recommendation:** Yes
+
+## E3: How does an existing v1 database move to the balance row, and how is the ledger kept append-only?
+
+- **Type:** Design choice
+- **Choice:** A: V3: backfill from the ledger, then row-level triggers
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: Backfill version as 0. Drawback noted in research: version would count every change for new SKUs but only later ones for migrated SKUs.
+  - C: Statement-level triggers (#63). Drawback noted in research: Rejects every UPDATE on sku, which the balance row needs on every write, and blocks the TRUNCATE that test cleanup uses.
+  - D: Privilege separation. Drawback noted in research: The deployment has one database role, so it needs a second role and separate migration credentials first.
+- **Matched recommendation:** Yes
+
+## A11: Which error does the append-only trigger raise?
+
+- **Type:** Design choice
+- **Choice:** A: P0001 from RAISE EXCEPTION
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: 42501 insufficient_privilege. Drawback noted in research: Claims a role separation this deployment doesn't have.
+- **Matched recommendation:** Yes
+
+## A14: Is quantity = SUM(quantity_delta) kept by the database or asserted by tests?
+
+- **Type:** Design choice
+- **Choice:** A: Asserted by tests
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: A trigger keeps the balance. Drawback noted in research: The trigger, not the conditional UPDATE, decides and returns the balance, and each write runs a second UPDATE.
+  - C: A constraint trigger checks the sum at commit. Drawback noted in research: Sums the SKU's whole ledger on every commit, the cost E1 removes.
+- **Matched recommendation:** Yes
+
+## A18: What does a keyed POST get when its key's row is committed without a stored response?
+
+- **Type:** Spec gap
+- **Choice:** B: 400 "Invalid request" (v2's A18)
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - A: IllegalStateException → 500 (main). Drawback noted in research: A 500 suggests a server fault where an operator cleared the row.
+- **Matched recommendation:** No
+
+## A33: Where does Idempotency-Key handling sit once nothing needs ordering against a retry?
+
+- **Type:** Design choice
+- **Choice:** A: Explicit call to IdempotencyStore.run
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: Keep the advice at READ COMMITTED. Drawback noted in research: Keeps a pointcut, arguments read by position and a per-method result strategy that only existed to sit between a retry and a SERIALIZABLE transaction.
+  - C: Store the domain outcome (#83). Drawback noted in research: Changes the stored format, so keys stored before the change need converting; it is #83's scope.
+- **Matched recommendation:** Yes
+
+## A34: In what order are a POST's body, Idempotency-Key and skuId checked, and where?
+
+- **Type:** Spec gap
+- **Choice:** A: Body → key format → skuId → claim, each checked once in the service
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: skuId before the key format. Drawback noted in research: A malformed key could get 404 on purchase, so S3's 400 would depend on the SKU.
+  - C: One SkuId check per Operation. Drawback noted in research: The domain's SkuId depends on idempotency.Operation, a dependency the layout removes (A37).
+- **Matched recommendation:** Yes
+
+## A37: Where does app-wide HTTP code live, and which types and members are public?
+
+- **Type:** Design choice
+- **Choice:** A: App-wide HTTP in web; feature endpoints in inventory.web, all package-private
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: Keep app-wide HTTP code in inventory.web. Drawback noted in research: Code that serves every path lives in one feature's package, and a second feature would import from it.
+  - C: Split TextErrors into generic and feature halves. Drawback noted in research: Two helpers, where S5 requires one.
+- **Matched recommendation:** Yes
+
+## A38: What does each write return, and how does the controller render it?
+
+- **Type:** Design choice
+- **Choice:** B: Per-operation results; every outcome rendered through OutcomeResponses
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - A: Per-operation results; the controller keeps its own switch for unkeyed outcomes. Drawback noted in research: Two mappings of the same outcomes (C-36) that must stay byte-identical by hand.
+  - C: One wide WriteResult (main). Drawback noted in research: Each controller switch carries branches for another operation's outcomes that can't happen.
+- **Matched recommendation:** No
+
+## A39: How is the package layout checked on the compiled classes?
+
+- **Type:** Design choice
+- **Choice:** A: ArchUnit core, plain JUnit tests
+- **My reasoning:** _No notes recorded._
+- **Rejected:**
+  - B: Source scans only. Drawback noted in research: Source scans can't see visibility, annotations, or a dependency without an import line.
+  - C: archunit-junit5. Drawback noted in research: A second test-engine artifact for what plain @Test and rule.check already do.
 - **Matched recommendation:** Yes
