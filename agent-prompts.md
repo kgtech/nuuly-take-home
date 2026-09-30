@@ -1255,3 +1255,34 @@ Tool: Claude Code (desktop app). One orchestrator; four parallel research subage
 - "Yes" (commit and open the PR: #122).
 - "commit it" (the review prompt).
 - "Draft the card and documented as it will likely come up in the interview."
+
+## 35. Concurrency review and load test of final (2026-09-30)
+
+**Prompt**
+- "Can this PR handle concurrency with correctness, coordination, and scarcity?" Then: "is the inventory available and the act?" (check-then-act), "Is it ready for multithreading?", "Is read modify write atomic?", "Let's do load testing", "Yes and save this to the notes."
+
+**Output summary**
+- Read `StockRepository` and V5: the check and the change are one conditional `UPDATE … WHERE quantity >= :q`, so there is no check-then-act; the ledger row comes from the V5 trigger in the same transaction.
+- Ran the concurrency tests against Postgres (they pass) and found no shared in-JVM state (no `synchronized`, `ThreadLocal`, concurrent collections or mutable statics).
+- Load-tested the running app (`docker compose`, stdlib Python, laptop, 64 to 100 threads):
+
+| Scenario | Load | Result |
+|---|---|---|
+| Scarcity | 500 units, 1000 purchases, 100 threads | exactly 500 × 200 and 500 × 400; final quantity 0 |
+| Hot SKU | 3,200 adds to one SKU, 64 threads | about 1,280 req/s, p99 97 ms; no lost updates |
+| Mixed | 19,200 requests over 500 SKUs, 64 threads | about 8,600 req/s, p99 21 ms; every balance matches its successful writes |
+| Idempotency | one key × 160 requests, 32 threads, `/v2` | all 200; stock moved once |
+
+- Added `scripts/loadtest.py` and `scripts/gate.sh --load`, which starts the app on compose, runs the script and tears it down.
+
+**Accepted**
+- The single-statement design. The hot-SKU rate is the expected ceiling: writers to one SKU queue on its row lock.
+
+**Rejected**
+- My first script called `POST /inventory` and sent the key to the unversioned API. The spec's create is `POST /inventory/{skuId}`, and keyed writes exist only under `/v2` (OD-4). Fixed in the script.
+
+**Limits**
+- One app instance, one laptop, load generator on the same machine. The pool-exhaustion 500 (3 s) and lock-timeout (5 s) paths were not driven. There is no throughput baseline from a separate host. `gate.sh --load` is opt-in and was checked with `bash -n`, not run end to end.
+
+**My response**
+- "Yes and save this to the notes."
